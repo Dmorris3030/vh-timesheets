@@ -340,15 +340,36 @@ async function loadSP(){
     if(auth.user){auth.isAdmin=S.adminEmails.map(e=>e.toLowerCase()).includes(auth.user.email.toLowerCase());updNav();}
     // Load submissions: admins see all, users see only their own
     if(data.submissions){
+      const restoredDrafts={};
       Object.entries(data.submissions).forEach(([key,wk])=>{
         const [iso,email]=key.split(':');
         if(auth.isAdmin||email===auth.user?.email){
-          // Don't overwrite a local draft with a submitted version if user re-opened
-          if(!S.weeks[iso]||S.weeks[iso].status==='draft'){
+          if(auth.isAdmin){
+            // Admins see all submitted/approved
             S.weeks[iso]=wk;
+          } else {
+            // For foremen: if status is draft (returned by manager), restore it to device
+            if(wk.status==='draft'){
+              S.weeks[iso]=wk;
+              restoredDrafts[iso]=wk; // save back to localStorage
+              toast('A timesheet was returned for your review.','error');
+            } else if(!S.weeks[iso]){
+              // Show their own submitted/approved weeks
+              S.weeks[iso]=wk;
+            }
           }
         }
       });
+      // Restore returned timesheets to localStorage so they persist on device
+      if(Object.keys(restoredDrafts).length>0){
+        try{
+          const drafts=JSON.parse(localStorage.getItem('vhts_drafts')||'{}');
+          Object.assign(drafts,restoredDrafts);
+          localStorage.setItem('vhts_drafts',JSON.stringify(drafts));
+          // Remove from SP submissions since it's now back as a local draft
+          // (will be re-submitted when foreman submits again)
+        }catch(e){}
+      }
     }
     initWeeks();updBadge();setSS('ok');
   }catch(e){setSS('err');toast('Load failed: '+e.message,'error');}
@@ -463,7 +484,7 @@ function rApproval(){const pend=Object.entries(S.weeks).filter(([,w])=>['submitt
 function appWk(iso){const n=auth.user?auth.user.name:prompt('Your name:');if(!n)return;S.weeks[iso].status='approved';S.weeks[iso].approvedBy=n;S.weeks[iso].approvedAt=new Date().toISOString();
   // Update SharePoint with all submitted/approved weeks
   saveAllSubmittedSP();updBadge();render();toast('Approved!','success');}
-function retWk(iso){const r=prompt('Reason for returning:');S.weeks[iso].status='draft';if(r)S.weeks[iso].comments=(S.weeks[iso].comments||'')+'\nReturned: '+r;S.weeks[iso].submittedBy='';saveAllSubmittedSP();updBadge();render();toast('Returned to foreman.','success');}
+function retWk(iso){const r=prompt('Reason for returning:');if(r===null)return;S.weeks[iso].status='draft';S.weeks[iso].returnedAt=new Date().toISOString();if(r)S.weeks[iso].comments=(S.weeks[iso].comments||'')+'\nReturned: '+r;S.weeks[iso].submittedBy='';saveAllSubmittedSP();updBadge();render();toast('Returned to foreman — they will see it on next login.','success');}
 function vwWk(iso){S.currentWeek=iso;document.getElementById('ws').value=iso;showPage('review');}
 function rExport(){if(!auth.isAdmin){document.getElementById('mc').innerHTML=`<div class="pg"><div class="nd"><i class="ti ti-lock"></i>Admins only.</div></div>`;return;}
   const app=Object.entries(S.weeks).filter(([,w])=>w.status==='approved');
