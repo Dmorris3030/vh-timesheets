@@ -3,6 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="apple-mobile-web-app-title" content="VH Timesheets">
@@ -268,12 +269,19 @@ function showUM(){showM(`<div class="mh"></div><div style="display:flex;align-it
 function setSS(s){const d=document.getElementById('sd');if(d)d.className='sd '+s;}
 async function saveSP(){const tok=await getTok();if(!tok){toast('Sign in to sync.','error');return;}setSS('busy');
   try{const p=JSON.stringify({weeks:S.weeks,managers:S.managers,adminEmails:S.adminEmails,settings:S.settings,savedAt:new Date().toISOString(),savedBy:auth.user?.name});
-    const r=await fetch(`https://graph.microsoft.com/v1.0/drives/${SDID}/root:/${SFN}:/content`,{method:'PUT',headers:{Authorization:'Bearer '+tok,'Content-Type':'application/json'},body:p});
+    // Try SharePoint drive first, fall back to personal OneDrive
+    let r=await fetch(`https://graph.microsoft.com/v1.0/drives/${SDID}/root:/${SFN}:/content`,{method:'PUT',headers:{Authorization:'Bearer '+tok,'Content-Type':'application/json'},body:p});
+    if(r.status===403||r.status===404){
+      // Fall back to user's OneDrive
+      r=await fetch(`https://graph.microsoft.com/v1.0/me/drive/root:/${SFN}:/content`,{method:'PUT',headers:{Authorization:'Bearer '+tok,'Content-Type':'application/json'},body:p});
+    }
     if(!r.ok)throw new Error(r.status);setSS('ok');toast('Saved.','success');
   }catch(e){setSS('err');toast('Sync failed: '+e.message,'error');}
 }
 async function loadSP(){const tok=await getTok();if(!tok)return;setSS('busy');
-  try{const r=await fetch(`https://graph.microsoft.com/v1.0/drives/${SDID}/root:/${SFN}:/content`,{headers:{Authorization:'Bearer '+tok}});
+  try{
+    let r=await fetch(`https://graph.microsoft.com/v1.0/drives/${SDID}/root:/${SFN}:/content`,{headers:{Authorization:'Bearer '+tok}});
+    if(r.status===403){r=await fetch(`https://graph.microsoft.com/v1.0/me/drive/root:/${SFN}:/content`,{headers:{Authorization:'Bearer '+tok}});}
     if(r.status===404){setSS('ok');return;}if(!r.ok)throw new Error(r.status);
     const d=await r.json();
     if(d.weeks)S.weeks={...S.weeks,...d.weeks};if(d.managers)S.managers=d.managers;if(d.adminEmails)S.adminEmails=d.adminEmails;if(d.settings)S.settings={...S.settings,...d.settings};
@@ -285,7 +293,7 @@ function bw(){return{employees:[],entries:{},equipmentEntries:{},status:'draft',
 function fw(iso){const d=new Date(iso+'T12:00:00');d.setDate(d.getDate()-6);return'Wk of '+d.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'});}
 function fd(iso){const d=new Date(iso+'T12:00:00');return d.toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'});}
 function fs(iso){const d=new Date(iso+'T12:00:00');return`${d.getMonth()+1}/${d.getDate()}`;}
-function wd(we){const end=new Date(we+'T12:00:00');return DK.map((_,i)=>{const d=new Date(end);d.setDate(end.getDate()-(6-i));return d.toISOString().split('T')[0];});}
+function wd(we){if(!we||!/^\d{4}-\d{2}-\d{2}$/.test(we))return DK.map(()=>new Date().toISOString().split('T')[0]);const end=new Date(we+'T12:00:00');if(isNaN(end.getTime()))return DK.map(()=>new Date().toISOString().split('T')[0]);return DK.map((_,i)=>{const d=new Date(end);d.setDate(end.getDate()-(6-i));return d.toISOString().split('T')[0];});}
 function initWeeks(){const sel=document.getElementById('ws');if(!sel)return;
   // Get current week Saturday
   const now=new Date();const curSat=new Date(now);curSat.setDate(now.getDate()+(6-now.getDay()));const curIso=curSat.toISOString().split('T')[0];
