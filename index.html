@@ -247,7 +247,7 @@ function rEntry(){const wk=S.weeks[S.currentWeek];const dates=wd(S.currentWeek);
           return`<div class="dp">
             <div class="fg"><span class="fl">Job #</span><input class="di" type="text" inputmode="text" value="${job}" ${ro?'disabled':''} placeholder="Enter job number" oninput="se('${eid}','${dt}','job',this.value)"/></div>
             <div class="fg"><span class="fl">Phase Code</span><input class="di" type="text" inputmode="text" value="${ph}" ${ro?'disabled':''} placeholder="Enter phase code" oninput="se('${eid}','${dt}','phase',this.value)"/></div>
-            <div class="fg"><span class="fl">Equipment</span><button class="eqb${he?' he':''}" onclick="${ro?'':``showEQ('${eid}','${dt}')``}" ${ro?'disabled':''}><div class="eqh"><i class="ti ti-tool"></i> ${he?eqs.length+' piece'+(eqs.length>1?'s':'')+' logged':'+ Add equipment'}</div>${he?eqs.map(x=>`<span class="eqi">#${x.number} — ${x.hours}h</span>`).join(''):''}</button></div>
+            <div class="fg"><span class="fl">Equipment</span><button class="eqb${he?' he':''}" onclick="${ro?'':'showEQ(\''+eid+'\',\''+dt+'\')'}" ${ro?'disabled':''}><div class="eqh"><i class="ti ti-tool"></i> ${he?eqs.length+' piece'+(eqs.length>1?'s':'')+' logged':'+ Add equipment'}</div>${he?eqs.map(x=>`<span class="eqi">#${x.number} — ${x.hours}h</span>`).join(''):''}</button></div>
             <div class="fg"><span class="fl">Labor Hours</span><input class="di hrs" type="number" inputmode="decimal" min="0" max="24" step="0.5" value="${hrs}" ${ro?'disabled':''} placeholder="0" oninput="se('${eid}','${dt}','hours',this.value);rTot('${eid}')"/></div>
           </div>`;}).join('')}
       </div></div>`;});}
