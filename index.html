@@ -287,14 +287,22 @@ function fd(iso){const d=new Date(iso+'T12:00:00');return d.toLocaleDateString('
 function fs(iso){const d=new Date(iso+'T12:00:00');return`${d.getMonth()+1}/${d.getDate()}`;}
 function wd(we){const end=new Date(we+'T12:00:00');return DK.map((_,i)=>{const d=new Date(end);d.setDate(end.getDate()-(6-i));return d.toISOString().split('T')[0];});}
 function initWeeks(){const sel=document.getElementById('ws');if(!sel)return;
+  // Get current week Saturday
+  const now=new Date();const curSat=new Date(now);curSat.setDate(now.getDate()+(6-now.getDay()));const curIso=curSat.toISOString().split('T')[0];
+  // Always set current week first
+  if(!S.currentWeek)S.currentWeek=curIso;
+  if(!S.weeks[curIso])S.weeks[curIso]=bw();
   const ex=new Set(Array.from(sel.options).map(o=>o.value));
-  for(let i=-1;i<=4;i++){const dt=new Date();dt.setDate(dt.getDate()+(6-dt.getDay())+i*7);const iso=dt.toISOString().split('T')[0];
+  // Add current week first if not already there
+  if(!ex.has(curIso)){const o=document.createElement('option');o.value=curIso;o.textContent=fw(curIso);sel.insertBefore(o,sel.firstChild);ex.add(curIso);}
+  // Add surrounding weeks
+  for(let i=-1;i<=4;i++){if(i===0)continue;const dt=new Date();dt.setDate(dt.getDate()+(6-dt.getDay())+i*7);const iso=dt.toISOString().split('T')[0];
     if(!ex.has(iso)){const o=document.createElement('option');o.value=iso;o.textContent=fw(iso);sel.appendChild(o);ex.add(iso);}if(!S.weeks[iso])S.weeks[iso]=bw();}
   Object.keys(S.weeks).forEach(iso=>{if(!ex.has(iso)){const o=document.createElement('option');o.value=iso;o.textContent=fw(iso);sel.appendChild(o);ex.add(iso);}});
   if(!S.currentWeek){const dt=new Date();dt.setDate(dt.getDate()+(6-dt.getDay()));S.currentWeek=dt.toISOString().split('T')[0];}sel.value=S.currentWeek;
 }
 function changeWeek(w){S.currentWeek=w;if(!S.weeks[w])S.weeks[w]=bw();adys={};render();updBadge();}
-function showPage(p){if(p==='export'&&!auth.isAdmin){toast('Admins only.','error');return;}cp=p;document.querySelectorAll('.nb[id^=nav-]').forEach(b=>b.classList.remove('active'));const nb=document.getElementById('nav-'+p);if(nb)nb.classList.add('active');render();}
+function showPage(p){if(p==='export'&&!auth.isAdmin){toast('Admins only.','error');return;}cp=p;document.querySelectorAll('.nb[id^=nav-]').forEach(b=>b.classList.remove('active'));const nb=document.getElementById('nav-'+p);if(nb)nb.classList.add('active');if(p==='approval'){loadSP().then(()=>render());}else{render();}}
 function render(){const wk=S.weeks[S.currentWeek];const ts=document.getElementById('ts');
   if(ts&&wk)ts.innerHTML=`<span class="sb sb-${wk.status.slice(0,2)}" style="font-size:11px;padding:3px 10px">${wk.status.charAt(0).toUpperCase()+wk.status.slice(1)}</span>`;
   updNav();if(cp==='entry')rEntry();else if(cp==='review')rReview();else if(cp==='approval')rApproval();else if(cp==='export')rExport();else if(cp==='settings')rSettings();
@@ -369,7 +377,7 @@ function subTS(){const wk=S.weeks[S.currentWeek];const by=document.getElementByI
 }
 function rToDraft(){const wk=S.weeks[S.currentWeek];wk.status='draft';wk.submittedBy='';wk.submittedAt='';saveSP();updBadge();render();toast('Returned to draft.','success');}
 function rApproval(){const pend=Object.entries(S.weeks).filter(([,w])=>['submitted','approved','rejected'].includes(w.status));
-  let h=`<div class="pg"><div class="ph"><h1>Approvals</h1><p>Review and approve submitted timesheets.</p></div>`;
+  let h=`<div class="pg"><div class="ph" style="display:flex;align-items:flex-start;justify-content:space-between"><div><h1>Approvals</h1><p>Review and approve submitted timesheets.</p></div><button class="btn btn-sm" onclick="loadSP().then(()=>rApproval())" style="flex-shrink:0;margin-top:4px"><i class="ti ti-refresh"></i> Refresh</button></div>`;
   if(!pend.length){h+=`<div class="nd"><i class="ti ti-shield-check"></i>No timesheets pending approval.</div>`;}
   else{pend.forEach(([iso,wk])=>{const tot=Object.values(wk.entries).reduce((s,v)=>s+(parseFloat(v.hours)||0),0);h+=`<div class="card"><div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:12px"><div><strong style="font-size:16px;font-weight:700;letter-spacing:-.3px">${fw(iso)}</strong><br><span style="font-size:13px;color:var(--text2)">${wk.submittedBy||'—'} · ${wk.employees.length} employees · ${tot.toFixed(1)}h</span></div><span class="sb sb-${wk.status.slice(0,2)}">${wk.status}</span></div>${wk.status==='submitted'&&auth.isAdmin?`<div style="display:flex;gap:8px"><button class="btn btn-s" style="flex:1" onclick="appWk('${iso}')"><i class="ti ti-check"></i> Approve</button><button class="btn btn-d" style="flex:1" onclick="retWk('${iso}')"><i class="ti ti-x"></i> Return</button></div>`:wk.status==='submitted'?`<div class="ib" style="margin:0"><i class="ti ti-clock"></i><span>Awaiting manager approval.</span></div>`:`<button class="btn btn-bl" onclick="vwWk('${iso}')"><i class="ti ti-eye"></i> View details</button>`}</div>`;});}
   h+=`</div>`;document.getElementById('mc').innerHTML=h;
