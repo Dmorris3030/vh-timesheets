@@ -228,7 +228,7 @@ input[type=checkbox]:checked::after{content:'';position:absolute;left:5px;top:2p
 const CID='127c307a-e672-4d13-b5e9-c3b96fb34759';
 const TID='1585f578-f5d3-41e6-a437-9c59bd33fbcf';
 const SDID='b!77-cpoIaSE-l0ci84kLfeiK-hbRtfAhKuOH7NIDhK2yh3aptjRomSIT4CiwMH65s';
-const SITE_ID='valentiheld.sharepoint.com,a69cbfef-1a82-4f48-a5d1-c8bce242df7a';
+const SITE_ID='valentiheld.sharepoint.com,155c9359-7fd3-4f2c-8c6a-b04a722b6f64,801969a1-b2a1-4f9a-8c3a-05ae5405e710';
 const SFN='vh_timesheets.json';
 const SCOPES=['Files.ReadWrite','Files.ReadWrite.All','Sites.ReadWrite.All','User.Read','offline_access'];
 const MCFG={auth:{clientId:CID,authority:`https://login.microsoftonline.com/${TID}`,redirectUri:window.location.origin+window.location.pathname},cache:{cacheLocation:'localStorage',storeAuthStateInCookie:true},system:{allowNativeBroker:false}};
@@ -272,22 +272,16 @@ function updUC(){const c=document.getElementById('uc');if(!c)return;
 }
 function showUM(){showM(`<div class="mh"></div><div style="display:flex;align-items:center;gap:14px;margin-bottom:18px"><span class="av" style="width:52px;height:52px;font-size:20px;flex-shrink:0">${auth.user.initials}</span><div><strong style="font-size:17px;letter-spacing:-.3px">${auth.user.name}</strong><br><span style="font-size:13px;color:var(--text2)">${auth.user.email}</span><br><span class="rb${auth.isAdmin?' adm':''}" style="margin-top:6px;display:inline-flex">${auth.isAdmin?'Administrator':'User'}</span></div></div><button class="btn btn-d btn-bl" onclick="signOut();closeM()"><i class="ti ti-logout"></i> Sign out</button>`,'um');}
 function setSS(s){const d=document.getElementById('sd');if(d)d.className='sd '+s;}
+
 async function saveSP(){const tok=await getTok();if(!tok){toast('Sign in to sync.','error');return;}setSS('busy');
   try{const p=JSON.stringify({weeks:S.weeks,managers:S.managers,adminEmails:S.adminEmails,settings:S.settings,savedAt:new Date().toISOString(),savedBy:auth.user?.name});
-    // Use SharePoint site endpoint (shared across all users)
-    let r=await fetch(`https://graph.microsoft.com/v1.0/sites/${SITE_ID}/drive/root:/${SFN}:/content`,{method:'PUT',headers:{Authorization:'Bearer '+tok,'Content-Type':'application/json'},body:p});
-    if(!r.ok){
-      // Fallback to drive ID endpoint
-      r=await fetch(`https://graph.microsoft.com/v1.0/drives/${SDID}/root:/${SFN}:/content`,{method:'PUT',headers:{Authorization:'Bearer '+tok,'Content-Type':'application/json'},body:p});
-    }
+    const r=await fetch(`https://graph.microsoft.com/v1.0/sites/${SITE_ID}/drive/root:/${SFN}:/content`,{method:'PUT',headers:{Authorization:'Bearer '+tok,'Content-Type':'application/json'},body:p});
     if(!r.ok)throw new Error(await r.text());setSS('ok');toast('Saved.','success');
   }catch(e){setSS('err');toast('Sync failed: '+e.message,'error');}
 }
 async function loadSP(){const tok=await getTok();if(!tok)return;setSS('busy');
   try{
-    // Use SharePoint site endpoint (shared across all users)
-    let r=await fetch(`https://graph.microsoft.com/v1.0/sites/${SITE_ID}/drive/root:/${SFN}:/content`,{headers:{Authorization:'Bearer '+tok}});
-    if(!r.ok){r=await fetch(`https://graph.microsoft.com/v1.0/drives/${SDID}/root:/${SFN}:/content`,{headers:{Authorization:'Bearer '+tok}});}
+    const r=await fetch(`https://graph.microsoft.com/v1.0/sites/${SITE_ID}/drive/root:/${SFN}:/content`,{headers:{Authorization:'Bearer '+tok}});
     if(r.status===404){setSS('ok');return;}if(!r.ok)throw new Error(r.status);
     const d=await r.json();
     if(d.weeks)S.weeks={...S.weeks,...d.weeks};if(d.managers)S.managers=d.managers;if(d.adminEmails)S.adminEmails=d.adminEmails;if(d.settings)S.settings={...S.settings,...d.settings};
