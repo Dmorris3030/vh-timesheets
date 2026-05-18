@@ -282,7 +282,7 @@ async function loadSP(){const tok=await getTok();if(!tok)return;setSS('busy');
   }catch(e){setSS('err');toast('Load failed: '+e.message,'error');}
 }
 function bw(){return{employees:[],entries:{},equipmentEntries:{},status:'draft',submittedBy:'',submittedAt:'',approvedBy:'',approvedAt:'',comments:''};}
-function fw(iso){const d=new Date(iso+'T12:00:00');return'Wk of '+d.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'});}
+function fw(iso){const d=new Date(iso+'T12:00:00');d.setDate(d.getDate()-6);return'Wk of '+d.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'});}
 function fd(iso){const d=new Date(iso+'T12:00:00');return d.toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'});}
 function fs(iso){const d=new Date(iso+'T12:00:00');return`${d.getMonth()+1}/${d.getDate()}`;}
 function wd(we){const end=new Date(we+'T12:00:00');return DK.map((_,i)=>{const d=new Date(end);d.setDate(end.getDate()-(6-i));return d.toISOString().split('T')[0];});}
