@@ -273,22 +273,87 @@ function updUC(){const c=document.getElementById('uc');if(!c)return;
 function showUM(){showM(`<div class="mh"></div><div style="display:flex;align-items:center;gap:14px;margin-bottom:18px"><span class="av" style="width:52px;height:52px;font-size:20px;flex-shrink:0">${auth.user.initials}</span><div><strong style="font-size:17px;letter-spacing:-.3px">${auth.user.name}</strong><br><span style="font-size:13px;color:var(--text2)">${auth.user.email}</span><br><span class="rb${auth.isAdmin?' adm':''}" style="margin-top:6px;display:inline-flex">${auth.isAdmin?'Administrator':'User'}</span></div></div><button class="btn btn-d btn-bl" onclick="signOut();closeM()"><i class="ti ti-logout"></i> Sign out</button>`,'um');}
 function setSS(s){const d=document.getElementById('sd');if(d)d.className='sd '+s;}
 
-async function saveSP(){const tok=await getTok();if(!tok){toast('Sign in to sync.','error');return;}setSS('busy');
-  try{const p=JSON.stringify({weeks:S.weeks,managers:S.managers,adminEmails:S.adminEmails,settings:S.settings,savedAt:new Date().toISOString(),savedBy:auth.user?.name});
-    const r=await fetch(`https://graph.microsoft.com/v1.0/sites/${SITE_ID}/drive/root:/${SFN}:/content`,{method:'PUT',headers:{Authorization:'Bearer '+tok,'Content-Type':'application/json'},body:p});
-    if(!r.ok)throw new Error(await r.text());setSS('ok');toast('Saved.','success');
+
+async function saveAllSubmittedSP(){
+  const tok=await getTok();if(!tok)return;
+  try{
+    // Gather all non-draft weeks from current state
+    const r=await fetch(`https://graph.microsoft.com/v1.0/sites/${SITE_ID}/drive/root:/${SFN}:/content`,{headers:{Authorization:'Bearer '+tok}});
+    let existing={submissions:{},managers:S.managers,adminEmails:S.adminEmails,settings:S.settings};
+    if(r.ok)existing=await r.json();
+    if(!existing.submissions)existing.submissions={};
+    // Update with current non-draft weeks
+    Object.entries(S.weeks).forEach(([iso,wk])=>{
+      if(wk.status!=='draft'){
+        // Find the key for this week (search existing or create new)
+        const existingKey=Object.keys(existing.submissions).find(k=>k.startsWith(iso+':'));
+        const key=existingKey||(iso+':'+(wk.submittedBy||auth.user?.email||'unknown'));
+        existing.submissions[key]=wk;
+      }
+    });
+    existing.managers=S.managers;existing.adminEmails=S.adminEmails;existing.settings=S.settings;
+    const put=await fetch(`https://graph.microsoft.com/v1.0/sites/${SITE_ID}/drive/root:/${SFN}:/content`,{method:'PUT',headers:{Authorization:'Bearer '+tok,'Content-Type':'application/json'},body:JSON.stringify(existing)});
+    if(!put.ok)throw new Error(await put.text());
+  }catch(e){console.error('saveAllSubmittedSP:',e);}
+}
+// Save draft to localStorage only (device-local, not shared)
+function saveDraft(){
+  try{
+    const drafts={};
+    Object.entries(S.weeks).forEach(([iso,wk])=>{if(wk.status==='draft')drafts[iso]=wk;});
+    localStorage.setItem('vhts_drafts',JSON.stringify(drafts));
+    setSS('ok');toast('Draft saved.','success');
+  }catch(e){toast('Could not save draft: '+e.message,'error');}
+}
+
+// Save settings + submitted weeks to SharePoint (shared)
+async function saveSP(){
+  const tok=await getTok();if(!tok){toast('Sign in to sync.','error');return;}setSS('busy');
+  try{
+    // Build submissions object - keyed by weekIso:email
+    const subs={};
+    Object.entries(S.weeks).forEach(([iso,wk])=>{
+      if(wk.status!=='draft'){const key=iso+':'+(auth.user?.email||'unknown');subs[key]=wk;}
+    });
+    const payload=JSON.stringify({submissions:subs,managers:S.managers,adminEmails:S.adminEmails,settings:S.settings,savedAt:new Date().toISOString()});
+    const r=await fetch(`https://graph.microsoft.com/v1.0/sites/${SITE_ID}/drive/root:/${SFN}:/content`,{method:'PUT',headers:{Authorization:'Bearer '+tok,'Content-Type':'application/json'},body:payload});
+    if(!r.ok)throw new Error(await r.text());setSS('ok');toast('Submitted.','success');
   }catch(e){setSS('err');toast('Sync failed: '+e.message,'error');}
 }
-async function loadSP(){const tok=await getTok();if(!tok)return;setSS('busy');
+async function loadSP(){
+  const tok=await getTok();if(!tok)return;setSS('busy');
   try{
+    // 1. Load drafts from localStorage (this device only)
+    try{
+      const drafts=JSON.parse(localStorage.getItem('vhts_drafts')||'{}');
+      Object.entries(drafts).forEach(([iso,wk])=>{S.weeks[iso]=wk;});
+    }catch(e){}
+
+    // 2. Load submitted/approved from SharePoint (admins/managers) or own submissions
     const r=await fetch(`https://graph.microsoft.com/v1.0/sites/${SITE_ID}/drive/root:/${SFN}:/content`,{headers:{Authorization:'Bearer '+tok}});
-    if(r.status===404){setSS('ok');return;}if(!r.ok)throw new Error(r.status);
-    const d=await r.json();
-    if(d.weeks)S.weeks={...S.weeks,...d.weeks};if(d.managers)S.managers=d.managers;if(d.adminEmails)S.adminEmails=d.adminEmails;if(d.settings)S.settings={...S.settings,...d.settings};
+    if(r.status===404){setSS('ok');initWeeks();updBadge();return;}
+    if(!r.ok)throw new Error(r.status);
+    const data=await r.json();
+    if(data.managers)S.managers=data.managers;
+    if(data.adminEmails)S.adminEmails=data.adminEmails;
+    if(data.settings)S.settings={...S.settings,...data.settings};
     if(auth.user){auth.isAdmin=S.adminEmails.map(e=>e.toLowerCase()).includes(auth.user.email.toLowerCase());updNav();}
+    // Load submissions: admins see all, users see only their own
+    if(data.submissions){
+      Object.entries(data.submissions).forEach(([key,wk])=>{
+        const [iso,email]=key.split(':');
+        if(auth.isAdmin||email===auth.user?.email){
+          // Don't overwrite a local draft with a submitted version if user re-opened
+          if(!S.weeks[iso]||S.weeks[iso].status==='draft'){
+            S.weeks[iso]=wk;
+          }
+        }
+      });
+    }
     initWeeks();updBadge();setSS('ok');
   }catch(e){setSS('err');toast('Load failed: '+e.message,'error');}
 }
+
 function bw(){return{employees:[],entries:{},equipmentEntries:{},status:'draft',submittedBy:'',submittedAt:'',approvedBy:'',approvedAt:'',comments:''};}
 function fw(iso){const d=new Date(iso+'T12:00:00');d.setDate(d.getDate()-6);return'Wk of '+d.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'});}
 function fd(iso){const d=new Date(iso+'T12:00:00');return d.toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'});}
@@ -320,7 +385,7 @@ function se(eid,dt,f,v){const wk=S.weeks[S.currentWeek];const k=`${eid}:${dt}`;i
 function ct(wk,eid){const dates=wd(S.currentWeek);let l=0,e=0;dates.forEach(dt=>{l+=parseFloat(ge(wk,eid,dt,'hours'))||0;(wk.equipmentEntries[`${eid}:${dt}`]||[]).forEach(x=>e+=parseFloat(x.hours)||0);});return{l,e,c:l+e};}
 function rEntry(){const wk=S.weeks[S.currentWeek];const dates=wd(S.currentWeek);const ro=wk.status!=='draft';
   let h=`<div class="pg">`;
-  if(auth.user){h+=`<div class="syb"><span class="sd ok" style="flex-shrink:0"></span><span style="flex:1;font-size:13px">${auth.user.name}${auth.isAdmin?' <span class="rb adm" style="margin-left:4px">Admin</span>':''}</span><button class="btn btn-sm" onclick="saveSP()" style="flex-shrink:0"><i class="ti ti-cloud-upload"></i></button><button class="btn btn-sm" onclick="loadSP()" style="flex-shrink:0"><i class="ti ti-refresh"></i></button></div>`;}
+  if(auth.user){h+=`<div class="syb"><span class="sd ok" style="flex-shrink:0"></span><span style="flex:1;font-size:13px">${auth.user.name}${auth.isAdmin?' <span class="rb adm" style="margin-left:4px">Admin</span>':''}</span><button class="btn btn-sm" onclick="saveDraft()" style="flex-shrink:0"><i class="ti ti-device-floppy"></i></button><button class="btn btn-sm" onclick="loadSP()" style="flex-shrink:0"><i class="ti ti-refresh"></i></button></div>`;}
   else{h+=`<div class="syb"><span class="sd off" style="flex-shrink:0"></span><span style="flex:1;font-size:14px">Not signed in</span><button class="btn btn-p btn-sm" onclick="signIn()" style="flex-shrink:0">Sign in</button></div>`;}
   if(ro)h+=`<div class="ib"><i class="ti ti-lock"></i><span>Timesheet is <strong>${wk.status}</strong>. Return to draft to edit.</span></div>`;
   h+=`<div style="display:flex;align-items:center;gap:10px;margin-bottom:16px"><strong style="font-size:16px;font-weight:700;letter-spacing:-.2px">Crew — ${wk.employees.length}/20</strong><button class="btn btn-sm" style="margin-left:auto" onclick="showEM()" ${ro?'disabled':''}><i class="ti ti-users"></i> Manage crew</button></div>`;
@@ -339,7 +404,7 @@ function rEntry(){const wk=S.weeks[S.currentWeek];const dates=wd(S.currentWeek);
             <div class="fg"><span class="fl">Labor Hours</span><input class="di hrs" type="number" inputmode="decimal" min="0" max="24" step="0.5" value="${hrs}" ${ro?'disabled':''} placeholder="0" oninput="se('${eid}','${dt}','hours',this.value);rTot('${eid}')"/></div>
           </div>`;}).join('')}
       </div></div>`;});}
-  if(!ro&&wk.employees.length)h+=`<div class="acts"><button class="btn btn-bl" onclick="saveSP()"><i class="ti ti-device-floppy"></i> Save draft</button><button class="btn btn-p btn-bl" onclick="showPage('review')"><i class="ti ti-arrow-right"></i> Review & submit</button></div>`;
+  if(!ro&&wk.employees.length)h+=`<div class="acts"><button class="btn btn-bl" onclick="saveDraft()"><i class="ti ti-device-floppy"></i> Save draft</button><button class="btn btn-p btn-bl" onclick="showPage('review')"><i class="ti ti-arrow-right"></i> Review & submit</button></div>`;
   h+=`</div>`;document.getElementById('mc').innerHTML=h;
 }
 function swDay(eid,di){adys[eid]=di;document.querySelectorAll(`#dts-${eid} .dt`).forEach((t,i)=>t.classList.toggle('active',i===di));const p=document.getElementById(`dps-${eid}`);if(p)p.style.transform=`translateX(-${di*100}%)`;}
@@ -381,7 +446,12 @@ function subTS(){const wk=S.weeks[S.currentWeek];const by=document.getElementByI
   wk.status='submitted';wk.submittedBy=by;wk.submittedAt=new Date().toISOString();wk.comments=document.getElementById('sn').value;
   const tot=Object.values(wk.entries).reduce((s,v)=>s+(parseFloat(v.hours)||0),0);
   mgrs.forEach(m=>{const sub=encodeURIComponent(`Timesheet Approval — ${fw(S.currentWeek)}`);const bod=encodeURIComponent(`Hi ${m.name},\n\nPlease approve the timesheet for ${fw(S.currentWeek)}.\n\nSubmitted by: ${by}\nEmployees: ${wk.employees.length}\nLabor hours: ${tot.toFixed(1)}\nNotes: ${wk.comments||'None'}\n\nOpen the VH Timesheet App to approve or return.\n\nThank you`);window.open(`mailto:${m.email}?subject=${sub}&body=${bod}`);});
-  saveSP();updBadge();render();toast('Submitted!','success');
+  // Push to SharePoint and remove from local drafts
+  saveSP().then(()=>{
+    // Remove from localStorage drafts
+    try{const drafts=JSON.parse(localStorage.getItem('vhts_drafts')||'{}');delete drafts[S.currentWeek];localStorage.setItem('vhts_drafts',JSON.stringify(drafts));}catch(e){}
+    updBadge();render();toast('Submitted!','success');
+  });
 }
 function rToDraft(){const wk=S.weeks[S.currentWeek];wk.status='draft';wk.submittedBy='';wk.submittedAt='';saveSP();updBadge();render();toast('Returned to draft.','success');}
 function rApproval(){const pend=Object.entries(S.weeks).filter(([,w])=>['submitted','approved','rejected'].includes(w.status));
@@ -390,8 +460,10 @@ function rApproval(){const pend=Object.entries(S.weeks).filter(([,w])=>['submitt
   else{pend.forEach(([iso,wk])=>{const tot=Object.values(wk.entries).reduce((s,v)=>s+(parseFloat(v.hours)||0),0);h+=`<div class="card"><div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:12px"><div><strong style="font-size:16px;font-weight:700;letter-spacing:-.3px">${fw(iso)}</strong><br><span style="font-size:13px;color:var(--text2)">${wk.submittedBy||'—'} · ${wk.employees.length} employees · ${tot.toFixed(1)}h</span></div><span class="sb sb-${wk.status.slice(0,2)}">${wk.status}</span></div>${wk.status==='submitted'&&auth.isAdmin?`<div style="display:flex;gap:8px"><button class="btn btn-s" style="flex:1" onclick="appWk('${iso}')"><i class="ti ti-check"></i> Approve</button><button class="btn btn-d" style="flex:1" onclick="retWk('${iso}')"><i class="ti ti-x"></i> Return</button></div>`:wk.status==='submitted'?`<div class="ib" style="margin:0"><i class="ti ti-clock"></i><span>Awaiting manager approval.</span></div>`:`<button class="btn btn-bl" onclick="vwWk('${iso}')"><i class="ti ti-eye"></i> View details</button>`}</div>`;});}
   h+=`</div>`;document.getElementById('mc').innerHTML=h;
 }
-function appWk(iso){const n=auth.user?auth.user.name:prompt('Your name:');if(!n)return;S.weeks[iso].status='approved';S.weeks[iso].approvedBy=n;S.weeks[iso].approvedAt=new Date().toISOString();saveSP();updBadge();render();toast('Approved!','success');}
-function retWk(iso){const r=prompt('Reason for returning:');S.weeks[iso].status='draft';if(r)S.weeks[iso].comments=(S.weeks[iso].comments||'')+'\nReturned: '+r;S.weeks[iso].submittedBy='';saveSP();updBadge();render();toast('Returned to foreman.','success');}
+function appWk(iso){const n=auth.user?auth.user.name:prompt('Your name:');if(!n)return;S.weeks[iso].status='approved';S.weeks[iso].approvedBy=n;S.weeks[iso].approvedAt=new Date().toISOString();
+  // Update SharePoint with all submitted/approved weeks
+  saveAllSubmittedSP();updBadge();render();toast('Approved!','success');}
+function retWk(iso){const r=prompt('Reason for returning:');S.weeks[iso].status='draft';if(r)S.weeks[iso].comments=(S.weeks[iso].comments||'')+'\nReturned: '+r;S.weeks[iso].submittedBy='';saveAllSubmittedSP();updBadge();render();toast('Returned to foreman.','success');}
 function vwWk(iso){S.currentWeek=iso;document.getElementById('ws').value=iso;showPage('review');}
 function rExport(){if(!auth.isAdmin){document.getElementById('mc').innerHTML=`<div class="pg"><div class="nd"><i class="ti ti-lock"></i>Admins only.</div></div>`;return;}
   const app=Object.entries(S.weeks).filter(([,w])=>w.status==='approved');
@@ -425,7 +497,7 @@ function rSettings(){let h=`<div class="pg"><div class="ph"><h1>Settings</h1></d
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:14px"><input type="text" id="nn" placeholder="Full name" style="padding:11px 14px;font-size:16px;background:var(--bg2);border:0.5px solid var(--border);border-radius:var(--r3);color:var(--text);-webkit-appearance:none;font-family:inherit"/><input type="email" id="ne" placeholder="Email" style="padding:11px 14px;font-size:16px;background:var(--bg2);border:0.5px solid var(--border);border-radius:var(--r3);color:var(--text);-webkit-appearance:none;font-family:inherit"/></div>
       <button class="btn btn-p btn-bl" style="margin-top:10px" onclick="addMgr()"><i class="ti ti-plus"></i> Add manager</button></div>`;
     h+=`<div class="card"><strong style="font-size:16px;font-weight:700;display:block;margin-bottom:14px;letter-spacing:-.2px">Spectrum settings</strong><div class="fr"><label>Company code</label><input type="text" value="${S.settings.companyCode}" oninput="S.settings.companyCode=this.value"/></div><div class="fr" style="margin:0"><label>Batch year prefix</label><input type="text" value="${S.settings.batchPrefix}" oninput="S.settings.batchPrefix=this.value"/></div></div>`;
-    h+=`<button class="btn btn-p btn-bl" onclick="saveSP()" style="margin-bottom:24px"><i class="ti ti-cloud-upload"></i> Save all settings to SharePoint</button>`;
+    h+=`<button class="btn btn-p btn-bl" onclick="saveAllSubmittedSP().then(()=>toast('Settings saved.','success'))" style="margin-bottom:24px"><i class="ti ti-cloud-upload"></i> Save all settings to SharePoint</button>`;
   }
   h+=`</div>`;document.getElementById('mc').innerHTML=h;
 }
