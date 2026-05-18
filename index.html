@@ -109,7 +109,7 @@ select{font-size:12px;background:var(--bg2);border:0.5px solid var(--border);bor
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
 .mc{flex:1;overflow-y:auto;overflow-x:hidden;padding-bottom:var(--bottom-nav-h);-webkit-overflow-scrolling:touch}
 .bn{position:fixed;bottom:0;left:0;right:0;height:var(--bottom-nav-h);background:var(--bg);border-top:2px solid var(--border);display:flex;align-items:stretch;z-index:50;padding-bottom:env(safe-area-inset-bottom,0);box-shadow:0 -4px 20px rgba(0,0,0,0.08)}
-.nb{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;font-size:10px;font-weight:600;color:var(--text3);border:none;background:none;cursor:pointer;padding:6px 2px;position:relative;-webkit-appearance:none;font-family:inherit;letter-spacing:0.3px;transition:color 0.15s,background 0.15s;border-radius:10px;margin:4px 2px}
+.nb{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;font-size:12px;font-weight:600;color:var(--text3);border:none;background:none;cursor:pointer;padding:6px 2px;position:relative;-webkit-appearance:none;font-family:inherit;letter-spacing:0.3px;transition:color 0.15s,background 0.15s;border-radius:10px;margin:4px 2px}
 .nb.active{color:var(--accent);background:rgba(24,95,165,0.1)}
 .nb .ti{font-size:24px}
 .nbg{background:#ff3b30;color:#fff;border-radius:10px;padding:1px 5px;font-size:9px;position:absolute;top:6px;right:calc(50% - 22px);font-weight:600}
@@ -195,6 +195,10 @@ select{font-size:12px;background:var(--bg2);border:0.5px solid var(--border);bor
 .toast.success{border-color:#34c759;background:#e6f3d8;color:#27500A}
 .toast.error{border-color:#ff3b30;background:#fde8e8;color:#791F1F}
 @keyframes tin{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:none}}
+
+input[type=checkbox]{-webkit-appearance:none;appearance:none;width:22px;height:22px;border:2px solid var(--border);border-radius:6px;background:var(--bg2);cursor:pointer;position:relative;flex-shrink:0;transition:all 0.15s}
+input[type=checkbox]:checked{background:var(--accent);border-color:var(--accent)}
+input[type=checkbox]:checked::after{content:'';position:absolute;left:5px;top:2px;width:8px;height:12px;border:2.5px solid #fff;border-top:none;border-left:none;transform:rotate(45deg)}
 </style>
 </head>
 <body>
@@ -224,6 +228,7 @@ select{font-size:12px;background:var(--bg2);border:0.5px solid var(--border);bor
 const CID='127c307a-e672-4d13-b5e9-c3b96fb34759';
 const TID='1585f578-f5d3-41e6-a437-9c59bd33fbcf';
 const SDID='b!77-cpoIaSE-l0ci84kLfeiK-hbRtfAhKuOH7NIDhK2yh3aptjRomSIT4CiwMH65s';
+const SITE_ID='valentiheld.sharepoint.com,a69cbfef-1a82-4f48-a5d1-c8bce242df7a';
 const SFN='vh_timesheets.json';
 const SCOPES=['Files.ReadWrite','Files.ReadWrite.All','Sites.ReadWrite.All','User.Read','offline_access'];
 const MCFG={auth:{clientId:CID,authority:`https://login.microsoftonline.com/${TID}`,redirectUri:window.location.origin+window.location.pathname},cache:{cacheLocation:'localStorage',storeAuthStateInCookie:true},system:{allowNativeBroker:false}};
@@ -269,19 +274,20 @@ function showUM(){showM(`<div class="mh"></div><div style="display:flex;align-it
 function setSS(s){const d=document.getElementById('sd');if(d)d.className='sd '+s;}
 async function saveSP(){const tok=await getTok();if(!tok){toast('Sign in to sync.','error');return;}setSS('busy');
   try{const p=JSON.stringify({weeks:S.weeks,managers:S.managers,adminEmails:S.adminEmails,settings:S.settings,savedAt:new Date().toISOString(),savedBy:auth.user?.name});
-    // Try SharePoint drive first, fall back to personal OneDrive
-    let r=await fetch(`https://graph.microsoft.com/v1.0/drives/${SDID}/root:/${SFN}:/content`,{method:'PUT',headers:{Authorization:'Bearer '+tok,'Content-Type':'application/json'},body:p});
-    if(r.status===403||r.status===404){
-      // Fall back to user's OneDrive
-      r=await fetch(`https://graph.microsoft.com/v1.0/me/drive/root:/${SFN}:/content`,{method:'PUT',headers:{Authorization:'Bearer '+tok,'Content-Type':'application/json'},body:p});
+    // Use SharePoint site endpoint (shared across all users)
+    let r=await fetch(`https://graph.microsoft.com/v1.0/sites/${SITE_ID}/drive/root:/${SFN}:/content`,{method:'PUT',headers:{Authorization:'Bearer '+tok,'Content-Type':'application/json'},body:p});
+    if(!r.ok){
+      // Fallback to drive ID endpoint
+      r=await fetch(`https://graph.microsoft.com/v1.0/drives/${SDID}/root:/${SFN}:/content`,{method:'PUT',headers:{Authorization:'Bearer '+tok,'Content-Type':'application/json'},body:p});
     }
-    if(!r.ok)throw new Error(r.status);setSS('ok');toast('Saved.','success');
+    if(!r.ok)throw new Error(await r.text());setSS('ok');toast('Saved.','success');
   }catch(e){setSS('err');toast('Sync failed: '+e.message,'error');}
 }
 async function loadSP(){const tok=await getTok();if(!tok)return;setSS('busy');
   try{
-    let r=await fetch(`https://graph.microsoft.com/v1.0/drives/${SDID}/root:/${SFN}:/content`,{headers:{Authorization:'Bearer '+tok}});
-    if(r.status===403){r=await fetch(`https://graph.microsoft.com/v1.0/me/drive/root:/${SFN}:/content`,{headers:{Authorization:'Bearer '+tok}});}
+    // Use SharePoint site endpoint (shared across all users)
+    let r=await fetch(`https://graph.microsoft.com/v1.0/sites/${SITE_ID}/drive/root:/${SFN}:/content`,{headers:{Authorization:'Bearer '+tok}});
+    if(!r.ok){r=await fetch(`https://graph.microsoft.com/v1.0/drives/${SDID}/root:/${SFN}:/content`,{headers:{Authorization:'Bearer '+tok}});}
     if(r.status===404){setSS('ok');return;}if(!r.ok)throw new Error(r.status);
     const d=await r.json();
     if(d.weeks)S.weeks={...S.weeks,...d.weeks};if(d.managers)S.managers=d.managers;if(d.adminEmails)S.adminEmails=d.adminEmails;if(d.settings)S.settings={...S.settings,...d.settings};
