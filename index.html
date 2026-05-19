@@ -705,7 +705,11 @@ function buildProductionView(wk,dates,ro){
 async function submitProductionToSP(wk){
   const tok=await getTok();if(!tok)return;
   if(!wk.production)return;
-  const entries=Object.values(wk.production).filter(function(p){return p.activity||p.quantity||p.yardsMovedTotal||p.strId||p.bidItem||p.workType;});
+  const entries=Object.values(wk.production).filter(function(p){
+    // Pass through any entry that has ANY field filled in beyond job/date/photos
+    const keys=Object.keys(p).filter(function(k){return k!=='job'&&k!=='date'&&k!=='photos'&&k!=='phase';});
+    return keys.some(function(k){return p[k]&&String(p[k]).trim()!=='';});
+  });
   if(!entries.length)return;
   try{
     const siteR=await fetch('https://graph.microsoft.com/v1.0/sites/valentiheld.sharepoint.com:/sites/FieldOperations',{headers:{Authorization:'Bearer '+tok}});
