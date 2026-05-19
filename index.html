@@ -244,8 +244,157 @@ const EQ=[{"number":"1","description":"OT - PROD. PRINTER/PLOTTER"},{"number":"7
 const DAYS=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
 const DK=['sun','mon','tue','wed','thu','fri','sat'];
 let mi,auth={user:null,isAdmin:false,account:null};
-let S={currentWeek:'',weeks:{},managers:[{name:'Derek Morris',email:'dmorris@valentiheld.com',title:'Manager - Earthwork'},{name:'Joe Roe',email:'jroe@valentiheld.com',title:'Superintendent'},{name:'Jason Trenkamp',email:'jtrenkamp@valentiheld.com',title:'Supervisor - Utility'}],adminEmails:['dmorris@valentiheld.com','abewley@valentiheld.com'],customEmployees:[],settings:{companyCode:'VHI',batchPrefix:'26'}};
+const FD_SITE='valentiheld.sharepoint.com,155c9359-7fd3-4f2c-8c6a-b04a722b6f64,801969a1-b2a1-4f9a-8c3a-05ae5405e710';
+const FD_LIST_NAME='Field Data';
+const PHASE_TEMPLATES={
+  '300':{label:'Mass Earthwork',fields:[
+    {id:'bidItem',label:'Bid Item',type:'text',span:2},
+    {id:'haulDistance',label:'Haul Distance (miles)',type:'number'},
+    {id:'yardsMovedTotal',label:'Total Yards Moved (CY)',type:'number'},
+    {id:'weather',label:'Weather',type:'weather'},
+    {id:'bidCostPerYard',label:'Bid Cost Per Yard ($)',type:'currency'},
+    {id:'actualCostPerYard',label:'Actual Cost Per Yard ($)',type:'currency'},
+    {id:'totalCost',label:'Total Cost ($)',type:'currency',span:2}
+  ]},
+  '310':{label:'Fine Grading',fields:[
+    {id:'bidItem',label:'Bid Item',type:'text',span:2},
+    {id:'areaFinished',label:'Area Finished (SY)',type:'number'},
+    {id:'weather',label:'Weather',type:'weather'},
+    {id:'bidCost',label:'Bid Cost ($)',type:'currency'},
+    {id:'actualCost',label:'Actual Cost ($)',type:'currency'},
+    {id:'totalCost',label:'Total Cost ($)',type:'currency',span:2}
+  ]},
+  '400':{label:'Storm Sewer',fields:[
+    {id:'strId',label:'STR ID',type:'text'},
+    {id:'workType',label:'Work Type',type:'text'},
+    {id:'bidDepth',label:'Bid Depth (ft)',type:'number'},
+    {id:'quantity',label:'Quantity (LF)',type:'number'},
+    {id:'pipeSize',label:'Pipe Size',type:'text'},
+    {id:'crewHours',label:'Crew Hours',type:'number'},
+    {id:'weather',label:'Weather',type:'weather'},
+    {id:'productionHours',label:'Production Hours',type:'number'}
+  ]},
+  '450':{label:'Phase 450',editable:true,fields:[
+    {id:'strId',label:'STR ID',type:'text'},
+    {id:'workType',label:'Work Type',type:'text'},
+    {id:'bidDepth',label:'Bid Depth (ft)',type:'number'},
+    {id:'quantity',label:'Quantity (LF)',type:'number'},
+    {id:'pipeSize',label:'Pipe Size',type:'text'},
+    {id:'crewHours',label:'Crew Hours',type:'number'},
+    {id:'weather',label:'Weather',type:'weather'},
+    {id:'productionHours',label:'Production Hours',type:'number'}
+  ]},
+  '500':{label:'Sanitary Sewer',fields:[
+    {id:'strId',label:'STR ID',type:'text'},
+    {id:'workType',label:'Work Type',type:'text'},
+    {id:'bidDepth',label:'Bid Depth (ft)',type:'number'},
+    {id:'quantity',label:'Quantity (LF)',type:'number'},
+    {id:'pipeSize',label:'Pipe Size',type:'text'},
+    {id:'crewHours',label:'Crew Hours',type:'number'},
+    {id:'weather',label:'Weather',type:'weather'},
+    {id:'productionHours',label:'Production Hours',type:'number'}
+  ]},
+  '600':{label:'Watermain',fields:[
+    {id:'strId',label:'STR ID',type:'text'},
+    {id:'workType',label:'Work Type',type:'text'},
+    {id:'bidDepth',label:'Bid Depth (ft)',type:'number'},
+    {id:'quantity',label:'Quantity (LF)',type:'number'},
+    {id:'pipeSize',label:'Pipe Size',type:'text'},
+    {id:'crewHours',label:'Crew Hours',type:'number'},
+    {id:'weather',label:'Weather',type:'weather'},
+    {id:'productionHours',label:'Production Hours',type:'number'}
+  ]},
+  '650':{label:'Phase 650',editable:true,fields:[
+    {id:'strId',label:'STR ID',type:'text'},
+    {id:'workType',label:'Work Type',type:'text'},
+    {id:'bidDepth',label:'Bid Depth (ft)',type:'number'},
+    {id:'quantity',label:'Quantity (LF)',type:'number'},
+    {id:'pipeSize',label:'Pipe Size',type:'text'},
+    {id:'crewHours',label:'Crew Hours',type:'number'},
+    {id:'weather',label:'Weather',type:'weather'},
+    {id:'productionHours',label:'Production Hours',type:'number'}
+  ]}
+};
+const WEATHER_OPTIONS=['Clear','Partly Cloudy','Overcast','Light Rain','Heavy Rain','Snow','Windy','Extreme Heat'];
+
+let entryMode='timecards'; // 'timecards' or 'production'
+let S={currentWeek:'',weeks:{},photoRecipients:[],phaseLabels:{},managers:[{name:'Derek Morris',email:'dmorris@valentiheld.com',title:'Manager - Earthwork'},{name:'Joe Roe',email:'jroe@valentiheld.com',title:'Superintendent'},{name:'Jason Trenkamp',email:'jtrenkamp@valentiheld.com',title:'Supervisor - Utility'}],adminEmails:['dmorris@valentiheld.com','abewley@valentiheld.com'],customEmployees:[],settings:{companyCode:'VHI',batchPrefix:'26'}};
 let cp='entry',eqmc=0,adys={};
+
+// ── RELIABILITY INFRASTRUCTURE ───────────────────────────────────────────────
+
+// Retry wrapper - retries fn up to maxRetries times with exponential backoff
+async function withRetry(fn, maxRetries=3, label='operation'){
+  let lastErr;
+  for(let i=0;i<maxRetries;i++){
+    try{return await fn();}
+    catch(e){
+      lastErr=e;
+      if(e.message&&(e.message.includes('401')||e.message.includes('403')))break; // auth errors don't retry
+      if(i<maxRetries-1){
+        const delay=1000*Math.pow(2,i); // 1s, 2s, 4s
+        console.warn(`${label} failed (attempt ${i+1}), retrying in ${delay}ms:`,e.message);
+        await new Promise(r=>setTimeout(r,delay));
+      }
+    }
+  }
+  throw lastErr;
+}
+
+// Online/offline tracking
+let isOnline=navigator.onLine;
+let pendingSave=false;
+window.addEventListener('online',()=>{
+  isOnline=true;setSS('busy');
+  toast('Back online — syncing...','success');
+  if(pendingSave){pendingSave=false;saveSP();}
+  else{loadSP();}
+});
+window.addEventListener('offline',()=>{
+  isOnline=false;setSS('off');
+  toast('No connection — changes saved locally.','error');
+});
+
+// Auto-save draft every 60 seconds
+let autoSaveTimer;
+function startAutoSave(){
+  clearInterval(autoSaveTimer);
+  autoSaveTimer=setInterval(()=>{
+    const wk=S.weeks[S.currentWeek];
+    if(wk&&wk.status==='draft'&&wk.employees.length>0){
+      saveDraft();
+    }
+  },60000);
+}
+
+// Validate week data before saving
+function validateWeek(wk){
+  if(!wk)return false;
+  if(!Array.isArray(wk.employees))return false;
+  if(typeof wk.entries!=='object')return false;
+  return true;
+}
+
+// Compress image to max 800px / 60% quality before storing
+async function compressPhoto(dataUrl, maxSize=800, quality=0.6){
+  return new Promise((resolve)=>{
+    const img=new Image();
+    img.onload=()=>{
+      const canvas=document.createElement('canvas');
+      let w=img.width,h=img.height;
+      if(w>maxSize||h>maxSize){
+        if(w>h){h=Math.round(h*maxSize/w);w=maxSize;}
+        else{w=Math.round(w*maxSize/h);h=maxSize;}
+      }
+      canvas.width=w;canvas.height=h;
+      const ctx=canvas.getContext('2d');
+      ctx.drawImage(img,0,0,w,h);
+      resolve(canvas.toDataURL('image/jpeg',quality));
+    };
+    img.onerror=()=>resolve(dataUrl); // fallback to original
+    img.src=dataUrl;
+  });
+}
 
 async function initApp(){
   try{mi=new msal.PublicClientApplication(MCFG);await mi.initialize();
@@ -268,7 +417,7 @@ async function onIn(account){
     const em=(d.userPrincipalName||'').toLowerCase();
     auth.user={name:d.displayName||d.userPrincipalName,email:d.userPrincipalName,initials:(d.displayName||'U').split(' ').map(p=>p[0]).join('').slice(0,2).toUpperCase()};
     auth.isAdmin=S.adminEmails.map(e=>e.toLowerCase()).includes(em);
-    updUC();updNav();setSS('busy');await loadSP();render();
+    updUC();updNav();setSS('busy');await loadSP();render();startAutoSave();
     toast('Signed in as '+auth.user.name+(auth.isAdmin?' · Admin':''),'success');
   }catch(e){console.error(e);}
 }
@@ -298,7 +447,7 @@ async function saveAllSubmittedSP(){
         existing.submissions[key]=wk;
       }
     });
-    existing.managers=S.managers;existing.adminEmails=S.adminEmails;existing.settings=S.settings;existing.customEmployees=S.customEmployees||[];
+    existing.managers=S.managers;existing.adminEmails=S.adminEmails;existing.settings=S.settings;existing.customEmployees=S.customEmployees||[];existing.photoRecipients=S.photoRecipients||[];existing.phaseLabels=S.phaseLabels||{};
     const put=await fetch(`https://graph.microsoft.com/v1.0/sites/${SITE_ID}/drive/root:/${SFN}:/content`,{method:'PUT',headers:{Authorization:'Bearer '+tok,'Content-Type':'application/json'},body:JSON.stringify(existing)});
     if(!put.ok)throw new Error(await put.text());
   }catch(e){console.error('saveAllSubmittedSP:',e);}
@@ -315,29 +464,31 @@ function saveDraft(){
 
 // Save settings + submitted weeks to SharePoint (shared)
 async function saveSP(){
+  if(!isOnline){saveDraft();pendingSave=true;toast('Saved locally — will sync when online.','success');return;}
   const tok=await getTok();if(!tok){toast('Sign in to sync.','error');return;}setSS('busy');
   try{
-    // READ existing SP data first so we don't overwrite other foremen's submissions
-    let existing={submissions:{},managers:S.managers,adminEmails:S.adminEmails,settings:S.settings,customEmployees:S.customEmployees||[]};
-    const rGet=await fetch(`https://graph.microsoft.com/v1.0/sites/${SITE_ID}/drive/root:/${SFN}:/content`,{headers:{Authorization:'Bearer '+tok}});
-    if(rGet.ok){try{const d=await rGet.json();if(d.submissions)existing.submissions=d.submissions;}catch(e){}}
-    // Add/update only THIS user's non-draft weeks
-    Object.entries(S.weeks).forEach(([iso,wk])=>{
-      if(wk.status!=='draft'){
-        const key=iso+':'+(auth.user?.email||'unknown')+':'+(wk.assignedManager||'');
-        existing.submissions[key]=wk;
+    await withRetry(async()=>{
+      let existing={submissions:{},managers:S.managers,adminEmails:S.adminEmails,settings:S.settings,customEmployees:S.customEmployees||[],photoRecipients:S.photoRecipients||[],phaseLabels:S.phaseLabels||{}};
+      const rGet=await fetch(`https://graph.microsoft.com/v1.0/sites/${SITE_ID}/drive/root:/${SFN}:/content`,{headers:{Authorization:'Bearer '+tok}});
+      if(rGet.ok){try{const d=await rGet.json();if(d.submissions)existing.submissions=d.submissions;}catch(e){}}
+      Object.entries(S.weeks).forEach(([iso,wk])=>{
+        if(wk.status!=='draft'&&validateWeek(wk)){
+          const key=iso+':'+(auth.user?.email||'unknown')+':'+(wk.assignedManager||'');
+          existing.submissions[key]=wk;
+        }
+      });
+      if(S.adminEmails.map(e=>e.toLowerCase()).includes((auth.user?.email||'').toLowerCase())){
+        existing.managers=S.managers;existing.adminEmails=S.adminEmails;existing.settings=S.settings;
+        existing.customEmployees=S.customEmployees||[];existing.photoRecipients=S.photoRecipients||[];existing.phaseLabels=S.phaseLabels||{};
       }
-    });
-    // Preserve settings/managers/admins from submitting user only if they're admin
-    if(S.adminEmails.includes((auth.user?.email||'').toLowerCase())){
-      existing.managers=S.managers;existing.adminEmails=S.adminEmails;
-      existing.settings=S.settings;existing.customEmployees=S.customEmployees||[];
-    }
-    existing.savedAt=new Date().toISOString();
-    const r=await fetch(`https://graph.microsoft.com/v1.0/sites/${SITE_ID}/drive/root:/${SFN}:/content`,{method:'PUT',headers:{Authorization:'Bearer '+tok,'Content-Type':'application/json'},body:JSON.stringify(existing)});
-    if(!r.ok)throw new Error(await r.text());setSS('ok');toast('Submitted.','success');
-  }catch(e){setSS('err');toast('Sync failed: '+e.message,'error');}
+      existing.savedAt=new Date().toISOString();
+      const r=await fetch(`https://graph.microsoft.com/v1.0/sites/${SITE_ID}/drive/root:/${SFN}:/content`,{method:'PUT',headers:{Authorization:'Bearer '+tok,'Content-Type':'application/json'},body:JSON.stringify(existing)});
+      if(!r.ok)throw new Error(r.status);
+    },'SharePoint save');
+    setSS('ok');toast('Submitted.','success');
+  }catch(e){setSS('err');saveDraft();pendingSave=true;toast('Sync failed — saved locally.','error');console.error('saveSP:',e);}
 }
+
 async function loadSP(){
   const tok=await getTok();if(!tok)return;setSS('busy');
   try{
@@ -356,6 +507,8 @@ async function loadSP(){
     if(data.adminEmails)S.adminEmails=data.adminEmails;
     if(data.settings)S.settings={...S.settings,...data.settings};
     if(data.customEmployees)S.customEmployees=data.customEmployees;
+    if(data.photoRecipients)S.photoRecipients=data.photoRecipients;
+    if(data.phaseLabels)S.phaseLabels=data.phaseLabels;
     if(auth.user){auth.isAdmin=S.adminEmails.map(e=>e.toLowerCase()).includes(auth.user.email.toLowerCase());updNav();}
     // Load submissions based on role:
     // - Admins (Allison etc): see all approved weeks for CSV export
@@ -402,7 +555,179 @@ async function loadSP(){
   }catch(e){setSS('err');toast('Load failed: '+e.message,'error');}
 }
 
-function bw(){return{employees:[],entries:{},equipmentEntries:{},status:'draft',submittedBy:'',submittedAt:'',approvedBy:'',approvedAt:'',comments:''};}
+function getUniqueJobsForDay(wk,dt){
+  const jobs=new Set();
+  wk.employees.forEach(eid=>{const lines=getJobLines(wk,eid,dt);lines.forEach(ln=>{if(ln.job)jobs.add(ln.job);});});
+  return Array.from(jobs);
+}
+function getJobTotals(wk,dt,jobNum){
+  let hrs=0;const crew=new Set();
+  wk.employees.forEach(eid=>{getJobLines(wk,eid,dt).forEach(ln=>{if(ln.job===jobNum){hrs+=parseFloat(ln.hours)||0;crew.add(eid);}});});
+  return{hours:hrs,crew:crew.size};
+}
+function setProd(dt,jobNum,field,val){
+  const wk=S.weeks[S.currentWeek];if(!wk.production)wk.production={};
+  const k=`${jobNum}:${dt}`;
+  if(!wk.production[k]){
+    // Auto-capture phase from time card when first creating production entry
+    const phase=getPhaseForJob(wk,dt,jobNum);
+    wk.production[k]={job:jobNum,date:dt,phase:phase||''};
+  }
+  wk.production[k][field]=val;
+}
+function getProd(dt,jobNum,field){
+  const wk=S.weeks[S.currentWeek];
+  return((wk.production&&wk.production[`${jobNum}:${dt}`])||{})[field]||'';
+}
+function getPhaseForJob(wk,dt,jobNum){
+  for(const eid of wk.employees){const lines=getJobLines(wk,eid,dt);for(const ln of lines){if(ln.job===jobNum&&ln.phase)return ln.phase;}}
+  return null;
+}
+function getPhaseTemplate(phase){
+  if(!phase)return null;
+  const key=Object.keys(PHASE_TEMPLATES).find(k=>phase.startsWith(k));
+  return key?{key,...PHASE_TEMPLATES[key]}:null;
+}
+function getPhaseLabel(phase){
+  const key=Object.keys(PHASE_TEMPLATES).find(k=>phase&&phase.startsWith(k));
+  if(!key)return phase;
+  return(S.phaseLabels&&S.phaseLabels[key])||PHASE_TEMPLATES[key].label;
+}
+function buildPhaseFields(dt,jobNum,template,ro){
+  const fields=template.fields||[];
+  let s='<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px">';
+  fields.forEach(function(f){
+    const val=(getProd(dt,jobNum,f.id)||'').toString().replace(/"/g,'&quot;');
+    const span=f.span===2?'grid-column:span 2':'';
+    s+=`<div style="${span}"><span class="fl" style="font-size:10px;margin-bottom:4px;display:block">${f.label}</span>`;
+    if(f.type==='weather'){
+      s+=`<select class="di" style="font-size:14px;padding:8px 10px" ${ro?'disabled':''} data-dt="${dt}" data-job="${jobNum}" data-f="${f.id}" onchange="setProd(this.dataset.dt,this.dataset.job,this.dataset.f,this.value)">`;
+      s+=`<option value="">Select...</option>`;
+      WEATHER_OPTIONS.forEach(function(w){s+=`<option value="${w}" ${val===w?'selected':''}>${w}</option>`;});
+      s+='</select>';
+    }else{
+      s+=`<input type="${f.type==='text'?'text':'number'}" class="di" ${f.type!=='text'?'inputmode="decimal"':''} value="${val}" ${ro?'disabled':''} placeholder="${f.label}" style="font-size:15px;padding:8px 10px" data-dt="${dt}" data-job="${jobNum}" data-f="${f.id}" oninput="setProd(this.dataset.dt,this.dataset.job,this.dataset.f,this.value)"/>`;
+    }
+    s+='</div>';
+  });
+  s+='</div>';
+  return s;
+}
+function handlePhoto(input){
+  const dt=input.dataset.dt,jobNum=input.dataset.job;
+  const files=Array.from(input.files);if(!files.length)return;
+  const wk=S.weeks[S.currentWeek];
+  if(!wk.production)wk.production={};
+  const k=`${jobNum}:${dt}`;
+  if(!wk.production[k])wk.production[k]={job:jobNum,date:dt};
+  if(!wk.production[k].photos)wk.production[k].photos=[];
+  let loaded=0;
+  files.forEach(function(file){
+    const reader=new FileReader();
+    reader.onload=function(e){
+      compressPhoto(e.target.result).then(function(compressed){
+        wk.production[k].photos.push({dataUrl:compressed,name:file.name,ts:new Date().toISOString()});
+        loaded++;
+        if(loaded===files.length){rEntry();if(S.photoRecipients&&S.photoRecipients.length)sendPhotoNotification(dt,jobNum,wk.production[k].photos.length);}
+      });
+    };
+    reader.readAsDataURL(file);
+  });
+}
+function removePhoto(dt,jobNum,idx){
+  const wk=S.weeks[S.currentWeek];const k=`${jobNum}:${dt}`;
+  if(wk.production&&wk.production[k]&&wk.production[k].photos){wk.production[k].photos.splice(idx,1);rEntry();}
+}
+async function sendPhotoNotification(dt,jobNum,count){
+  const tok=await getTok();if(!tok)return;
+  if(!S.photoRecipients||!S.photoRecipients.length)return;
+  try{
+    const toList=S.photoRecipients.map(function(e){return{emailAddress:{address:e}};});
+    await fetch('https://graph.microsoft.com/v1.0/me/sendMail',{method:'POST',headers:{Authorization:'Bearer '+tok,'Content-Type':'application/json'},body:JSON.stringify({message:{subject:`Ticket Photo — Job #${jobNum} (${fd(dt)})`,body:{contentType:'Text',content:`Receiving ticket photo added.
+
+Job: ${jobNum}
+Date: ${fd(dt)}
+Photos: ${count}
+By: ${auth.user?.name||'Foreman'}`},toRecipients:toList},saveToSentItems:false})});
+  }catch(e){console.error('Photo email:',e);}
+}
+function buildProductionView(wk,dates,ro){
+  const ad=adys['_prod']||0;
+  let s='';
+  s+='<div style="display:flex;border-bottom:0.5px solid var(--border);overflow-x:auto;-webkit-overflow-scrolling:touch;scrollbar-width:none;margin-bottom:16px">';
+  dates.forEach(function(dt,di){
+    const jobs=getUniqueJobsForDay(wk,dt);
+    const hasData=jobs.some(function(j){return(wk.production||{})[`${j}:${dt}`];});
+    s+=`<div style="flex-shrink:0;padding:10px 12px;font-size:11px;font-weight:600;cursor:pointer;border-bottom:2px solid ${di===ad?'var(--accent)':'transparent'};color:${di===ad?'var(--accent)':hasData?'var(--text)':'var(--text3)'};text-transform:uppercase;letter-spacing:.5px;min-width:48px;text-align:center;line-height:1.3" onclick="adys['_prod']=${di};rEntry()">`;
+    s+=DAYS[di]+'<br><span style="font-size:9px;font-weight:500;opacity:.7">'+fs(dt)+'</span></div>';
+  });
+  s+='</div>';
+  const dt=dates[ad];
+  const jobs=getUniqueJobsForDay(wk,dt);
+  if(!jobs.length){s+='<div class="nd" style="padding:32px 20px"><i class="ti ti-hammer"></i>No jobs for this day.<br><span style="font-size:13px">Add time cards first — jobs appear here automatically.</span></div>';return s;}
+  jobs.forEach(function(jobNum){
+    const totals=getJobTotals(wk,dt,jobNum);
+    const phase=getPhaseForJob(wk,dt,jobNum);
+    const template=getPhaseTemplate(phase);
+    const phaseLabel=phase?getPhaseLabel(phase):null;
+    const photos=((wk.production&&wk.production[`${jobNum}:${dt}`])||{}).photos||[];
+    s+='<div class="card">';
+    s+='<div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:12px">';
+    s+=`<div><strong style="font-size:16px;font-weight:700">Job #${jobNum}</strong>`;
+    if(phaseLabel)s+=` <span style="font-size:12px;background:var(--bg2);border:0.5px solid var(--border);border-radius:20px;padding:2px 10px;color:var(--text2);font-weight:600;margin-left:4px">${phaseLabel}</span>`;
+    s+=`<br><span style="font-size:12px;color:var(--text2)">${totals.crew} crew · ${totals.hours.toFixed(1)}h labor</span></div>`;
+    if(!ro)s+=`<label style="cursor:pointer"><input type="file" accept="image/*" capture="environment" style="display:none" data-dt="${dt}" data-job="${jobNum}" onchange="handlePhoto(this)"/><span class="btn btn-sm"><i class="ti ti-camera"></i>${photos.length>0?' '+photos.length:''}</span></label>`;
+    s+='</div>';
+    if(photos.length>0){
+      s+='<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">';
+      photos.forEach(function(p,pi){
+        s+=`<div style="position:relative"><img src="${p.dataUrl}" style="width:72px;height:72px;object-fit:cover;border-radius:8px;border:0.5px solid var(--border)"/>`;
+        if(!ro)s+=`<button onclick="removePhoto('${dt}','${jobNum}',${pi})" style="position:absolute;top:-6px;right:-6px;background:#ff3b30;color:#fff;border:none;border-radius:50%;width:20px;height:20px;font-size:12px;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0">x</button>`;
+        s+='</div>';
+      });
+      s+='</div>';
+    }
+    if(template){s+=buildPhaseFields(dt,jobNum,template,ro);}
+    else{
+      s+='<div class="fr"><label>Activity / Work Description</label>';
+      s+=`<input type="text" class="di" value="${(getProd(dt,jobNum,'activity')||'').replace(/"/g,'&quot;')}" ${ro?'disabled':''} placeholder="Describe work" data-dt="${dt}" data-job="${jobNum}" data-f="activity" oninput="setProd(this.dataset.dt,this.dataset.job,this.dataset.f,this.value)"/></div>`;
+    }
+    s+='<div class="fr" style="margin-top:8px;margin-bottom:0"><label>Notes</label>';
+    s+=`<textarea class="di" ${ro?'disabled':''} placeholder="Field conditions, issues..." style="height:60px;resize:none;font-size:14px" data-dt="${dt}" data-job="${jobNum}" data-f="notes" oninput="setProd(this.dataset.dt,this.dataset.job,this.dataset.f,this.value)">${getProd(dt,jobNum,'notes')||''}</textarea></div>`;
+    s+='</div>';
+  });
+  if(!ro)s+='<div class="acts"><button class="btn btn-bl" onclick="saveDraft()"><i class="ti ti-device-floppy"></i> Save production</button></div>';
+  return s;
+}
+
+// Submit production entries to Field Data SharePoint list
+async function submitProductionToSP(wk){
+  const tok=await getTok();if(!tok)return;
+  if(!wk.production)return;
+  const entries=Object.values(wk.production).filter(function(p){return p.activity||p.quantity||p.yardsMovedTotal||p.strId||p.bidItem||p.workType;});
+  if(!entries.length)return;
+  try{
+    const siteR=await fetch('https://graph.microsoft.com/v1.0/sites/valentiheld.sharepoint.com:/sites/FieldOperations',{headers:{Authorization:'Bearer '+tok}});
+    if(!siteR.ok)return;
+    const site=await siteR.json();
+    const listR=await fetch(`https://graph.microsoft.com/v1.0/sites/${site.id}/lists?$filter=displayName eq 'Field Data'`,{headers:{Authorization:'Bearer '+tok}});
+    if(!listR.ok)return;
+    const listData=await listR.json();
+    const listId=listData.value[0]?.id;if(!listId)return;
+    for(const p of entries){
+      const totals=getJobTotals(wk,p.date,p.job);
+      const qty=parseFloat(p.quantity||p.yardsMovedTotal||p.areaFinished)||0;
+      const unit=p.unit||(p.yardsMovedTotal?'CY':p.areaFinished?'SY':'LF');
+      const activity=p.activity||p.workType||p.bidItem||'';
+      const cost=parseFloat(p.materialCost||p.totalCost||p.actualCost)||0;
+      const notesParts=[p.notes,p.weather?'Weather: '+p.weather:'',p.pipeSize?'Pipe: '+p.pipeSize:'',p.strId?'STR: '+p.strId:''].filter(Boolean);
+      await fetch(`https://graph.microsoft.com/v1.0/sites/${site.id}/lists/${listId}/items`,{method:'POST',headers:{Authorization:'Bearer '+tok,'Content-Type':'application/json'},body:JSON.stringify({fields:{JobNumber:p.job||'',Phase:p.phase||'',BidItem:p.bidItem||p.activity||'',Activity:activity,Quantity:qty,Unit:unit,HoursWorked:totals.hours,CrewSize:totals.crew,MaterialCost:cost,ForemanName:auth.user?.name||'',EntryDate:p.date,Notes:notesParts.join(' | ')}})});
+    }
+    toast('Production data sent to Field Data.','success');
+  }catch(e){console.error('Production submit error:',e);}
+}
+
+function bw(){return{employees:[],entries:{},equipmentEntries:{},status:'draft',submittedBy:'',submittedAt:'',approvedBy:'',approvedAt:'',comments:'',production:{}};}
 function fw(iso){const d=new Date(iso+'T12:00:00');d.setDate(d.getDate()-6);return'Wk of '+d.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'});}
 function fd(iso){const d=new Date(iso+'T12:00:00');return d.toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'});}
 function fs(iso){const d=new Date(iso+'T12:00:00');return`${d.getMonth()+1}/${d.getDate()}`;}
@@ -497,6 +822,11 @@ function rEntry(){const wk=S.weeks[S.currentWeek];const dates=wd(S.currentWeek);
   if(auth.user){h+=`<div class="syb"><span class="sd ok" style="flex-shrink:0"></span><span style="flex:1;font-size:13px">${auth.user.name}${auth.isAdmin?' <span class="rb adm" style="margin-left:4px">Admin</span>':''}</span><button class="btn btn-sm" onclick="saveDraft()" style="flex-shrink:0;font-size:12px">💾 Save</button><button class="btn btn-sm" onclick="loadSP()" style="flex-shrink:0;font-size:12px">↻ Sync</button></div>`;}
   else{h+=`<div class="syb"><span class="sd off" style="flex-shrink:0"></span><span style="flex:1;font-size:14px">Not signed in</span><button class="btn btn-p btn-sm" onclick="signIn()" style="flex-shrink:0">Sign in</button></div>`;}
   if(ro)h+=`<div class="ib"><i class="ti ti-lock"></i><span>Timesheet is <strong>${wk.status}</strong>. Return to draft to edit.</span></div>`;
+  h+=`<div style="display:flex;gap:0;background:var(--bg2);border-radius:var(--r3);padding:3px;margin-bottom:16px">
+    <button class="btn" style="flex:1;min-height:38px;font-size:14px;font-weight:600;border-radius:9px;border:none;${entryMode==='timecards'?'background:var(--bg);box-shadow:0 1px 3px rgba(0,0,0,.1);color:var(--accent)':'background:transparent;color:var(--text2)'}" onclick="entryMode='timecards';rEntry()">Time Cards</button>
+    <button class="btn" style="flex:1;min-height:38px;font-size:14px;font-weight:600;border-radius:9px;border:none;${entryMode==='production'?'background:var(--bg);box-shadow:0 1px 3px rgba(0,0,0,.1);color:var(--accent)':'background:transparent;color:var(--text2)'}" onclick="entryMode='production';rEntry()">Production</button>
+  </div>`;
+  if(entryMode==='production'){h+=buildProductionView(wk,dates,ro);h+='</div>';document.getElementById('mc').innerHTML=h;return;}
   h+=`<div style="display:flex;align-items:center;gap:10px;margin-bottom:16px"><strong style="font-size:16px;font-weight:700;letter-spacing:-.2px">Crew — ${wk.employees.length}/20</strong><button class="btn btn-sm" style="margin-left:auto" onclick="showEM()" ${ro?'disabled':''}><i class="ti ti-users"></i> Manage crew</button></div>`;
   if(!wk.employees.length){h+=`<div class="nd"><i class="ti ti-users"></i>No crew added.<br>Tap "Manage crew" to get started.</div>`;}
   else{wk.employees.forEach(eid=>{const emp=allEmps().find(e=>e.id===eid);if(!emp)return;
@@ -619,7 +949,7 @@ function rReview(){const wk=S.weeks[S.currentWeek];const dates=wd(S.currentWeek)
     <div class="fr"><label>Submitted by</label><input type="text" id="sb" placeholder="Your name" value="${auth.user?auth.user.name:''}"/></div>
     <div class="fr"><label>Notes (optional)</label><textarea id="sn" placeholder="Job numbers, special instructions..."></textarea></div>
     <div class="fr"><label>Send approval to</label>${S.managers.map((m,i)=>`<label style="display:flex;align-items:center;gap:12px;font-size:15px;margin-top:12px;cursor:pointer"><input type="radio" name="mgr" id="mg-${i}" value="${i}" ${i===0?'checked':''} style="width:22px;height:22px;accent-color:var(--accent)"/> <div>${m.name}<br><span style="font-size:13px;color:var(--text2)">${m.email}</span></div></label>`).join('')}</div>
-    <button class="btn btn-p btn-bl" style="margin-top:8px" onclick="subTS()"><i class="ti ti-send"></i> Submit & notify managers</button></div>`;}
+    <button class="btn btn-p btn-bl" style="margin-top:8px" id="sub-btn" onclick="this.disabled=true;this.textContent='Submitting...';subTS()"><i class="ti ti-send"></i> Submit & notify managers</button></div>`;}
   else{h+=`<div class="ib"><i class="ti ti-info-circle"></i><div>Status: <strong>${wk.status}</strong>${wk.submittedBy?' · '+wk.submittedBy:''}${wk.approvedBy?' · Approved by '+wk.approvedBy:''}<br><button class="btn btn-sm" style="margin-top:10px" onclick="rToDraft()"><i class="ti ti-arrow-back"></i> Return to draft</button> <button class=\"btn btn-sm btn-d\" onclick=\"deleteSubmission()\"><i class=\"ti ti-trash\"></i> Delete</button></div></div>`;}
   h+=`</div>`;document.getElementById('mc').innerHTML=h;
 }
@@ -631,6 +961,7 @@ function subTS(){const wk=S.weeks[S.currentWeek];const by=document.getElementByI
   const tot=Object.values(wk.entries).reduce((s,v)=>s+(parseFloat(v.hours)||0),0);
   mgrs.forEach(m=>{const sub=encodeURIComponent(`Timesheet Approval — ${fw(S.currentWeek)}`);const bod=encodeURIComponent(`Hi ${m.name},\n\nPlease approve the timesheet for ${fw(S.currentWeek)}.\n\nSubmitted by: ${by}\nEmployees: ${wk.employees.length}\nLabor hours: ${tot.toFixed(1)}\nNotes: ${wk.comments||'None'}\n\nOpen the VH Timesheet App to approve or return.\n\nThank you`);window.open(`mailto:${m.email}?subject=${sub}&body=${bod}`);});
   // Push to SharePoint and remove from local drafts
+  submitProductionToSP(wk);
   saveSP().then(()=>{
     // Remove from localStorage drafts
     try{const drafts=JSON.parse(localStorage.getItem('vhts_drafts')||'{}');delete drafts[S.currentWeek];localStorage.setItem('vhts_drafts',JSON.stringify(drafts));}catch(e){}
@@ -692,6 +1023,8 @@ function rSettings(){let h=`<div class="pg"><div class="ph"><h1>Settings</h1></d
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:14px"><input type="text" id="nn" placeholder="Full name" style="padding:11px 14px;font-size:16px;background:var(--bg2);border:0.5px solid var(--border);border-radius:var(--r3);color:var(--text);-webkit-appearance:none;font-family:inherit"/><input type="email" id="ne" placeholder="Email" style="padding:11px 14px;font-size:16px;background:var(--bg2);border:0.5px solid var(--border);border-radius:var(--r3);color:var(--text);-webkit-appearance:none;font-family:inherit"/></div>
       <button class="btn btn-p btn-bl" style="margin-top:10px" onclick="addMgr()"><i class="ti ti-plus"></i> Add manager</button></div>`;
     h+=`<div class="card"><strong style="font-size:16px;font-weight:700;display:block;margin-bottom:14px;letter-spacing:-.2px">Spectrum settings</strong><div class="fr"><label>Company code</label><input type="text" value="${S.settings.companyCode}" oninput="S.settings.companyCode=this.value"/></div><div class="fr" style="margin:0"><label>Batch year prefix</label><input type="text" value="${S.settings.batchPrefix}" oninput="S.settings.batchPrefix=this.value"/></div></div>`;
+    h+=buildPhaseSettingsSection();
+    h+=buildPhotoRecipientsSection();
     h+=buildEmpSection();
   h+='<button class="btn btn-p btn-bl" onclick="saveAllSubmittedSP().then(()=>toast(\'Settings saved.\',\'success\'))" style="margin-bottom:24px"><i class="ti ti-cloud-upload"></i> Save all settings to SharePoint</button>';
   }
@@ -751,6 +1084,43 @@ async function removeFromSP(iso){
     await fetch(`https://graph.microsoft.com/v1.0/sites/${SITE_ID}/drive/root:/${SFN}:/content`,{method:'PUT',headers:{Authorization:'Bearer '+tok,'Content-Type':'application/json'},body:JSON.stringify(data)});
   }catch(e){console.error('removeFromSP:',e);}
 }
+
+function buildPhaseSettingsSection(){
+  let s='<div class="card"><strong style="font-size:16px;font-weight:700;display:block;margin-bottom:6px;letter-spacing:-.2px">Phase labels</strong>';
+  s+='<p style="font-size:14px;color:var(--text2);margin-bottom:14px">Customize the names for phases 450 and 650.</p>';
+  ['450','650'].forEach(function(ph){
+    const cur=(S.phaseLabels&&S.phaseLabels[ph])||PHASE_TEMPLATES[ph].label;
+    s+='<div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">';
+    s+=`<span style="font-size:13px;font-weight:600;color:var(--text2);flex-shrink:0;width:80px">Phase ${ph}</span>`;
+    s+=`<input type="text" class="di" value="${cur}" style="flex:1;padding:10px 12px;font-size:15px" data-ph="${ph}" oninput="if(!S.phaseLabels)S.phaseLabels={};S.phaseLabels[this.dataset.ph]=this.value"/></div>`;
+  });
+  s+='</div>';
+  return s;
+}
+function buildPhotoRecipientsSection(){
+  let s='<div class="card"><strong style="font-size:16px;font-weight:700;display:block;margin-bottom:6px;letter-spacing:-.2px">Ticket photo recipients</strong>';
+  s+='<p style="font-size:14px;color:var(--text2);margin-bottom:14px">These people receive an email when a foreman captures a receiving ticket photo.</p>';
+  const recs=S.photoRecipients||[];
+  if(!recs.length)s+='<p style="font-size:13px;color:var(--text3);text-align:center;padding:8px">No recipients added yet.</p>';
+  recs.forEach(function(email,i){
+    s+='<div style="display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:0.5px solid var(--border)">';
+    s+=`<span style="flex:1;font-size:14px">${email}</span>`;
+    s+=`<button class="btn btn-sm btn-d" onclick="rmPhotoRecipient(${i})"><i class="ti ti-trash"></i></button></div>`;
+  });
+  s+='<div style="display:flex;gap:8px;margin-top:12px">';
+  s+='<input type="email" id="pr-email" placeholder="email@valentiheld.com" style="flex:1;padding:11px 14px;font-size:16px;background:var(--bg2);border:0.5px solid var(--border);border-radius:var(--r3);color:var(--text);-webkit-appearance:none;font-family:inherit"/>';
+  s+='<button class="btn btn-p" onclick="addPhotoRecipient()"><i class="ti ti-plus"></i></button></div>';
+  s+='</div>';
+  return s;
+}
+function addPhotoRecipient(){
+  const e=document.getElementById('pr-email').value.trim().toLowerCase();
+  if(!e||!e.includes('@')){toast('Enter a valid email.','error');return;}
+  if(!S.photoRecipients)S.photoRecipients=[];
+  if(S.photoRecipients.includes(e)){toast('Already added.','error');return;}
+  S.photoRecipients.push(e);rSettings();toast('Recipient added.','success');
+}
+function rmPhotoRecipient(i){S.photoRecipients.splice(i,1);rSettings();}
 
 function buildEmpSection(){
   let s='<div class="card"><strong style="font-size:16px;font-weight:700;display:block;margin-bottom:6px;letter-spacing:-.2px">Employee roster</strong>';
