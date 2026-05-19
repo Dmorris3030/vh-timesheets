@@ -518,9 +518,9 @@ function retWk(iso){const r=prompt('Reason for returning:');if(r===null)return;S
 function vwWk(iso){S.currentWeek=iso;document.getElementById('ws').value=iso;showPage('review');}
 function rExport(){if(!auth.isAdmin){document.getElementById('mc').innerHTML=`<div class="pg"><div class="nd"><i class="ti ti-lock"></i>Admins only.</div></div>`;return;}
   const app=Object.entries(S.weeks).filter(([,w])=>w.status==='approved');
-  let h=`<div class="pg"><div class="ph"><h1>Spectrum CSV Export</h1><p>Company code: <strong>VHI</strong></p></div>`;
+  let h=`<div class="pg"><div class="ph" style="display:flex;align-items:flex-start;justify-content:space-between"><div><h1>Spectrum CSV Export</h1><p>Company code: <strong>VHI</strong></p></div>${app.length>0?'<button class=\"btn btn-sm btn-d\" onclick=\"clearAllExports()\"><i class=\"ti ti-trash\"></i> Clear all</button>':''}</div>`;
   if(!app.length)h+=`<div class="nd"><i class="ti ti-file-x"></i>No approved timesheets yet.</div>`;
-  else{app.forEach(([iso,wk])=>{const tot=Object.values(wk.entries).reduce((s,v)=>s+(parseFloat(v.hours)||0),0);h+=`<div class="card" style="display:flex;align-items:center;gap:12px"><div style="flex:1"><strong style="font-size:15px;font-weight:700;letter-spacing:-.2px">${fw(iso)}</strong><br><span style="font-size:13px;color:var(--text2)">${wk.employees.length} employees · ${tot.toFixed(1)}h · Approved by ${wk.approvedBy}</span></div><button class="btn btn-p btn-sm" onclick="expCSV('${iso}')"><i class="ti ti-download"></i> CSV</button></div>`;});}
+  else{app.forEach(([iso,wk])=>{const tot=Object.values(wk.entries).reduce((s,v)=>s+(parseFloat(v.hours)||0),0);h+=`<div class="card" style="display:flex;align-items:center;gap:12px"><div style="flex:1"><strong style="font-size:15px;font-weight:700;letter-spacing:-.2px">${fw(iso)}</strong><br><span style="font-size:13px;color:var(--text2)">${wk.employees.length} employees · ${tot.toFixed(1)}h · Approved by ${wk.approvedBy}</span></div><button class="btn btn-p btn-sm" onclick="expCSV('${iso}')"><i class="ti ti-download"></i> CSV</button><button class="btn btn-sm btn-d" onclick="clearExport('${iso}')" style="margin-left:4px"><i class="ti ti-trash"></i></button></div></div>`;});}
   h+=`<div class="card" style="background:var(--bg2)"><strong style="font-size:15px;font-weight:700;display:block;margin-bottom:12px">Export settings</strong><div class="fr"><label>Company code</label><input type="text" value="${S.settings.companyCode}" oninput="S.settings.companyCode=this.value"/></div><div class="fr" style="margin:0"><label>Batch year prefix</label><input type="text" value="${S.settings.batchPrefix}" oninput="S.settings.batchPrefix=this.value"/></div></div></div>`;
   document.getElementById('mc').innerHTML=h;
 }
@@ -553,6 +553,20 @@ function rSettings(){let h=`<div class="pg"><div class="ph"><h1>Settings</h1></d
   }
   h+=`</div>`;document.getElementById('mc').innerHTML=h;
 }
+function clearExport(iso){
+  if(!confirm('Remove this export from the list? The timesheet data will be deleted from SharePoint.'))return;
+  delete S.weeks[iso];
+  removeFromSP(iso);
+  render();toast('Export cleared.','success');
+}
+
+function clearAllExports(){
+  if(!confirm('Clear all downloaded exports? This removes all approved timesheets from SharePoint.'))return;
+  const approved=Object.entries(S.weeks).filter(([,w])=>w.status==='approved').map(([iso])=>iso);
+  approved.forEach(iso=>{delete S.weeks[iso];removeFromSP(iso);});
+  render();toast('All exports cleared.','success');
+}
+
 function clearDraft(){
   if(!confirm('Clear all entries for this week? This cannot be undone.'))return;
   const wk=S.weeks[S.currentWeek];
