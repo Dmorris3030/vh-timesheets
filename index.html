@@ -454,28 +454,30 @@ function addJobLine(eid,dt){
   if(!wk.entries[k].jobLines)wk.entries[k].jobLines=getJobLines(wk,eid,dt);
   wk.entries[k].jobLines.push({job:'',phase:'',hours:'',equipment:[]});
   refreshTotal(eid);
-  // Re-render entry page to show new line
-  rEntry();
-  // Restore active day
-  setTimeout(()=>{
-    const ad=adys[eid]||0;
-    const p=document.getElementById('dps-'+eid);if(p)p.style.transform='translateX(-'+ad*100+'%)';
-    document.querySelectorAll('#dts-'+eid+' .dt').forEach((t,i)=>t.classList.toggle('active',i===ad));
-  },10);
+  refreshDayPanel(eid,dt);
 }
 function removeJobLine(eid,dt,idx){
   const wk=S.weeks[S.currentWeek];const k=`${eid}:${dt}`;
   if(!wk.entries[k]||!wk.entries[k].jobLines)return;
   wk.entries[k].jobLines.splice(idx,1);
-  if(wk.entries[k].jobLines.length===0)wk.entries[k].jobLines=[{job:'',phase:'',hours:''}];
+  if(wk.entries[k].jobLines.length===0)wk.entries[k].jobLines=[{job:'',phase:'',hours:'',equipment:[]}];
   const total=wk.entries[k].jobLines.reduce((s,l)=>s+(parseFloat(l.hours)||0),0);
   wk.entries[k].hours=total>0?String(total):'';
-  refreshTotal(eid);rEntry();
-  setTimeout(()=>{
-    const ad=adys[eid]||0;
-    const p=document.getElementById('dps-'+eid);if(p)p.style.transform='translateX(-'+ad*100+'%)';
-    document.querySelectorAll('#dts-'+eid+' .dt').forEach((t,i)=>t.classList.toggle('active',i===ad));
-  },10);
+  refreshTotal(eid);
+  refreshDayPanel(eid,dt);
+}
+function refreshDayPanel(eid,dt){
+  const wk=S.weeks[S.currentWeek];const ro=wk.status!=='draft';
+  const eqs=(wk.equipmentEntries&&wk.equipmentEntries[`${eid}:${dt}`])||[];
+  const he=eqs.length>0;
+  const dates=wd(S.currentWeek);const di=dates.indexOf(dt);if(di<0)return;
+  const container=document.getElementById('dps-'+eid);if(!container)return;
+  const panels=container.querySelectorAll('.dp');
+  if(panels[di]){
+    const tmp=document.createElement('div');
+    tmp.innerHTML=buildDayPanel(eid,dt,wk,ro,eqs,he);
+    panels[di].replaceWith(tmp.firstChild);
+  }
 }
 function se(eid,dt,f,v){const wk=S.weeks[S.currentWeek];const k=`${eid}:${dt}`;if(!wk.entries[k])wk.entries[k]={};if(v===''||v===null)delete wk.entries[k][f];else wk.entries[k][f]=v;}
 function ct(wk,eid){const dates=wd(S.currentWeek);let l=0,e=0;dates.forEach(dt=>{const lines=getJobLines(wk,eid,dt);lines.forEach(ln=>{l+=parseFloat(ln.hours)||0;(ln.equipment||[]).forEach(x=>e+=parseFloat(x.hours)||0);});// also count legacy day-level equipment
