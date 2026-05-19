@@ -359,10 +359,10 @@ async function loadSP(){
         const managerEmail=(parts[2]||'').toLowerCase();
         const isMySubmission=foremanEmail===myEmail;
         const isForMe=managerEmail===myEmail;
-        if(auth.isAdmin){
-          // Admins see all (for export)
-          if(!S.weeks[iso]||wk.status==='approved')S.weeks[iso]=wk;
-        } else if(isForMe){
+        if(auth.isAdmin||isForMe){
+          // Admins and assigned managers see all non-draft submissions
+          S.weeks[iso]=wk;
+        } else if(false){  // placeholder
           // Manager sees weeks assigned to them
           S.weeks[iso]=wk;
         } else if(isMySubmission){
