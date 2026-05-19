@@ -313,16 +313,24 @@ function saveDraft(){
 async function saveSP(){
   const tok=await getTok();if(!tok){toast('Sign in to sync.','error');return;}setSS('busy');
   try{
-    // Build submissions object - keyed by weekIso:foremanEmail:managerEmail
-    const subs={};
+    // READ existing SP data first so we don't overwrite other foremen's submissions
+    let existing={submissions:{},managers:S.managers,adminEmails:S.adminEmails,settings:S.settings,customEmployees:S.customEmployees||[]};
+    const rGet=await fetch(`https://graph.microsoft.com/v1.0/sites/${SITE_ID}/drive/root:/${SFN}:/content`,{headers:{Authorization:'Bearer '+tok}});
+    if(rGet.ok){try{const d=await rGet.json();if(d.submissions)existing.submissions=d.submissions;}catch(e){}}
+    // Add/update only THIS user's non-draft weeks
     Object.entries(S.weeks).forEach(([iso,wk])=>{
       if(wk.status!=='draft'){
         const key=iso+':'+(auth.user?.email||'unknown')+':'+(wk.assignedManager||'');
-        subs[key]=wk;
+        existing.submissions[key]=wk;
       }
     });
-    const payload=JSON.stringify({submissions:subs,managers:S.managers,adminEmails:S.adminEmails,settings:S.settings,customEmployees:S.customEmployees||[],savedAt:new Date().toISOString()});
-    const r=await fetch(`https://graph.microsoft.com/v1.0/sites/${SITE_ID}/drive/root:/${SFN}:/content`,{method:'PUT',headers:{Authorization:'Bearer '+tok,'Content-Type':'application/json'},body:payload});
+    // Preserve settings/managers/admins from submitting user only if they're admin
+    if(S.adminEmails.includes((auth.user?.email||'').toLowerCase())){
+      existing.managers=S.managers;existing.adminEmails=S.adminEmails;
+      existing.settings=S.settings;existing.customEmployees=S.customEmployees||[];
+    }
+    existing.savedAt=new Date().toISOString();
+    const r=await fetch(`https://graph.microsoft.com/v1.0/sites/${SITE_ID}/drive/root:/${SFN}:/content`,{method:'PUT',headers:{Authorization:'Bearer '+tok,'Content-Type':'application/json'},body:JSON.stringify(existing)});
     if(!r.ok)throw new Error(await r.text());setSS('ok');toast('Submitted.','success');
   }catch(e){setSS('err');toast('Sync failed: '+e.message,'error');}
 }
@@ -518,7 +526,7 @@ function expCSV(iso){const wk=S.weeks[iso];const dates=wd(iso);const bc=S.settin
   wk.employees.forEach(eid=>{const emp=allEmps().find(e=>e.id===eid);if(!emp)return;
     dates.forEach(dt=>{const en=wk.entries[`${eid}:${dt}`]||{};const lh=parseFloat(en.hours)||0;const job=en.job||'';const ph=en.phase||'';const eq=wk.equipmentEntries[`${eid}:${dt}`]||[];const d=new Date(dt+'T12:00:00');const ds=`${d.getMonth()+1}/${d.getDate()}/${d.getFullYear()}`;const ct=emp.dept==='FLD'?'L':'';
       if(lh>0)rows.push(`${bc},${emp.sc||emp.id},${emp.dept},R,${lh},${job},${ph},${ct},${ds},,,,,,,,,,,,${S.settings.companyCode},,,,,,,,,,`);
-      eq.forEach(x=>{if(x.hours>0)rows.push(`${bc},${emp.sc||emp.id},${emp.dept},ER,${x.hours},${job},${ph},${ct},${ds},,,,,,,,,,${x.number},${x.hours},,${S.settings.companyCode},,,,,,,,,,`);});
+      eq.forEach(x=>{if(x.hours>0)rows.push(`${bc},${emp.sc||emp.id},${emp.dept},ER,${x.hours},${job},${ph},${ct},${ds},,,,,,,,,${x.number},${x.hours},,${S.settings.companyCode},,,,,,,,,,`);});
     });});
   const blob=new Blob([rows.join('\n')],{type:'text/csv'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=`time_cards_${iso}.csv`;a.click();toast('Downloaded!','success');
 }
