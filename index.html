@@ -738,16 +738,16 @@ async function submitProductionToSP(wk){
       const cost=parseFloat(p.materialCost||p.totalCost||p.actualCost)||0;
       const notesParts=[p.notes,p.weather?'Weather: '+p.weather:'',p.pipeSize?'Pipe: '+p.pipeSize:'',p.strId?'STR: '+p.strId:''].filter(Boolean);
       await fetch(`https://graph.microsoft.com/v1.0/sites/${site.id}/lists/${listId}/items`,{method:'POST',headers:{Authorization:'Bearer '+tok,'Content-Type':'application/json'},body:JSON.stringify({fields:{
-          'Job_x0020_number':p.job||'',
+          Jobnumber:p.job||'',
           Phase:p.phase||'',
-          'Bid_x0020_Task':p.bidItem||p.workType||p.activity||'',
+          BidItem:p.bidItem||p.workType||p.activity||'',
           'Yardage_x002f_production':qty,
           Unit:unit,
           Foreman:auth.user?.name||'',
           Date:p.date,
-          'Bid_x0020_Cost':parseFloat(p.bidCost||0)||0,
-          'Actual_x0020_Cost':parseFloat(p.actualCost||0)||0,
-          'Total_x0020_Cost':parseFloat(p.totalCost||0)||0,
+          BidCost:parseFloat(p.bidCost||0)||0,
+          ActualCost:parseFloat(p.actualCost||0)||0,
+          TotalCost:parseFloat(p.totalCost||0)||0,
           Equipment:p.strId||'',
           EquipmentHours:getJobEquipHours(wk,p.date,p.job),
           'Pipe_x0020_Size':p.pipeSize||'',
@@ -759,8 +759,8 @@ async function submitProductionToSP(wk){
           'Labor_x0020_Hours':totals.hours,
           'Crew_x0020_Size':totals.crew,
           'Production_x0020_Hours':parseFloat(p.productionHours||0)||0,
-          'Bid_x0020_Cost_x0020_Per_x0020_Yard':parseFloat(p.bidCostPerYard||0)||0,
-          'Actual_x0020_Cost_x0020_Per_x0020_Yard':parseFloat(p.actualCostPerYard||0)||0,
+          'Bid_x0020_Cost_x0020_Per_x0020_Y':parseFloat(p.bidCostPerYard||0)||0,
+          'Actual_x0020_Cost_x0020_Per_x002':parseFloat(p.actualCostPerYard||0)||0,
           Notes:notesParts.join(' | ')
         }})});
     }
