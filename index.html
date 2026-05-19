@@ -464,7 +464,6 @@ function saveDraft(){
 
 // Save settings + submitted weeks to SharePoint (shared)
 async function saveSP(){
-  if(!isOnline){saveDraft();pendingSave=true;toast('Saved locally — will sync when online.','success');return;}
   const tok=await getTok();if(!tok){toast('Sign in to sync.','error');return;}setSS('busy');
   try{
     await withRetry(async()=>{
