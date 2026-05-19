@@ -468,16 +468,26 @@ function removeJobLine(eid,dt,idx){
 }
 function refreshDayPanel(eid,dt){
   const wk=S.weeks[S.currentWeek];const ro=wk.status!=='draft';
-  const eqs=(wk.equipmentEntries&&wk.equipmentEntries[`${eid}:${dt}`])||[];
-  const he=eqs.length>0;
-  const dates=wd(S.currentWeek);const di=dates.indexOf(dt);if(di<0)return;
+  const dates=wd(S.currentWeek);
   const container=document.getElementById('dps-'+eid);if(!container)return;
-  const panels=container.querySelectorAll('.dp');
-  if(panels[di]){
-    const tmp=document.createElement('div');
-    tmp.innerHTML=buildDayPanel(eid,dt,wk,ro,eqs,he);
-    panels[di].replaceWith(tmp.firstChild);
-  }
+  // Save current active day position
+  const currentTransform=container.style.transform;
+  // Rebuild all panels for this employee (preserves all days)
+  container.innerHTML=dates.map(function(d){
+    const eq=(wk.equipmentEntries&&wk.equipmentEntries[`${eid}:${d}`])||[];
+    return buildDayPanel(eid,d,wk,ro,eq,eq.length>0);
+  }).join('');
+  // Restore active day position
+  container.style.transform=currentTransform;
+  // Update day tab indicators
+  const dhd=dates.map(function(d){
+    const en=wk.entries[`${eid}:${d}`]||{};
+    const jls=getJobLines(wk,eid,d);
+    return jls.some(function(l){return l.job||l.hours||l.phase||(l.equipment&&l.equipment.length>0);});
+  });
+  document.querySelectorAll('#dts-'+eid+' .dt').forEach(function(tab,i){
+    tab.classList.toggle('hd',!!dhd[i]);
+  });
 }
 function se(eid,dt,f,v){const wk=S.weeks[S.currentWeek];const k=`${eid}:${dt}`;if(!wk.entries[k])wk.entries[k]={};if(v===''||v===null)delete wk.entries[k][f];else wk.entries[k][f]=v;}
 function ct(wk,eid){const dates=wd(S.currentWeek);let l=0,e=0;dates.forEach(dt=>{const lines=getJobLines(wk,eid,dt);lines.forEach(ln=>{l+=parseFloat(ln.hours)||0;(ln.equipment||[]).forEach(x=>e+=parseFloat(x.hours)||0);});// also count legacy day-level equipment
