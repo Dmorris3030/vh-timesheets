@@ -380,7 +380,8 @@ async function loadSP(){
             S.weeks[iso]=wk;
             restoredDrafts[iso]=wk;
             toast('A timesheet was returned for your review.','error');
-          } else if(!S.weeks[iso]){
+          } else {
+            // Always update from SP so foreman sees latest status (submitted→approved)
             S.weeks[iso]=wk;
           }
         }
@@ -419,7 +420,7 @@ function initWeeks(){const sel=document.getElementById('ws');if(!sel)return;
   if(!S.currentWeek){const dt=new Date();dt.setDate(dt.getDate()+(6-dt.getDay()));S.currentWeek=dt.toISOString().split('T')[0];}sel.value=S.currentWeek;
 }
 function changeWeek(w){S.currentWeek=w;if(!S.weeks[w])S.weeks[w]=bw();adys={};render();updBadge();}
-function showPage(p){if(p==='export'&&!auth.isAdmin){toast('Admins only.','error');return;}cp=p;document.querySelectorAll('.nb[id^=nav-]').forEach(b=>b.classList.remove('active'));const nb=document.getElementById('nav-'+p);if(nb)nb.classList.add('active');if(p==='approval'){loadSP().then(()=>render());}else{render();}}
+function showPage(p){if(p==='export'&&!auth.isAdmin){toast('Admins only.','error');return;}cp=p;document.querySelectorAll('.nb[id^=nav-]').forEach(b=>b.classList.remove('active'));const nb=document.getElementById('nav-'+p);if(nb)nb.classList.add('active');if(p==='approval'||p==='review'){loadSP().then(()=>render());}else{render();}}
 function render(){const wk=S.weeks[S.currentWeek];const ts=document.getElementById('ts');
   if(ts&&wk)ts.innerHTML=`<span class="sb sb-${wk.status.slice(0,2)}" style="font-size:11px;padding:3px 10px">${wk.status.charAt(0).toUpperCase()+wk.status.slice(1)}</span>`;
   updNav();if(cp==='entry')rEntry();else if(cp==='review')rReview();else if(cp==='approval')rApproval();else if(cp==='export')rExport();else if(cp==='settings')rSettings();
