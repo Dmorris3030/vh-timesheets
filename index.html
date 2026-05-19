@@ -430,8 +430,54 @@ function render(){const wk=S.weeks[S.currentWeek];const ts=document.getElementBy
   updNav();if(cp==='entry')rEntry();else if(cp==='review')rReview();else if(cp==='approval')rApproval();else if(cp==='export')rExport();else if(cp==='settings')rSettings();
 }
 function ge(wk,eid,dt,f){return(wk.entries[`${eid}:${dt}`]||{})[f]||'';}
+function getJobLines(wk,eid,dt){
+  const e=wk.entries[`${eid}:${dt}`]||{};
+  if(e.jobLines&&e.jobLines.length>0)return e.jobLines;
+  // backwards compat: convert flat job/phase/hours to jobLines
+  if(e.job||e.hours)return [{job:e.job||'',phase:e.phase||'',hours:e.hours||''}];
+  return [{job:'',phase:'',hours:''}];
+}
+function setJobLine(eid,dt,idx,field,val){
+  const wk=S.weeks[S.currentWeek];const k=`${eid}:${dt}`;
+  if(!wk.entries[k])wk.entries[k]={};
+  if(!wk.entries[k].jobLines)wk.entries[k].jobLines=getJobLines(wk,eid,dt);
+  if(!wk.entries[k].jobLines[idx])wk.entries[k].jobLines[idx]={job:'',phase:'',hours:''};
+  wk.entries[k].jobLines[idx][field]=val;
+  // keep legacy fields in sync for total calc
+  const total=wk.entries[k].jobLines.reduce((s,l)=>s+(parseFloat(l.hours)||0),0);
+  wk.entries[k].hours=total>0?String(total):'';
+}
+function addJobLine(eid,dt){
+  const wk=S.weeks[S.currentWeek];const k=`${eid}:${dt}`;
+  if(!wk.entries[k])wk.entries[k]={};
+  if(!wk.entries[k].jobLines)wk.entries[k].jobLines=getJobLines(wk,eid,dt);
+  wk.entries[k].jobLines.push({job:'',phase:'',hours:''});
+  refreshTotal(eid);
+  // Re-render entry page to show new line
+  rEntry();
+  // Restore active day
+  setTimeout(()=>{
+    const ad=adys[eid]||0;
+    const p=document.getElementById('dps-'+eid);if(p)p.style.transform='translateX(-'+ad*100+'%)';
+    document.querySelectorAll('#dts-'+eid+' .dt').forEach((t,i)=>t.classList.toggle('active',i===ad));
+  },10);
+}
+function removeJobLine(eid,dt,idx){
+  const wk=S.weeks[S.currentWeek];const k=`${eid}:${dt}`;
+  if(!wk.entries[k]||!wk.entries[k].jobLines)return;
+  wk.entries[k].jobLines.splice(idx,1);
+  if(wk.entries[k].jobLines.length===0)wk.entries[k].jobLines=[{job:'',phase:'',hours:''}];
+  const total=wk.entries[k].jobLines.reduce((s,l)=>s+(parseFloat(l.hours)||0),0);
+  wk.entries[k].hours=total>0?String(total):'';
+  refreshTotal(eid);rEntry();
+  setTimeout(()=>{
+    const ad=adys[eid]||0;
+    const p=document.getElementById('dps-'+eid);if(p)p.style.transform='translateX(-'+ad*100+'%)';
+    document.querySelectorAll('#dts-'+eid+' .dt').forEach((t,i)=>t.classList.toggle('active',i===ad));
+  },10);
+}
 function se(eid,dt,f,v){const wk=S.weeks[S.currentWeek];const k=`${eid}:${dt}`;if(!wk.entries[k])wk.entries[k]={};if(v===''||v===null)delete wk.entries[k][f];else wk.entries[k][f]=v;}
-function ct(wk,eid){const dates=wd(S.currentWeek);let l=0,e=0;dates.forEach(dt=>{l+=parseFloat(ge(wk,eid,dt,'hours'))||0;(wk.equipmentEntries[`${eid}:${dt}`]||[]).forEach(x=>e+=parseFloat(x.hours)||0);});return{l,e,c:l+e};}
+function ct(wk,eid){const dates=wd(S.currentWeek);let l=0,e=0;dates.forEach(dt=>{const lines=getJobLines(wk,eid,dt);lines.forEach(ln=>l+=parseFloat(ln.hours)||0);(wk.equipmentEntries[`${eid}:${dt}`]||[]).forEach(x=>e+=parseFloat(x.hours)||0);});return{l,e,c:l+e};}
 function rEntry(){const wk=S.weeks[S.currentWeek];const dates=wd(S.currentWeek);const ro=wk.status!=='draft';
   let h=`<div class="pg">`;
   if(auth.user){h+=`<div class="syb"><span class="sd ok" style="flex-shrink:0"></span><span style="flex:1;font-size:13px">${auth.user.name}${auth.isAdmin?' <span class="rb adm" style="margin-left:4px">Admin</span>':''}</span><button class="btn btn-sm" onclick="saveDraft()" style="flex-shrink:0;font-size:12px">💾 Save</button><button class="btn btn-sm" onclick="loadSP()" style="flex-shrink:0;font-size:12px">↻ Sync</button></div>`;}
@@ -445,17 +491,53 @@ function rEntry(){const wk=S.weeks[S.currentWeek];const dates=wd(S.currentWeek);
     h+=`<div class="eb"><div class="eh"><div class="ehl"><strong>${emp.name}</strong><small>${emp.title} · ${emp.id}</small></div><div class="et"><span class="cm">${c.toFixed(1)}h</span><span class="br">L:${l.toFixed(1)} E:${e.toFixed(1)}</span></div></div>
       <div class="dts" id="dts-${eid}">${DAYS.map((day,di)=>`<div class="dt${di===ad?' active':''}${dhd[di]?' hd':''}" onclick="swDay('${eid}',${di})">${day}<br><span style="font-size:9px;font-weight:500;opacity:.7">${fs(dates[di])}</span></div>`).join('')}</div>
       <div class="dps" id="dps-${eid}" style="transform:translateX(-${ad*100}%)">
-        ${dates.map((dt,di)=>{const job=ge(wk,eid,dt,'job');const ph=ge(wk,eid,dt,'phase');const hrs=ge(wk,eid,dt,'hours');const eqs=wk.equipmentEntries[`${eid}:${dt}`]||[];const he=eqs.length>0;
-          return`<div class="dp">
-            <div class="fg"><span class="fl">Job #</span><input class="di" type="text" inputmode="text" value="${job}" ${ro?'disabled':''} placeholder="Enter job number" oninput="se('${eid}','${dt}','job',this.value)"/></div>
-            <div class="fg"><span class="fl">Phase Code</span><input class="di" type="text" inputmode="text" value="${ph}" ${ro?'disabled':''} placeholder="Enter phase code" oninput="se('${eid}','${dt}','phase',this.value)"/></div>
-            <div class="fg"><span class="fl">Equipment</span><button class="eqb${he?' he':''}" onclick="${ro?'':'showEQ(\''+eid+'\',\''+dt+'\')'}" ${ro?'disabled':''}><div class="eqh"><i class="ti ti-tool"></i> ${he?eqs.length+' piece'+(eqs.length>1?'s':'')+' logged':'+ Add equipment'}</div>${he?eqs.map(x=>`<span class="eqi">#${x.number} — ${x.hours}h</span>`).join(''):''}</button></div>
-            <div class="fg"><span class="fl">Labor Hours</span><input class="di hrs" type="number" inputmode="decimal" min="0" max="24" step="0.5" value="${hrs}" ${ro?'disabled':''} placeholder="0" oninput="se('${eid}','${dt}','hours',this.value);rTot('${eid}')"/></div>
-          </div>`;}).join('')}
+        ${dates.map((dt,di)=>{const eqs=wk.equipmentEntries[`${eid}:${dt}`]||[];const he=eqs.length>0;
+          const jls=getJobLines(wk,eid,dt);
+          return buildDayPanel(eid,dt,wk,ro,eqs,he);
+          }).join('')}
       </div></div>`;});}
   if(!ro&&wk.employees.length)h+=`<div class="acts"><button class="btn btn-sm btn-d" onclick="clearDraft()"><i class="ti ti-trash"></i> Clear</button><button class="btn btn-bl" onclick="saveDraft()"><i class="ti ti-device-floppy"></i> Save</button><button class="btn btn-p btn-bl" onclick="showPage('review')"><i class="ti ti-arrow-right"></i> Review & submit</button></div>`;
   h+=`</div>`;document.getElementById('mc').innerHTML=h;
 }
+function buildDayPanel(eid,dt,wk,ro,eqs,he){
+  const jls=getJobLines(wk,eid,dt);
+  const e=eid,d=dt;
+  let s='<div class="dp">';
+  s+='<div class="fg"><span class="fl">Job lines</span>';
+  jls.forEach(function(ln,ji){
+    const jobVal=ln.job.replace(/"/g,'&quot;');
+    const phVal=ln.phase.replace(/"/g,'&quot;');
+    const hrsVal=ln.hours||'';
+    const dis=ro?'disabled':'';
+    s+='<div style="border:0.5px solid var(--border);border-radius:var(--r3);padding:10px;margin-bottom:8px">';
+    s+='<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">';
+    s+='<div><span class="fl" style="font-size:10px;margin-bottom:4px;display:block">Job #</span>';
+    s+='<input class="di" type="text" inputmode="text" value="'+jobVal+'" '+dis+' placeholder="Job number" style="padding:8px 10px;font-size:15px" data-eid="'+e+'" data-dt="'+d+'" data-ji="'+ji+'" data-f="job" oninput="setJobLine(this.dataset.eid,this.dataset.dt,+this.dataset.ji,this.dataset.f,this.value)"/></div>';
+    s+='<div><span class="fl" style="font-size:10px;margin-bottom:4px;display:block">Phase</span>';
+    s+='<input class="di" type="text" inputmode="text" value="'+phVal+'" '+dis+' placeholder="Phase code" style="padding:8px 10px;font-size:15px" data-eid="'+e+'" data-dt="'+d+'" data-ji="'+ji+'" data-f="phase" oninput="setJobLine(this.dataset.eid,this.dataset.dt,+this.dataset.ji,this.dataset.f,this.value)"/></div>';
+    s+='</div>';
+    s+='<div style="display:flex;align-items:center;gap:8px">';
+    s+='<div style="flex:1"><span class="fl" style="font-size:10px;margin-bottom:4px;display:block">Hours</span>';
+    s+='<input class="di hrs" type="number" inputmode="decimal" min="0" max="24" step="0.5" value="'+hrsVal+'" '+dis+' placeholder="0" data-eid="'+e+'" data-dt="'+d+'" data-ji="'+ji+'" data-f="hours" oninput="setJobLine(this.dataset.eid,this.dataset.dt,+this.dataset.ji,this.dataset.f,this.value);refreshTotal(this.dataset.eid)"/></div>';
+    if(!ro&&jls.length>1){
+      s+='<button class="btn btn-sm btn-d" style="align-self:flex-end;min-height:44px" data-eid="'+e+'" data-dt="'+d+'" data-ji="'+ji+'" onclick="removeJobLine(this.dataset.eid,this.dataset.dt,+this.dataset.ji)"><i class="ti ti-x"></i></button>';
+    }
+    s+='</div></div>';
+  });
+  if(!ro){
+    s+='<button class="btn btn-bl" style="font-size:13px;min-height:40px;margin-top:4px" data-eid="'+e+'" data-dt="'+d+'" onclick="addJobLine(this.dataset.eid,this.dataset.dt)"><i class="ti ti-plus"></i> Add job line</button>';
+  }
+  s+='</div>';
+  // Equipment
+  s+='<div class="fg"><span class="fl">Equipment</span>';
+  s+='<button class="eqb'+(he?' he':'')+'" '+(!ro?'data-eid="'+e+'" data-dt="'+d+'" onclick="showEQ(this.dataset.eid,this.dataset.dt)"':'disabled')+'>';
+  s+='<div class="eqh"><i class="ti ti-tool"></i> '+(he?eqs.length+' piece'+(eqs.length>1?'s':'')+' logged':'+ Add equipment')+'</div>';
+  if(he)eqs.forEach(function(x){s+='<span class="eqi">#'+x.number+' — '+x.hours+'h</span>';});
+  s+='</button></div>';
+  s+='</div>';
+  return s;
+}
+
 function swDay(eid,di){adys[eid]=di;document.querySelectorAll(`#dts-${eid} .dt`).forEach((t,i)=>t.classList.toggle('active',i===di));const p=document.getElementById(`dps-${eid}`);if(p)p.style.transform=`translateX(-${di*100}%)`;}
 function rTot(eid){const wk=S.weeks[S.currentWeek];const{l,e,c}=ct(wk,eid);const bl=document.getElementById(`dps-${eid}`)?.closest('.eb');if(!bl)return;const cm=bl.querySelector('.cm');const br=bl.querySelector('.br');if(cm)cm.textContent=c.toFixed(1)+'h';if(br)br.textContent=`L:${l.toFixed(1)} E:${e.toFixed(1)}`;}
 function showEQ(eid,dt){const wk=S.weeks[S.currentWeek];const k=`${eid}:${dt}`;const eqs=JSON.parse(JSON.stringify(wk.equipmentEntries[k]||[]));if(!eqs.length)eqs.push({number:'',hours:''});const emp=EMPS.find(e=>e.id===eid);eqmc=eqs.length;
@@ -529,9 +611,17 @@ function expCSV(iso){const wk=S.weeks[iso];const dates=wd(iso);const bc=S.settin
   const hdr='Batch Code,Employee Code,Department,Pay Type,Hours,Job,Phase,Cost Type,Date,Message,Pay Rate Level ,Wage Code,Union/Pay Group,Workers Comp,State Tax Code,County Tax,Local Tax,Equipment Code,Equipment Hours,Quantity,Company Code,Pay Rate,Equip cost category,crew number,cost center,work order,site equipment,site component,contract,eq. work order';
   const rows=[hdr];
   wk.employees.forEach(eid=>{const emp=allEmps().find(e=>e.id===eid);if(!emp)return;
-    dates.forEach(dt=>{const en=wk.entries[`${eid}:${dt}`]||{};const lh=parseFloat(en.hours)||0;const job=en.job||'';const ph=en.phase||'';const eq=wk.equipmentEntries[`${eid}:${dt}`]||[];const d=new Date(dt+'T12:00:00');const ds=`${d.getMonth()+1}/${d.getDate()}/${d.getFullYear()}`;const ct=emp.dept==='FLD'?'L':'';
-      if(lh>0)rows.push(`${bc},${emp.sc||emp.id},${emp.dept},R,${lh},${job},${ph},${ct},${ds},,,,,,,,,,,,${S.settings.companyCode},,,,,,,,,,`);
-      eq.forEach(x=>{if(x.hours>0)rows.push(`${bc},${emp.sc||emp.id},${emp.dept},ER,${x.hours},${job},${ph},${ct},${ds},,,,,,,,,${x.number},${x.hours},,${S.settings.companyCode},,,,,,,,,,`);});
+    dates.forEach(dt=>{
+      const en=wk.entries[`${eid}:${dt}`]||{};
+      const jobLines=en.jobLines&&en.jobLines.length>0?en.jobLines:(en.job||en.hours?[{job:en.job||'',phase:en.phase||'',hours:en.hours||''}]:[]);
+      const eq=wk.equipmentEntries[`${eid}:${dt}`]||[];
+      const d=new Date(dt+'T12:00:00');const ds=`${d.getMonth()+1}/${d.getDate()}/${d.getFullYear()}`;const ct=emp.dept==='FLD'?'L':'';
+      jobLines.forEach(ln=>{
+        const lh=parseFloat(ln.hours)||0;const job=ln.job||'';const ph=ln.phase||'';
+        if(lh>0)rows.push(`${bc},${emp.sc||emp.id},${emp.dept},R,${lh},${job},${ph},${ct},${ds},,,,,,,,,,,,${S.settings.companyCode},,,,,,,,,,`);
+      });
+      const firstJob=(jobLines[0]||{}).job||'';const firstPh=(jobLines[0]||{}).phase||'';
+      eq.forEach(x=>{if(x.hours>0)rows.push(`${bc},${emp.sc||emp.id},${emp.dept},ER,${x.hours},${firstJob},${firstPh},${ct},${ds},,,,,,,,,${x.number},${x.hours},,${S.settings.companyCode},,,,,,,,,,`);});
     });});
   const blob=new Blob([rows.join('\n')],{type:'text/csv'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=`time_cards_${iso}.csv`;a.click();toast('Downloaded!','success');
 }
