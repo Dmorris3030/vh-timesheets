@@ -466,27 +466,29 @@ function saveDraft(){
 async function saveSP(){
   const tok=await getTok();if(!tok){toast('Sign in to sync.','error');return;}setSS('busy');
   try{
-    await withRetry(async()=>{
-      let existing={submissions:{},managers:S.managers,adminEmails:S.adminEmails,settings:S.settings,customEmployees:S.customEmployees||[],photoRecipients:S.photoRecipients||[],phaseLabels:S.phaseLabels||{}};
+    let existing={submissions:{},managers:S.managers,adminEmails:S.adminEmails,settings:S.settings,customEmployees:S.customEmployees||[],photoRecipients:S.photoRecipients||[],phaseLabels:S.phaseLabels||{}};
+    try{
       const rGet=await fetch(`https://graph.microsoft.com/v1.0/sites/${SITE_ID}/drive/root:/${SFN}:/content`,{headers:{Authorization:'Bearer '+tok}});
-      if(rGet.ok){try{const d=await rGet.json();if(d.submissions)existing.submissions=d.submissions;}catch(e){}}
-      Object.entries(S.weeks).forEach(([iso,wk])=>{
-        if(wk.status!=='draft'&&validateWeek(wk)){
-          const key=iso+':'+(auth.user?.email||'unknown')+':'+(wk.assignedManager||'');
-          existing.submissions[key]=wk;
-        }
-      });
-      if(S.adminEmails.map(e=>e.toLowerCase()).includes((auth.user?.email||'').toLowerCase())){
-        existing.managers=S.managers;existing.adminEmails=S.adminEmails;existing.settings=S.settings;
-        existing.customEmployees=S.customEmployees||[];existing.photoRecipients=S.photoRecipients||[];existing.phaseLabels=S.phaseLabels||{};
+      if(rGet.ok){const d=await rGet.json();if(d&&d.submissions)existing.submissions=d.submissions;}
+    }catch(e){console.warn('SP read:',e);}
+    // Add this user's submitted weeks — no validateWeek filter, trust the data
+    Object.entries(S.weeks).forEach(([iso,wk])=>{
+      if(wk.status&&wk.status!=='draft'){
+        const key=iso+':'+(auth.user?.email||'unknown')+':'+(wk.assignedManager||'');
+        existing.submissions[key]=wk;
       }
-      existing.savedAt=new Date().toISOString();
-      const r=await fetch(`https://graph.microsoft.com/v1.0/sites/${SITE_ID}/drive/root:/${SFN}:/content`,{method:'PUT',headers:{Authorization:'Bearer '+tok,'Content-Type':'application/json'},body:JSON.stringify(existing)});
-      if(!r.ok)throw new Error(r.status);
-    },'SharePoint save');
+    });
+    if(S.adminEmails.map(e=>e.toLowerCase()).includes((auth.user?.email||'').toLowerCase())){
+      existing.managers=S.managers;existing.adminEmails=S.adminEmails;existing.settings=S.settings;
+      existing.customEmployees=S.customEmployees||[];existing.photoRecipients=S.photoRecipients||[];existing.phaseLabels=S.phaseLabels||{};
+    }
+    existing.savedAt=new Date().toISOString();
+    const r=await fetch(`https://graph.microsoft.com/v1.0/sites/${SITE_ID}/drive/root:/${SFN}:/content`,{method:'PUT',headers:{Authorization:'Bearer '+tok,'Content-Type':'application/json'},body:JSON.stringify(existing)});
+    if(!r.ok){const txt=await r.text();throw new Error(r.status+': '+txt.slice(0,100));}
     setSS('ok');toast('Submitted.','success');
-  }catch(e){setSS('err');saveDraft();pendingSave=true;toast('Sync failed — saved locally.','error');console.error('saveSP:',e);}
+  }catch(e){setSS('err');toast('Sync failed: '+e.message,'error');console.error('saveSP:',e);}
 }
+
 
 async function loadSP(){
   const tok=await getTok();if(!tok)return;setSS('busy');
