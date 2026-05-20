@@ -637,13 +637,14 @@ function buildProductionView(wk,dates,ro){
   const suggestions=getJobSuggestions(wk,dt);
 
   // Phase tabs
-  s+='<div style="display:flex;gap:6px;margin-bottom:14px;overflow-x:auto;scrollbar-width:none">';
+  s+='<div style="display:flex;gap:4px;margin-bottom:14px;overflow-x:auto;scrollbar-width:none;-webkit-overflow-scrolling:touch;padding-bottom:2px">';
   PROD_PHASES.forEach(function(ph,pi){
     const label=(S.phaseLabels&&S.phaseLabels[ph])||PHASE_TEMPLATES[ph].label;
     const active=pi===adPhase;
     const count=prodEntries(wk).filter(function(e){return e.date===dt&&e.phase===ph;}).length;
-    s+='<button data-pi="'+pi+'" onclick="adys[\'_prod_phase\']=+this.dataset.pi;rEntry()" style="flex-shrink:0;padding:7px 14px;border-radius:20px;border:0.5px solid '+(active?'var(--accent)':'var(--border)')+';background:'+(active?'var(--accent)':'var(--bg2)')+';color:'+(active?'#fff':'var(--text2)')+';font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap">';
-    s+=ph+' &mdash; '+label+(count>0?' ('+count+')':'')+' </button>';
+    s+='<button data-pi="'+pi+'" onclick="adys[\'_prod_phase\']=+this.dataset.pi;rEntry()" style="flex-shrink:0;padding:6px 10px;border-radius:16px;border:0.5px solid '+(active?'var(--accent)':'var(--border)')+';background:'+(active?'var(--accent)':'var(--bg2)')+';color:'+(active?'#fff':'var(--text2)')+';font-size:11px;font-weight:600;cursor:pointer;white-space:nowrap">';
+    const shortLabel={'300':'Earthwork','310':'Fine Grade','400':'Storm','500':'Sanitary','600':'Watermain'};
+    s+=ph+' '+( shortLabel[ph]||label)+(count>0?' ('+count+')':'')+' </button>';
   });
   s+='</div>';
 
