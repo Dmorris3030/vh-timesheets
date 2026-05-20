@@ -808,9 +808,14 @@ function setJobLine(eid,dt,idx,field,val){
   const wk=S.weeks[S.currentWeek];const k=`${eid}:${dt}`;
   if(!wk.entries[k])wk.entries[k]={};
   if(!wk.entries[k].jobLines)wk.entries[k].jobLines=getJobLines(wk,eid,dt);
-  if(!wk.entries[k].jobLines[idx])wk.entries[k].jobLines[idx]={job:'',phase:'',hours:'',equipment:[]};
+  if(!wk.entries[k].jobLines[idx])wk.entries[k].jobLines[idx]={job:'',phase:'',startTime:'',stopTime:'',lunch:'',hours:'',equipment:[]};
   if(!wk.entries[k].jobLines[idx].equipment)wk.entries[k].jobLines[idx].equipment=[];
   wk.entries[k].jobLines[idx][field]=val;
+  // Recalculate hours from start/stop/lunch for each line
+  wk.entries[k].jobLines.forEach(function(ln){
+    const c=calcJobHours(ln);
+    ln.hours=c.total>0?String(c.total):'';
+  });
   const total=wk.entries[k].jobLines.reduce((s,l)=>s+(parseFloat(l.hours)||0),0);
   wk.entries[k].hours=total>0?String(total):'';
 }
@@ -884,6 +889,20 @@ function rEntry(){const wk=S.weeks[S.currentWeek];const dates=wd(S.currentWeek);
   if(!ro&&wk.employees.length)h+=`<div class="acts"><button class="btn btn-sm btn-d" onclick="clearDraft()"><i class="ti ti-trash"></i> Clear</button><button class="btn btn-bl" onclick="saveDraft()"><i class="ti ti-device-floppy"></i> Save</button><button class="btn btn-p btn-bl" onclick="showPage('review')"><i class="ti ti-arrow-right"></i> Review & submit</button></div>`;
   h+=`</div>`;document.getElementById('mc').innerHTML=h;
 }
+function calcJobHours(ln){
+  // Total = stop - start - lunch, then labor = total - equipment hours
+  const start=ln.startTime||'';const stop=ln.stopTime||'';
+  if(!start||!stop)return{total:parseFloat(ln.hours)||0,labor:parseFloat(ln.hours)||0,equip:0};
+  const toMin=t=>{const[h,m]=t.split(':').map(Number);return h*60+(m||0);};
+  let mins=toMin(stop)-toMin(start);
+  if(mins<0)mins+=1440; // crosses midnight
+  const lunch=parseFloat(ln.lunch)||0;
+  mins=Math.max(0,mins-lunch*60);
+  const total=Math.round(mins/60*4)/4; // round to nearest 0.25
+  const equipHrs=(ln.equipment||[]).reduce((s,x)=>s+(parseFloat(x.hours)||0),0);
+  const labor=Math.max(0,Math.round((total-equipHrs)*4)/4);
+  return{total,labor,equip:equipHrs};
+}
 function buildDayPanel(eid,dt,wk,ro,eqs,he){
   const jls=getJobLines(wk,eid,dt);
   const e=eid,d=dt;
@@ -892,29 +911,46 @@ function buildDayPanel(eid,dt,wk,ro,eqs,he){
   jls.forEach(function(ln,ji){
     const jobVal=(ln.job||'').replace(/"/g,'&quot;');
     const phVal=(ln.phase||'').replace(/"/g,'&quot;');
-    const hrsVal=ln.hours||'';
     const dis=ro?'disabled':'';
     const lineEq=ln.equipment||[];
     const hasEq=lineEq.length>0;
+    const calc=calcJobHours(ln);
+    const hasTime=ln.startTime&&ln.stopTime;
     s+='<div style="border:0.5px solid var(--border);border-radius:var(--r3);padding:10px;margin-bottom:8px">';
-    // Job # and Phase
+    // Job # and Phase row
     s+='<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">';
     s+='<div><span class="fl" style="font-size:10px;margin-bottom:4px;display:block">Job #</span>';
     s+='<input class="di" type="text" inputmode="text" value="'+jobVal+'" '+dis+' placeholder="Job number" style="padding:8px 10px;font-size:15px" data-eid="'+e+'" data-dt="'+d+'" data-ji="'+ji+'" data-f="job" oninput="setJobLine(this.dataset.eid,this.dataset.dt,+this.dataset.ji,this.dataset.f,this.value)"/></div>';
     s+='<div><span class="fl" style="font-size:10px;margin-bottom:4px;display:block">Phase</span>';
     s+='<input class="di" type="text" inputmode="text" value="'+phVal+'" '+dis+' placeholder="Phase code" style="padding:8px 10px;font-size:15px" data-eid="'+e+'" data-dt="'+d+'" data-ji="'+ji+'" data-f="phase" oninput="setJobLine(this.dataset.eid,this.dataset.dt,+this.dataset.ji,this.dataset.f,this.value)"/></div>';
     s+='</div>';
-    // Labor Hours + Equipment + Remove button on same row
-    s+='<div style="display:grid;grid-template-columns:80px 1fr auto;gap:8px;align-items:flex-end">';
-    s+='<div><span class="fl" style="font-size:10px;margin-bottom:4px;display:block">Hours</span>';
-    s+='<input class="di hrs" type="number" inputmode="decimal" min="0" max="24" step="0.5" value="'+hrsVal+'" '+dis+' placeholder="0" style="font-size:20px;font-weight:700;text-align:center;padding:10px 4px" data-eid="'+e+'" data-dt="'+d+'" data-ji="'+ji+'" data-f="hours" oninput="setJobLine(this.dataset.eid,this.dataset.dt,+this.dataset.ji,this.dataset.f,this.value);rTot(this.dataset.eid)"/></div>';
-    // Equipment button for this job line
-    s+='<div><span class="fl" style="font-size:10px;margin-bottom:4px;display:block">Equipment</span>';
-    s+='<button class="eqb'+(hasEq?' he':'')+'" style="width:100%;min-height:44px" '+dis+' data-eid="'+e+'" data-dt="'+d+'" data-ji="'+ji+'" onclick="showEQLine(this.dataset.eid,this.dataset.dt,+this.dataset.ji)">';
+    // Start / Stop / Lunch row
+    s+='<div style="display:grid;grid-template-columns:1fr 1fr 80px;gap:8px;margin-bottom:8px">';
+    s+='<div><span class="fl" style="font-size:10px;margin-bottom:4px;display:block">Start</span>';
+    s+='<input class="di" type="time" value="'+(ln.startTime||'')+'" '+dis+' style="padding:8px 10px;font-size:15px" data-eid="'+e+'" data-dt="'+d+'" data-ji="'+ji+'" data-f="startTime" onchange="setJobLine(this.dataset.eid,this.dataset.dt,+this.dataset.ji,this.dataset.f,this.value);refreshDayPanel(this.dataset.eid,this.dataset.dt)"/></div>';
+    s+='<div><span class="fl" style="font-size:10px;margin-bottom:4px;display:block">Stop</span>';
+    s+='<input class="di" type="time" value="'+(ln.stopTime||'')+'" '+dis+' style="padding:8px 10px;font-size:15px" data-eid="'+e+'" data-dt="'+d+'" data-ji="'+ji+'" data-f="stopTime" onchange="setJobLine(this.dataset.eid,this.dataset.dt,+this.dataset.ji,this.dataset.f,this.value);refreshDayPanel(this.dataset.eid,this.dataset.dt)"/></div>';
+    s+='<div><span class="fl" style="font-size:10px;margin-bottom:4px;display:block">Lunch (hrs)</span>';
+    s+='<input class="di" type="number" inputmode="decimal" step="0.25" min="0" max="2" value="'+(ln.lunch||'')+'" '+dis+' placeholder="0" style="font-size:15px;padding:8px 4px;text-align:center" data-eid="'+e+'" data-dt="'+d+'" data-ji="'+ji+'" data-f="lunch" oninput="setJobLine(this.dataset.eid,this.dataset.dt,+this.dataset.ji,this.dataset.f,this.value);refreshDayPanel(this.dataset.eid,this.dataset.dt)"/></div>';
+    s+='</div>';
+    // Hours summary + Equipment button + Remove
+    s+='<div style="display:grid;grid-template-columns:1fr 1fr auto;gap:8px;align-items:flex-end">';
+    // Hours display
+    s+='<div style="background:var(--bg2);border-radius:var(--r3);padding:8px 10px">';
+    if(hasTime){
+      s+='<div style="font-size:10px;color:var(--text2);margin-bottom:2px">Total · Labor · Equip</div>';
+      s+='<div style="font-size:16px;font-weight:700;color:var(--accent)">'+calc.total.toFixed(2)+'h &nbsp;·&nbsp; <span style="color:var(--text)">'+calc.labor.toFixed(2)+'h</span> &nbsp;·&nbsp; <span style="color:var(--text2)">'+calc.equip.toFixed(2)+'h</span></div>';
+    } else {
+      s+='<div style="font-size:10px;color:var(--text2);margin-bottom:2px">Enter start &amp; stop</div>';
+      s+='<div style="font-size:13px;color:var(--text3)">— hrs</div>';
+    }
+    s+='</div>';
+    // Equipment button
+    s+='<div><button class="eqb'+(hasEq?' he':'')+'" style="width:100%;min-height:44px" '+dis+' data-eid="'+e+'" data-dt="'+d+'" data-ji="'+ji+'" onclick="showEQLine(this.dataset.eid,this.dataset.dt,+this.dataset.ji)">';
     s+='<div class="eqh"><i class="ti ti-tool"></i> '+(hasEq?lineEq.length+' equip':'+ Equip')+'</div>';
     lineEq.forEach(function(x){s+='<span class="eqi">#'+x.number+' &mdash; '+x.hours+'h</span>';});
     s+='</button></div>';
-    // Remove button (only if more than 1 line)
+    // Remove button
     if(!ro&&jls.length>1){
       s+='<button class="btn btn-sm btn-d" style="align-self:flex-end;min-height:44px" data-eid="'+e+'" data-dt="'+d+'" data-ji="'+ji+'" onclick="removeJobLine(this.dataset.eid,this.dataset.dt,+this.dataset.ji)"><i class="ti ti-trash"></i></button>';
     } else {
@@ -960,6 +996,10 @@ function saveEQLine(eid,dt,ji){
   if(!wk.entries[k].jobLines)wk.entries[k].jobLines=getJobLines(wk,eid,dt);
   if(!wk.entries[k].jobLines[ji])wk.entries[k].jobLines[ji]={job:'',phase:'',hours:'',equipment:[]};
   wk.entries[k].jobLines[ji].equipment=result;
+  // Recalc hours after equipment update
+  wk.entries[k].jobLines.forEach(function(ln){const c=calcJobHours(ln);ln.hours=c.total>0?String(c.total):'';});
+  const total=wk.entries[k].jobLines.reduce((s,l)=>s+(parseFloat(l.hours)||0),0);
+  wk.entries[k].hours=total>0?String(total):'';
   closeM();rEntry();
 }
 function showEQ(eid,dt){const wk=S.weeks[S.currentWeek];const k=`${eid}:${dt}`;const eqs=JSON.parse(JSON.stringify(wk.equipmentEntries[k]||[]));if(!eqs.length)eqs.push({number:'',hours:''});const emp=EMPS.find(e=>e.id===eid);eqmc=eqs.length;
@@ -1041,7 +1081,8 @@ function expCSV(iso){const wk=S.weeks[iso];const dates=wd(iso);const bc=S.settin
       const d=new Date(dt+'T12:00:00');const ds=`${d.getMonth()+1}/${d.getDate()}/${d.getFullYear()}`;const ct=emp.dept==='FLD'?'L':'';
       jobLines.forEach(ln=>{
         const lh=parseFloat(ln.hours)||0;const job=ln.job||'';const ph=ln.phase||'';
-        if(lh>0)rows.push(`${bc},${emp.sc||emp.id},${emp.dept},R,${lh},${job},${ph},${ct},${ds},,,,,,,,,,,,${S.settings.companyCode},,,,,,,,,,`);
+        const calc=calcJobHours(ln);const laborHrs=calc.labor>0?calc.labor:lh;
+        if(laborHrs>0)rows.push(`${bc},${emp.sc||emp.id},${emp.dept},R,${laborHrs},${job},${ph},${ct},${ds},,,,,,,,,,,,${S.settings.companyCode},,,,,,,,,,`);
         // Equipment tied to this job line
         (ln.equipment||[]).forEach(x=>{if(x.hours>0)rows.push(`${bc},${emp.sc||emp.id},${emp.dept},ER,${x.hours},${job},${ph},${ct},${ds},,,,,,,,,${x.number},${x.hours},,${S.settings.companyCode},,,,,,,,,,`);});
       });
