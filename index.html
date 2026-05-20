@@ -556,170 +556,166 @@ async function loadSP(){
   }catch(e){setSS('err');toast('Load failed: '+e.message,'error');}
 }
 
-function getUniqueJobsForDay(wk,dt){
+// ── PRODUCTION V2 ────────────────────────────────────────────────────────────
+const PROD_PHASES = ['300','310','400','500','600'];
+
+function prodEntries(wk){
+  if(!wk.production)wk.production={entries:[]};
+  // migrate old format
+  if(!Array.isArray(wk.production.entries)){
+    const old=wk.production;
+    wk.production={entries:[]};
+    Object.values(old).forEach(function(p){if(p&&p.job)wk.production.entries.push(Object.assign({id:Date.now()+Math.random(),phase:p.phase||'400'},p));});
+  }
+  return wk.production.entries;
+}
+
+function addProdEntry(phase,dt){
+  const wk=S.weeks[S.currentWeek];
+  const entries=prodEntries(wk);
+  entries.push({id:Date.now()+Math.random(),phase:phase,date:dt,job:'',notes:''});
+  rEntry();
+}
+
+function removeProdEntry(id){
+  const wk=S.weeks[S.currentWeek];
+  const entries=prodEntries(wk);
+  const idx=entries.findIndex(function(e){return e.id==id;});
+  if(idx>=0){entries.splice(idx,1);rEntry();}
+}
+
+function setProdField(id,field,val){
+  const wk=S.weeks[S.currentWeek];
+  const entry=prodEntries(wk).find(function(e){return e.id==id;});
+  if(entry)entry[field]=val;
+}
+
+function getJobSuggestions(wk,dt){
   const jobs=new Set();
-  wk.employees.forEach(eid=>{const lines=getJobLines(wk,eid,dt);lines.forEach(ln=>{if(ln.job)jobs.add(ln.job);});});
+  (wk.employees||[]).forEach(function(eid){
+    getJobLines(wk,eid,dt).forEach(function(ln){if(ln.job)jobs.add(ln.job);});
+  });
   return Array.from(jobs);
 }
+
+function buildProdField(f,entry,ro){
+  const val=(entry[f.id]||'').toString().replace(/"/g,'&quot;');
+  const id=entry.id;
+  let s='<div>';
+  s+='<span class="fl" style="font-size:10px;margin-bottom:4px;display:block">'+f.label+'</span>';
+  if(f.type==='weather'){
+    s+='<select class="di" style="font-size:14px;padding:8px 10px" '+(ro?'disabled':'')+' data-id="'+id+'" data-f="'+f.id+'" onchange="setProdField(+this.dataset.id,this.dataset.f,this.value)">';
+    s+='<option value="">Select...</option>';
+    WEATHER_OPTIONS.forEach(function(w){s+='<option value="'+w+'" '+(entry[f.id]===w?'selected':'')+'>'+w+'</option>';});
+    s+='</select>';
+  }else{
+    s+='<input type="'+(f.type==='text'?'text':'number')+'" class="di" '+(f.type!=='text'?'inputmode="decimal"':'')+' value="'+val+'" '+(ro?'disabled':'')+' placeholder="'+f.label+'" style="font-size:15px;padding:8px 10px" data-id="'+id+'" data-f="'+f.id+'" oninput="setProdField(+this.dataset.id,this.dataset.f,this.value)"/>';
+  }
+  s+='</div>';
+  return s;
+}
+
+function buildProductionView(wk,dates,ro){
+  const adDay=adys['_prod_day']||0;
+  const adPhase=adys['_prod_phase']||0;
+  let s='';
+
+  // Day tabs
+  s+='<div style="display:flex;border-bottom:0.5px solid var(--border);overflow-x:auto;-webkit-overflow-scrolling:touch;scrollbar-width:none;margin-bottom:12px">';
+  dates.forEach(function(dt,di){
+    const entries=prodEntries(wk).filter(function(e){return e.date===dt;});
+    const hasData=entries.length>0;
+    const active=di===adDay;
+    s+='<div style="flex-shrink:0;padding:10px 12px;font-size:11px;font-weight:600;cursor:pointer;border-bottom:2px solid '+(active?'var(--accent)':'transparent')+';color:'+(active?'var(--accent)':hasData?'var(--text)':'var(--text3)')+';text-transform:uppercase;letter-spacing:.5px;min-width:48px;text-align:center;line-height:1.3" data-di="'+di+'" onclick="adys[\'_prod_day\']=+this.dataset.di;rEntry()">';
+    s+=DAYS[di]+'<br><span style="font-size:9px;font-weight:500;opacity:.7">'+fs(dt)+'</span>';
+    if(hasData)s+='<span style="display:block;width:6px;height:6px;border-radius:50%;background:var(--accent);margin:2px auto 0"></span>';
+    s+='</div>';
+  });
+  s+='</div>';
+
+  const dt=dates[adDay];
+  const suggestions=getJobSuggestions(wk,dt);
+
+  // Phase tabs
+  s+='<div style="display:flex;gap:6px;margin-bottom:14px;overflow-x:auto;scrollbar-width:none">';
+  PROD_PHASES.forEach(function(ph,pi){
+    const label=(S.phaseLabels&&S.phaseLabels[ph])||PHASE_TEMPLATES[ph].label;
+    const active=pi===adPhase;
+    const count=prodEntries(wk).filter(function(e){return e.date===dt&&e.phase===ph;}).length;
+    s+='<button data-pi="'+pi+'" onclick="adys[\'_prod_phase\']=+this.dataset.pi;rEntry()" style="flex-shrink:0;padding:7px 14px;border-radius:20px;border:0.5px solid '+(active?'var(--accent)':'var(--border)')+';background:'+(active?'var(--accent)':'var(--bg2)')+';color:'+(active?'#fff':'var(--text2)')+';font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap">';
+    s+=ph+' &mdash; '+label+(count>0?' ('+count+')':'')+' </button>';
+  });
+  s+='</div>';
+
+  const phase=PROD_PHASES[adPhase];
+  const template=PHASE_TEMPLATES[phase];
+  const phaseEntries=prodEntries(wk).filter(function(e){return e.date===dt&&e.phase===phase;});
+
+  if(!phaseEntries.length){
+    s+='<div class="nd" style="padding:24px 16px"><i class="ti ti-clipboard"></i>No '+template.label+' reports for this day.<br>';
+    if(!ro)s+='<button class="btn btn-p" style="margin-top:10px" onclick="addProdEntry(''+phase+'',''+dt+'')"><i class="ti ti-plus"></i> Add report</button>';
+    s+='</div>';
+  } else {
+    phaseEntries.forEach(function(entry){
+      s+='<div class="card" style="position:relative">';
+      // Remove button
+      if(!ro)s+='<button onclick="removeProdEntry('+entry.id+')" style="position:absolute;top:10px;right:10px;background:none;border:none;color:var(--text3);font-size:18px;cursor:pointer;padding:4px">✕</button>';
+      // Job # with suggestions
+      s+='<div style="margin-bottom:10px"><span class="fl" style="font-size:10px;margin-bottom:4px;display:block">Job #</span>';
+      s+='<input type="text" class="di" list="job-suggestions-'+entry.id+'" value="'+(entry.job||'')+'" '+(ro?'disabled':'')+' placeholder="Job number" style="font-size:16px;font-weight:600;padding:10px 12px" data-id="'+entry.id+'" data-f="job" oninput="setProdField(+this.dataset.id,this.dataset.f,this.value)"/>';
+      if(suggestions.length){
+        s+='<datalist id="job-suggestions-'+entry.id+'">';
+        suggestions.forEach(function(j){s+='<option value="'+j+'">'+j+'</option>';});
+        s+='</datalist>';
+      }
+      s+='</div>';
+      // Phase fields grid
+      s+='<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px">';
+      (template.fields||[]).forEach(function(f){
+        const span=f.span===2?'grid-column:span 2':'';
+        s+='<div style="'+span+'">'+buildProdField(f,entry,ro)+'</div>';
+      });
+      s+='</div>';
+      // Notes
+      s+='<div><span class="fl" style="font-size:10px;margin-bottom:4px;display:block">Notes</span>';
+      s+='<textarea class="di" '+(ro?'disabled':'')+' placeholder="Field conditions, issues..." style="height:60px;resize:none;font-size:14px" data-id="'+entry.id+'" data-f="notes" oninput="setProdField(+this.dataset.id,this.dataset.f,this.value)">'+(entry.notes||'')+'</textarea></div>';
+      s+='</div>';
+    });
+    if(!ro){
+      s+='<button class="btn btn-bl" onclick="addProdEntry(''+phase+'',''+dt+'')" style="margin-bottom:8px"><i class="ti ti-plus"></i> Add another '+template.label+' report</button>';
+    }
+  }
+
+  if(!ro){
+    s+='<div class="acts"><button class="btn btn-bl" onclick="saveDraft()"><i class="ti ti-device-floppy"></i> Save production</button></div>';
+  }
+  return s;
+}
+
 function getJobTotals(wk,dt,jobNum){
   let hrs=0;const crew=new Set();
-  wk.employees.forEach(eid=>{getJobLines(wk,eid,dt).forEach(ln=>{if(ln.job===jobNum){hrs+=parseFloat(ln.hours)||0;crew.add(eid);}});});
+  (wk.employees||[]).forEach(function(eid){getJobLines(wk,eid,dt).forEach(function(ln){if(ln.job===jobNum){const c=calcJobHours(ln);hrs+=c.labor;crew.add(eid);}});});
   return{hours:hrs,crew:crew.size};
 }
+
 function getJobEquipHours(wk,dt,jobNum){
   let equip=0;
-  wk.employees.forEach(function(eid){
+  (wk.employees||[]).forEach(function(eid){
     getJobLines(wk,eid,dt).forEach(function(ln){
       if(ln.job===jobNum)(ln.equipment||[]).forEach(function(x){equip+=parseFloat(x.hours)||0;});
     });
   });
-
   return equip;
-}
-
-function setProd(dt,jobNum,field,val){
-  const wk=S.weeks[S.currentWeek];if(!wk.production)wk.production={};
-  const k=`${jobNum}:${dt}`;
-  if(!wk.production[k]){
-    // Auto-capture phase from time card when first creating production entry
-    const phase=getPhaseForJob(wk,dt,jobNum);
-    wk.production[k]={job:jobNum,date:dt,phase:phase||''};
-  }
-  wk.production[k][field]=val;
-}
-function getProd(dt,jobNum,field){
-  const wk=S.weeks[S.currentWeek];
-  return((wk.production&&wk.production[`${jobNum}:${dt}`])||{})[field]||'';
-}
-function getPhaseForJob(wk,dt,jobNum){
-  for(const eid of wk.employees){const lines=getJobLines(wk,eid,dt);for(const ln of lines){if(ln.job===jobNum&&ln.phase)return ln.phase;}}
-  return null;
-}
-function getPhaseTemplate(phase){
-  if(!phase)return null;
-  const key=Object.keys(PHASE_TEMPLATES).find(k=>phase.startsWith(k));
-  return key?{key,...PHASE_TEMPLATES[key]}:null;
-}
-function getPhaseLabel(phase){
-  const key=Object.keys(PHASE_TEMPLATES).find(k=>phase&&phase.startsWith(k));
-  if(!key)return phase;
-  return(S.phaseLabels&&S.phaseLabels[key])||PHASE_TEMPLATES[key].label;
-}
-function buildPhaseFields(dt,jobNum,template,ro){
-  const fields=template.fields||[];
-  let s='<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px">';
-  fields.forEach(function(f){
-    const val=(getProd(dt,jobNum,f.id)||'').toString().replace(/"/g,'&quot;');
-    const span=f.span===2?'grid-column:span 2':'';
-    s+=`<div style="${span}"><span class="fl" style="font-size:10px;margin-bottom:4px;display:block">${f.label}</span>`;
-    if(f.type==='weather'){
-      s+=`<select class="di" style="font-size:14px;padding:8px 10px" ${ro?'disabled':''} data-dt="${dt}" data-job="${jobNum}" data-f="${f.id}" onchange="setProd(this.dataset.dt,this.dataset.job,this.dataset.f,this.value)">`;
-      s+=`<option value="">Select...</option>`;
-      WEATHER_OPTIONS.forEach(function(w){s+=`<option value="${w}" ${val===w?'selected':''}>${w}</option>`;});
-      s+='</select>';
-    }else{
-      s+=`<input type="${f.type==='text'?'text':'number'}" class="di" ${f.type!=='text'?'inputmode="decimal"':''} value="${val}" ${ro?'disabled':''} placeholder="${f.label}" style="font-size:15px;padding:8px 10px" data-dt="${dt}" data-job="${jobNum}" data-f="${f.id}" oninput="setProd(this.dataset.dt,this.dataset.job,this.dataset.f,this.value)"/>`;
-    }
-    s+='</div>';
-  });
-  s+='</div>';
-  return s;
-}
-function handlePhoto(input){
-  const dt=input.dataset.dt,jobNum=input.dataset.job;
-  const files=Array.from(input.files);if(!files.length)return;
-  const wk=S.weeks[S.currentWeek];
-  if(!wk.production)wk.production={};
-  const k=`${jobNum}:${dt}`;
-  if(!wk.production[k])wk.production[k]={job:jobNum,date:dt};
-  if(!wk.production[k].photos)wk.production[k].photos=[];
-  let loaded=0;
-  files.forEach(function(file){
-    const reader=new FileReader();
-    reader.onload=function(e){
-      compressPhoto(e.target.result).then(function(compressed){
-        wk.production[k].photos.push({dataUrl:compressed,name:file.name,ts:new Date().toISOString()});
-        loaded++;
-        if(loaded===files.length){rEntry();if(S.photoRecipients&&S.photoRecipients.length)sendPhotoNotification(dt,jobNum,wk.production[k].photos.length);}
-      });
-    };
-    reader.readAsDataURL(file);
-  });
-}
-function removePhoto(dt,jobNum,idx){
-  const wk=S.weeks[S.currentWeek];const k=`${jobNum}:${dt}`;
-  if(wk.production&&wk.production[k]&&wk.production[k].photos){wk.production[k].photos.splice(idx,1);rEntry();}
-}
-async function sendPhotoNotification(dt,jobNum,count){
-  const tok=await getTok();if(!tok)return;
-  if(!S.photoRecipients||!S.photoRecipients.length)return;
-  try{
-    const toList=S.photoRecipients.map(function(e){return{emailAddress:{address:e}};});
-    await fetch('https://graph.microsoft.com/v1.0/me/sendMail',{method:'POST',headers:{Authorization:'Bearer '+tok,'Content-Type':'application/json'},body:JSON.stringify({message:{subject:`Ticket Photo — Job #${jobNum} (${fd(dt)})`,body:{contentType:'Text',content:`Receiving ticket photo added.
-
-Job: ${jobNum}
-Date: ${fd(dt)}
-Photos: ${count}
-By: ${auth.user?.name||'Foreman'}`},toRecipients:toList},saveToSentItems:false})});
-  }catch(e){console.error('Photo email:',e);}
-}
-function buildProductionView(wk,dates,ro){
-  const ad=adys['_prod']||0;
-  let s='';
-  s+='<div style="display:flex;border-bottom:0.5px solid var(--border);overflow-x:auto;-webkit-overflow-scrolling:touch;scrollbar-width:none;margin-bottom:16px">';
-  dates.forEach(function(dt,di){
-    const jobs=getUniqueJobsForDay(wk,dt);
-    const hasData=jobs.some(function(j){return(wk.production||{})[`${j}:${dt}`];});
-    s+=`<div style="flex-shrink:0;padding:10px 12px;font-size:11px;font-weight:600;cursor:pointer;border-bottom:2px solid ${di===ad?'var(--accent)':'transparent'};color:${di===ad?'var(--accent)':hasData?'var(--text)':'var(--text3)'};text-transform:uppercase;letter-spacing:.5px;min-width:48px;text-align:center;line-height:1.3" onclick="adys['_prod']=${di};rEntry()">`;
-    s+=DAYS[di]+'<br><span style="font-size:9px;font-weight:500;opacity:.7">'+fs(dt)+'</span></div>';
-  });
-  s+='</div>';
-  const dt=dates[ad];
-  const jobs=getUniqueJobsForDay(wk,dt);
-  if(!jobs.length){s+='<div class="nd" style="padding:32px 20px"><i class="ti ti-hammer"></i>No jobs for this day.<br><span style="font-size:13px">Add time cards first — jobs appear here automatically.</span></div>';return s;}
-  jobs.forEach(function(jobNum){
-    const totals=getJobTotals(wk,dt,jobNum);
-    const phase=getPhaseForJob(wk,dt,jobNum);
-    const template=getPhaseTemplate(phase);
-    const phaseLabel=phase?getPhaseLabel(phase):null;
-    const photos=((wk.production&&wk.production[`${jobNum}:${dt}`])||{}).photos||[];
-    s+='<div class="card">';
-    s+='<div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:12px">';
-    s+=`<div><strong style="font-size:16px;font-weight:700">Job #${jobNum}</strong>`;
-    if(phaseLabel)s+=` <span style="font-size:12px;background:var(--bg2);border:0.5px solid var(--border);border-radius:20px;padding:2px 10px;color:var(--text2);font-weight:600;margin-left:4px">${phaseLabel}</span>`;
-    s+=`<br><span style="font-size:12px;color:var(--text2)">${totals.crew} crew · ${totals.hours.toFixed(1)}h labor</span></div>`;
-    if(!ro)s+=`<label style="cursor:pointer"><input type="file" accept="image/*" capture="environment" style="display:none" data-dt="${dt}" data-job="${jobNum}" onchange="handlePhoto(this)"/><span class="btn btn-sm"><i class="ti ti-camera"></i>${photos.length>0?' '+photos.length:''}</span></label>`;
-    s+='</div>';
-    if(photos.length>0){
-      s+='<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">';
-      photos.forEach(function(p,pi){
-        s+=`<div style="position:relative"><img src="${p.dataUrl}" style="width:72px;height:72px;object-fit:cover;border-radius:8px;border:0.5px solid var(--border)"/>`;
-        if(!ro)s+=`<button onclick="removePhoto('${dt}','${jobNum}',${pi})" style="position:absolute;top:-6px;right:-6px;background:#ff3b30;color:#fff;border:none;border-radius:50%;width:20px;height:20px;font-size:12px;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0">x</button>`;
-        s+='</div>';
-      });
-      s+='</div>';
-    }
-    if(template){s+=buildPhaseFields(dt,jobNum,template,ro);}
-    else{
-      s+='<div class="fr"><label>Activity / Work Description</label>';
-      s+=`<input type="text" class="di" value="${(getProd(dt,jobNum,'activity')||'').replace(/"/g,'&quot;')}" ${ro?'disabled':''} placeholder="Describe work" data-dt="${dt}" data-job="${jobNum}" data-f="activity" oninput="setProd(this.dataset.dt,this.dataset.job,this.dataset.f,this.value)"/></div>`;
-    }
-    s+='<div class="fr" style="margin-top:8px;margin-bottom:0"><label>Notes</label>';
-    s+=`<textarea class="di" ${ro?'disabled':''} placeholder="Field conditions, issues..." style="height:60px;resize:none;font-size:14px" data-dt="${dt}" data-job="${jobNum}" data-f="notes" oninput="setProd(this.dataset.dt,this.dataset.job,this.dataset.f,this.value)">${getProd(dt,jobNum,'notes')||''}</textarea></div>`;
-    s+='</div>';
-  });
-  if(!ro)s+='<div class="acts"><button class="btn btn-bl" onclick="saveDraft()"><i class="ti ti-device-floppy"></i> Save production</button></div>';
-  return s;
 }
 
 // Submit production entries to Field Data SharePoint list
 async function submitProductionToSP(wk){
   const tok=await getTok();if(!tok)return;
   if(!wk.production)return;
-  const entries=Object.values(wk.production).filter(function(p){
-    // Pass through any entry that has ANY field filled in beyond job/date/photos
-    const keys=Object.keys(p).filter(function(k){return k!=='job'&&k!=='date'&&k!=='photos'&&k!=='phase';});
-    return keys.some(function(k){return p[k]&&String(p[k]).trim()!=='';});
+  const allEntries=prodEntries(wk);
+  const entries=allEntries.filter(function(p){
+    const keys=Object.keys(p).filter(function(k){return k!=='id'&&k!=='job'&&k!=='date'&&k!=='photos'&&k!=='phase';});
+    return p.job||keys.some(function(k){return p[k]&&String(p[k]).trim()!=='';});
   });
   if(!entries.length)return;
   try{
@@ -733,13 +729,14 @@ async function submitProductionToSP(wk){
     for(const p of entries){
       const totals=getJobTotals(wk,p.date,p.job);
       const qty=parseFloat(p.quantity||p.yardsMovedTotal||p.areaFinished)||0;
+      const entryPhase=p.phase||'';
       const unit=p.unit||(p.yardsMovedTotal?'CY':p.areaFinished?'SY':'LF');
       const activity=p.activity||p.workType||p.bidItem||'';
       const cost=parseFloat(p.materialCost||p.totalCost||p.actualCost)||0;
       const notesParts=[p.notes,p.weather?'Weather: '+p.weather:'',p.pipeSize?'Pipe: '+p.pipeSize:'',p.strId?'STR: '+p.strId:''].filter(Boolean);
       await fetch(`https://graph.microsoft.com/v1.0/sites/${site.id}/lists/${listId}/items`,{method:'POST',headers:{Authorization:'Bearer '+tok,'Content-Type':'application/json'},body:JSON.stringify({fields:{
           Jobnumber:p.job||'',
-          Phase:p.phase||'',
+          Phase:entryPhase,
           BidItem:p.bidItem||p.workType||p.activity||'',
           'Yardage_x002f_production':qty,
           Unit:unit,
@@ -854,14 +851,16 @@ function refreshDayPanel(eid,dt){
   const dhd=dates.map(function(d){
     const en=wk.entries[`${eid}:${d}`]||{};
     const jls=getJobLines(wk,eid,d);
-    return jls.some(function(l){return l.job||l.hours||l.phase||(l.equipment&&l.equipment.length>0);});
+    return jls.some(function(l){return l.job||l.hours||l.phase||l.startTime||(l.equipment&&l.equipment.length>0);});
   });
   document.querySelectorAll('#dts-'+eid+' .dt').forEach(function(tab,i){
     tab.classList.toggle('hd',!!dhd[i]);
   });
+  // Update corner totals
+  rTot(eid);
 }
 function se(eid,dt,f,v){const wk=S.weeks[S.currentWeek];const k=`${eid}:${dt}`;if(!wk.entries[k])wk.entries[k]={};if(v===''||v===null)delete wk.entries[k][f];else wk.entries[k][f]=v;}
-function ct(wk,eid){const dates=wd(S.currentWeek);let l=0,e=0;dates.forEach(dt=>{const lines=getJobLines(wk,eid,dt);lines.forEach(ln=>{l+=parseFloat(ln.hours)||0;(ln.equipment||[]).forEach(x=>e+=parseFloat(x.hours)||0);});// also count legacy day-level equipment
+function ct(wk,eid){const dates=wd(S.currentWeek);let l=0,e=0;dates.forEach(dt=>{const lines=getJobLines(wk,eid,dt);lines.forEach(ln=>{const c=calcJobHours(ln);l+=c.labor;e+=c.equip;});// legacy day-level equipment
 (wk.equipmentEntries&&wk.equipmentEntries[`${eid}:${dt}`]||[]).forEach(x=>e+=parseFloat(x.hours)||0);});return{l,e,c:l+e};}
 function rEntry(){const wk=S.weeks[S.currentWeek];const dates=wd(S.currentWeek);const ro=wk.status!=='draft';
   let h=`<div class="pg">`;
