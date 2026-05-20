@@ -653,7 +653,7 @@ function buildProductionView(wk,dates,ro){
 
   if(!phaseEntries.length){
     s+='<div class="nd" style="padding:24px 16px"><i class="ti ti-clipboard"></i>No '+template.label+' reports for this day.<br>';
-    if(!ro)s+='<button class="btn btn-p" style="margin-top:10px" onclick="addProdEntry(''+phase+'',''+dt+'')"><i class="ti ti-plus"></i> Add report</button>';
+    if(!ro)s+='<button class="btn btn-p" style="margin-top:10px" data-ph="'+phase+'" data-dt="'+dt+'" onclick="addProdEntry(this.dataset.ph,this.dataset.dt)"><i class="ti ti-plus"></i> Add report</button>';
     s+='</div>';
   } else {
     phaseEntries.forEach(function(entry){
@@ -682,7 +682,7 @@ function buildProductionView(wk,dates,ro){
       s+='</div>';
     });
     if(!ro){
-      s+='<button class="btn btn-bl" onclick="addProdEntry(''+phase+'',''+dt+'')" style="margin-bottom:8px"><i class="ti ti-plus"></i> Add another '+template.label+' report</button>';
+    s+='<button class="btn btn-bl" data-ph="'+phase+'" data-dt="'+dt+'" onclick="addProdEntry(this.dataset.ph,this.dataset.dt)" style="margin-bottom:8px"><i class="ti ti-plus"></i> Add another '+template.label+' report</button>';
     }
   }
 
