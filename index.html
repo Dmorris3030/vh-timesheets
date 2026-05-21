@@ -766,6 +766,73 @@ async function submitProductionToSP(wk){
   }catch(e){console.error('Production submit error:',e);}
 }
 
+// Persist per-day per-job timesheet hours to SharePoint list 'TimesheetJobLines'
+// so Power BI can join against bid data for bid-vs-actual variance reporting.
+// One row per (employee, date, jobLine). Idempotent on re-submit: deletes the
+// (week, submitter) rows first, then inserts fresh.
+async function submitJobLinesToSP(wk){
+  const tok=await getTok();if(!tok)return;
+  if(!wk||!wk.entries)return;
+  try{
+    const siteR=await fetch('https://graph.microsoft.com/v1.0/sites/valentiheld.sharepoint.com:/sites/FieldOperations',{headers:{Authorization:'Bearer '+tok}});
+    if(!siteR.ok)return;
+    const site=await siteR.json();
+    const listR=await fetch(`https://graph.microsoft.com/v1.0/sites/${site.id}/lists?$filter=displayName eq 'TimesheetJobLines'`,{headers:{Authorization:'Bearer '+tok}});
+    if(!listR.ok)return;
+    const listData=await listR.json();
+    const listId=listData.value[0]?.id;
+    if(!listId){console.warn('TimesheetJobLines list not found on FieldOperations site.');return;}
+
+    const weekIso=S.currentWeek;
+    const submittedBy=auth.user?.email||wk.submittedBy||'unknown';
+    const submittedAt=new Date().toISOString();
+
+    // Idempotency: clear prior rows for this (week, submitter) before inserting
+    try{
+      const filt=encodeURIComponent(`fields/WeekIso eq '${weekIso}' and fields/SubmittedBy eq '${submittedBy}'`);
+      const existR=await fetch(`https://graph.microsoft.com/v1.0/sites/${site.id}/lists/${listId}/items?$filter=${filt}&$top=999`,{headers:{Authorization:'Bearer '+tok,'Prefer':'HonorNonIndexedQueriesWarningMayFailRandomly'}});
+      if(existR.ok){
+        const existData=await existR.json();
+        for(const item of (existData.value||[])){
+          await fetch(`https://graph.microsoft.com/v1.0/sites/${site.id}/lists/${listId}/items/${item.id}`,{method:'DELETE',headers:{Authorization:'Bearer '+tok}});
+        }
+      }
+    }catch(e){console.warn('TimesheetJobLines cleanup skipped:',e);}
+
+    // Insert fresh rows: one per (employee, date, jobLine)
+    let inserted=0;
+    for(const [k,entry] of Object.entries(wk.entries)){
+      const colonPos=k.indexOf(':');
+      if(colonPos<0)continue;
+      const empId=k.substring(0,colonPos);
+      const workDate=k.substring(colonPos+1);
+      const emp=(wk.employees||[]).find(e=>(e.id||e)===empId);
+      const empName=(emp&&emp.name)||empId;
+      const lines=entry.jobLines||[];
+      for(const ln of lines){
+        const hrs=parseFloat(ln.hours)||0;
+        if(hrs===0&&!ln.job)continue;
+        const equipStr=(ln.equipment||[]).map(eq=>(eq&&(eq.id||eq.equipNum))||eq).filter(Boolean).join(', ');
+        const r=await fetch(`https://graph.microsoft.com/v1.0/sites/${site.id}/lists/${listId}/items`,{method:'POST',headers:{Authorization:'Bearer '+tok,'Content-Type':'application/json'},body:JSON.stringify({fields:{
+          Title:`${weekIso}-${empId}-${workDate}-${ln.job||'x'}-${ln.phase||'x'}`,
+          WeekIso:weekIso,
+          EmployeeId:empId,
+          EmployeeName:empName,
+          WorkDate:workDate,
+          Jobnumber:ln.job||'',
+          Phase:ln.phase||'',
+          Hours:hrs,
+          Equipment:equipStr,
+          SubmittedBy:submittedBy,
+          SubmittedAt:submittedAt
+        }})});
+        if(r.ok)inserted++;
+      }
+    }
+    if(inserted>0)toast(`Hours sent: ${inserted} row${inserted===1?'':'s'} to TimesheetJobLines.`,'success');
+  }catch(e){console.error('submitJobLinesToSP:',e);}
+}
+
 function bw(){return{employees:[],entries:{},equipmentEntries:{},status:'draft',submittedBy:'',submittedAt:'',approvedBy:'',approvedAt:'',comments:'',production:{}};}
 function fw(iso){const d=new Date(iso+'T12:00:00');d.setDate(d.getDate()-6);return'Wk of '+d.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'});}
 function fd(iso){const d=new Date(iso+'T12:00:00');return d.toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'});}
@@ -1043,6 +1110,7 @@ function subTS(){const wk=S.weeks[S.currentWeek];const by=document.getElementByI
   mgrs.forEach(m=>{const sub=encodeURIComponent(`Timesheet Approval — ${fw(S.currentWeek)}`);const bod=encodeURIComponent(`Hi ${m.name},\n\nPlease approve the timesheet for ${fw(S.currentWeek)}.\n\nSubmitted by: ${by}\nEmployees: ${wk.employees.length}\nLabor hours: ${tot.toFixed(1)}\nNotes: ${wk.comments||'None'}\n\nOpen the VH Timesheet App to approve or return.\n\nThank you`);window.open(`mailto:${m.email}?subject=${sub}&body=${bod}`);});
   // Push to SharePoint and remove from local drafts
   submitProductionToSP(wk);
+  submitJobLinesToSP(wk);
   saveSP().then(()=>{
     // Remove from localStorage drafts
     try{const drafts=JSON.parse(localStorage.getItem('vhts_drafts')||'{}');delete drafts[S.currentWeek];localStorage.setItem('vhts_drafts',JSON.stringify(drafts));}catch(e){}
