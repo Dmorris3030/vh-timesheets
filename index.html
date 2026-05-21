@@ -806,8 +806,9 @@ async function submitJobLinesToSP(wk){
       if(colonPos<0)continue;
       const empId=k.substring(0,colonPos);
       const workDate=k.substring(colonPos+1);
-      const emp=(wk.employees||[]).find(e=>(e.id||e)===empId);
+      const emp=(typeof EMPS!=='undefined'?EMPS:[]).find(e=>e.id===empId);
       const empName=(emp&&emp.name)||empId;
+      const empTitle=(emp&&emp.title)||'';
       const lines=entry.jobLines||[];
       for(const ln of lines){
         const hrs=parseFloat(ln.hours)||0;
@@ -818,6 +819,7 @@ async function submitJobLinesToSP(wk){
           WeekIso:weekIso,
           EmployeeId:empId,
           EmployeeName:empName,
+          EmployeeTitle:empTitle,
           WorkDate:workDate,
           Jobnumber:ln.job||'',
           Phase:ln.phase||'',
