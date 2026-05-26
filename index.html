@@ -841,6 +841,7 @@ function fd(iso){const d=new Date(iso+'T12:00:00');return d.toLocaleDateString('
 function fs(iso){const d=new Date(iso+'T12:00:00');return`${d.getMonth()+1}/${d.getDate()}`;}
 function wd(we){if(!we||!/^\d{4}-\d{2}-\d{2}$/.test(we))return DK.map(()=>new Date().toISOString().split('T')[0]);const end=new Date(we+'T12:00:00');if(isNaN(end.getTime()))return DK.map(()=>new Date().toISOString().split('T')[0]);return DK.map((_,i)=>{const d=new Date(end);d.setDate(end.getDate()-(6-i));return d.toISOString().split('T')[0];});}
 function allEmps(){return [...EMPS,...(S.customEmployees||[])].filter((e,i,a)=>a.findIndex(x=>x.id===e.id)===i);}
+function tmOpts(cur){var s='<option value=""'+(!cur?' selected':'')+'>--</option>';for(var h=4;h<=20;h++){for(var m=0;m<60;m+=15){var v=(h<10?'0':'')+h+':'+(m<10?'0':'')+m;var d12=h===0?12:h>12?h-12:h;var l=d12+':'+(m<10?'0':'')+m+(h<12?'a':'p');s+='<option value="'+v+'"'+(cur===v?' selected':'')+'>'+l+'</option>';}}return s;}
 function initWeeks(){const sel=document.getElementById('ws');if(!sel)return;
   // Get current week Saturday
   const now=new Date();const curSat=new Date(now);curSat.setDate(now.getDate()+(6-now.getDay()));const curIso=curSat.toISOString().split('T')[0];
@@ -996,11 +997,20 @@ function buildDayPanel(eid,dt,wk,ro,eqs,he){
     // Start / Stop / Lunch row
     s+='<div style="display:grid;grid-template-columns:1fr 1fr 80px;gap:8px;margin-bottom:8px">';
     s+='<div><span class="fl" style="font-size:10px;margin-bottom:4px;display:block">Start</span>';
-    s+='<input class="di" type="time" value="'+(ln.startTime||'')+'" '+dis+' style="padding:8px 10px;font-size:15px" data-eid="'+e+'" data-dt="'+d+'" data-ji="'+ji+'" data-f="startTime" onchange="setJobLine(this.dataset.eid,this.dataset.dt,+this.dataset.ji,this.dataset.f,this.value);refreshDayPanel(this.dataset.eid,this.dataset.dt)"/></div>';
+    s+='<select class="di" '+dis+' style="padding:8px 10px;font-size:15px" data-eid="'+e+'" data-dt="'+d+'" data-ji="'+ji+'" data-f="startTime" onchange="setJobLine(this.dataset.eid,this.dataset.dt,+this.dataset.ji,this.dataset.f,this.value);refreshDayPanel(this.dataset.eid,this.dataset.dt)">'+tmOpts(ln.startTime)+'</select></div>';
     s+='<div><span class="fl" style="font-size:10px;margin-bottom:4px;display:block">Stop</span>';
-    s+='<input class="di" type="time" value="'+(ln.stopTime||'')+'" '+dis+' style="padding:8px 10px;font-size:15px" data-eid="'+e+'" data-dt="'+d+'" data-ji="'+ji+'" data-f="stopTime" onchange="setJobLine(this.dataset.eid,this.dataset.dt,+this.dataset.ji,this.dataset.f,this.value);refreshDayPanel(this.dataset.eid,this.dataset.dt)"/></div>';
+    s+='<select class="di" '+dis+' style="padding:8px 10px;font-size:15px" data-eid="'+e+'" data-dt="'+d+'" data-ji="'+ji+'" data-f="stopTime" onchange="setJobLine(this.dataset.eid,this.dataset.dt,+this.dataset.ji,this.dataset.f,this.value);refreshDayPanel(this.dataset.eid,this.dataset.dt)">'+tmOpts(ln.stopTime)+'</select></div>';
     s+='<div><span class="fl" style="font-size:10px;margin-bottom:4px;display:block">Lunch (hrs)</span>';
-    s+='<input class="di" type="number" inputmode="decimal" step="0.25" min="0" max="2" value="'+(ln.lunch||'')+'" '+dis+' placeholder="0" style="font-size:15px;padding:8px 4px;text-align:center" data-eid="'+e+'" data-dt="'+d+'" data-ji="'+ji+'" data-f="lunch" oninput="setJobLine(this.dataset.eid,this.dataset.dt,+this.dataset.ji,this.dataset.f,this.value);refreshDayPanel(this.dataset.eid,this.dataset.dt)"/></div>';
+    s+='<select class="di" '+dis+' style="font-size:15px;padding:8px 4px;text-align:center" data-eid="'+e+'" data-dt="'+d+'" data-ji="'+ji+'" data-f="lunch" onchange="setJobLine(this.dataset.eid,this.dataset.dt,+this.dataset.ji,this.dataset.f,this.value);refreshDayPanel(this.dataset.eid,this.dataset.dt)">';
+    s+='<option value=""'+(ln.lunch===''||ln.lunch==null?' selected':'')+'>--</option>';
+    s+='<option value="0"'+(parseFloat(ln.lunch)===0?' selected':'')+'>0</option>';
+    s+='<option value="0.25"'+(parseFloat(ln.lunch)===0.25?' selected':'')+'>0.25</option>';
+    s+='<option value="0.5"'+(parseFloat(ln.lunch)===0.5?' selected':'')+'>0.50</option>';
+    s+='<option value="0.75"'+(parseFloat(ln.lunch)===0.75?' selected':'')+'>0.75</option>';
+    s+='<option value="1"'+(parseFloat(ln.lunch)===1?' selected':'')+'>1.00</option>';
+    s+='<option value="1.5"'+(parseFloat(ln.lunch)===1.5?' selected':'')+'>1.50</option>';
+    s+='<option value="2"'+(parseFloat(ln.lunch)===2?' selected':'')+'>2.00</option>';
+    s+='</select></div>';
     s+='</div>';
     // Hours summary + Equipment button + Remove
     s+='<div style="display:grid;grid-template-columns:1fr 1fr auto;gap:8px;align-items:flex-end">';
