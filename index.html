@@ -760,6 +760,7 @@ async function submitProductionToSP(wk){
       const cost=parseFloat(p.materialCost||p.totalCost||p.actualCost)||0;
       const notesParts=[p.notes,p.weather?'Weather: '+p.weather:'',p.pipeSize?'Pipe: '+p.pipeSize:'',p.strId?'STR: '+p.strId:''].filter(Boolean);
       await fetch(`https://graph.microsoft.com/v1.0/sites/${site.id}/lists/${listId}/items`,{method:'POST',headers:{Authorization:'Bearer '+tok,'Content-Type':'application/json'},body:JSON.stringify({fields:{
+          Title:`${p.job||'?'} P${entryPhase||'?'} ${p.date||''}`,
           Jobnumber:p.job||'',
           Phase:entryPhase,
           BidItem:p.bidItem||p.workType||p.activity||'',
