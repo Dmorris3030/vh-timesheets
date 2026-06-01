@@ -1194,8 +1194,18 @@ function vwWkK(key){
   const wk=S.weeks[key];if(!wk){toast('Timesheet not found.','error');return;}
   const iso=key.split(':')[0];
   const dates=wd(iso);
+  // Compute per-employee labor/equip via the canonical calcJobHours path, using THIS week's dates (not S.currentWeek)
+  function empTotals(eid){
+    let l=0,eq=0;
+    dates.forEach(dt=>{
+      const lines=getJobLines(wk,eid,dt);
+      lines.forEach(ln=>{const c=calcJobHours(ln);l+=c.labor;eq+=c.equip;});
+      (wk.equipmentEntries&&wk.equipmentEntries[`${eid}:${dt}`]||[]).forEach(x=>eq+=parseFloat(x.hours)||0);
+    });
+    return{l,e:eq,c:l+eq};
+  }
   let tH=0,tE=0;
-  wk.employees.forEach(eid=>{dates.forEach(dt=>{const h=parseFloat(ge(wk,eid,dt,'hours'))||0;tH+=h;(wk.equipmentEntries[`${eid}:${dt}`]||[]).forEach(e=>tE+=parseFloat(e.hours)||0);});});
+  wk.employees.forEach(eid=>{const t=empTotals(eid);tH+=t.l;tE+=t.e;});
   let h=`<div class="mh"></div><h2 style="font-size:18px;font-weight:700;margin-bottom:4px">Review Timesheet</h2>`;
   h+=`<p style="font-size:13px;color:var(--text2);margin-bottom:2px">${fw(iso)}</p>`;
   h+=`<p style="font-size:13px;color:var(--text2);margin-bottom:12px"><strong>Submitted by:</strong> ${wk.submittedBy||'—'}${wk.submittedAt?' · '+new Date(wk.submittedAt).toLocaleString():''}</p>`;
@@ -1204,27 +1214,31 @@ function vwWkK(key){
   // Per-employee with daily breakdown
   wk.employees.forEach(eid=>{
     const emp=allEmps().find(e=>e.id===eid);if(!emp)return;
-    const tot=ct(wk,eid);
+    const tot=empTotals(eid);
     h+=`<div class="card" style="margin-bottom:8px;padding:10px 12px"><div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px"><div><strong style="font-size:14px">${emp.name}</strong><br><span style="font-size:11px;color:var(--text2)">${emp.title}</span></div><div style="text-align:right"><strong style="font-size:15px">${tot.c.toFixed(1)}h</strong><br><span style="font-size:10px;color:var(--text3)">L:${tot.l.toFixed(1)} E:${tot.e.toFixed(1)}</span></div></div>`;
     let hasDays=false;
     dates.forEach(dt=>{
-      const en=wk.entries[`${eid}:${dt}`]||{};
-      const dayH=parseFloat(en.hours)||0;
       const jls=getJobLines(wk,eid,dt);
-      const dayEq=wk.equipmentEntries[`${eid}:${dt}`]||[];
-      const has=dayH>0||(jls&&jls.length>0)||dayEq.length>0;
+      const dayEq=wk.equipmentEntries&&wk.equipmentEntries[`${eid}:${dt}`]||[];
+      const has=(jls&&jls.length>0)||dayEq.length>0;
       if(!has)return;
       hasDays=true;
       const d=new Date(dt+'T12:00:00');
       const ds=d.toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'});
       h+=`<div style="margin-top:5px;padding-top:5px;border-top:0.5px solid var(--border);font-size:12px"><strong>${ds}</strong>`;
-      if(en.start||en.stop){h+=` <span style="color:var(--text2)">${en.start||'?'}–${en.stop||'?'}${en.lunch?', lunch '+en.lunch+'h':''}</span>`;}
       if(jls&&jls.length){
         jls.forEach(ln=>{
-          h+=`<br><span style="color:var(--text2);margin-left:8px">${ln.job||'?'} P${ln.phase||'?'}: ${ln.hours||0}h</span>`;
-          if(ln.equipment&&ln.equipment.length){ln.equipment.forEach(eqi=>{if(eqi&&eqi.number&&eqi.hours)h+=` <span style="color:var(--text3)">[${eqi.number}: ${eqi.hours}h]</span>`;});}
+          const c=calcJobHours(ln);
+          h+=`<br><span style="color:var(--text2);margin-left:8px">${ln.job||'?'} P${ln.phase||'?'}: ${c.labor.toFixed(2)}h labor`;
+          if(ln.startTime||ln.stopTime){h+=` <span style="color:var(--text3)">(${ln.startTime||'?'}–${ln.stopTime||'?'}${ln.lunch?', lunch '+ln.lunch+'h':''})</span>`;}
+          h+=`</span>`;
+          if(ln.equipment&&ln.equipment.length){
+            ln.equipment.forEach(eqi=>{if(eqi&&eqi.number&&parseFloat(eqi.hours)>0)h+=`<br><span style="color:var(--text3);margin-left:18px">↳ Equip ${eqi.number}: ${parseFloat(eqi.hours).toFixed(2)}h</span>`;});
+          }
         });
       }
+      // Legacy day-level equipment (rare)
+      dayEq.forEach(eqi=>{if(eqi&&eqi.number&&parseFloat(eqi.hours)>0)h+=`<br><span style="color:var(--text3);margin-left:8px">Equip ${eqi.number}: ${parseFloat(eqi.hours).toFixed(2)}h</span>`;});
       h+=`</div>`;
     });
     if(!hasDays)h+=`<div style="font-size:11px;color:var(--text3);font-style:italic">No hours entered</div>`;
