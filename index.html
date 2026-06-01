@@ -433,17 +433,26 @@ function setSS(s){const d=document.getElementById('sd');if(d)d.className='sd '+s
 async function saveAllSubmittedSP(){
   const tok=await getTok();if(!tok)return;
   try{
-    // Gather all non-draft weeks from current state
+    // Pull current SP state, merge in our changes, write back
     const r=await fetch(`https://graph.microsoft.com/v1.0/sites/${SITE_ID}/drive/root:/${SFN}:/content`,{headers:{Authorization:'Bearer '+tok}});
     let existing={submissions:{},managers:S.managers,adminEmails:S.adminEmails,settings:S.settings};
     if(r.ok)existing=await r.json();
     if(!existing.submissions)existing.submissions={};
-    // Update with current non-draft weeks
-    Object.entries(S.weeks).forEach(([iso,wk])=>{
-      if(wk.status!=='draft'){
-        // Find the key for this week (search existing or create new)
-        const existingKey=Object.keys(existing.submissions).find(k=>k.startsWith(iso+':'));
-        const key=existingKey||(iso+':'+(wk.submittedBy||auth.user?.email||'unknown')+':'+(wk.assignedManager||''));
+    const myEmail=(auth.user?.email||'unknown').toLowerCase();
+    // Iterate every entry in S.weeks. iso-only keys are own submissions; composite keys (containing ':') are foreign (I'm the manager).
+    Object.entries(S.weeks).forEach(([k,wk])=>{
+      if(!wk.status)return;
+      if(k.includes(':')){
+        // Foreign sub — k IS already the SP composite key. Write status as-is, including 'draft' so a "Return to foreman" flows back through SP.
+        existing.submissions[k]=wk;
+      } else {
+        // Own sub — skip drafts (own drafts live in localStorage), then find/build the exact composite key.
+        if(wk.status==='draft')return;
+        const matchKey=Object.keys(existing.submissions).find(ek=>{
+          const p=ek.split(':');
+          return p[0]===k && (p[1]||'').toLowerCase()===myEmail;
+        });
+        const key=matchKey||(k+':'+(wk.submittedBy||auth.user?.email||'unknown')+':'+(wk.assignedManager||''));
         existing.submissions[key]=wk;
       }
     });
@@ -456,7 +465,10 @@ async function saveAllSubmittedSP(){
 function saveDraft(){
   try{
     const drafts={};
-    Object.entries(S.weeks).forEach(([iso,wk])=>{if(wk.status==='draft')drafts[iso]=wk;});
+    Object.entries(S.weeks).forEach(([iso,wk])=>{
+      if(iso.includes(':'))return; // foreign sub, not my draft
+      if(wk.status==='draft')drafts[iso]=wk;
+    });
     localStorage.setItem('vhts_drafts',JSON.stringify(drafts));
     setSS('ok');toast('Draft saved.','success');
   }catch(e){toast('Could not save draft: '+e.message,'error');}
@@ -471,9 +483,18 @@ async function saveSP(){
       const rGet=await fetch(`https://graph.microsoft.com/v1.0/sites/${SITE_ID}/drive/root:/${SFN}:/content`,{headers:{Authorization:'Bearer '+tok}});
       if(rGet.ok){const d=await rGet.json();if(d&&d.submissions)existing.submissions=d.submissions;}
     }catch(e){console.warn('SP read:',e);}
-    // Add this user's submitted weeks — no validateWeek filter, trust the data
+    // Add this user's submitted weeks — own subs only. Foreign subs saved by saveAllSubmittedSP.
+    const myEmailLC=(auth.user?.email||'unknown').toLowerCase();
     Object.entries(S.weeks).forEach(([iso,wk])=>{
+      if(iso.includes(':'))return; // foreign sub, skip
       if(wk.status&&wk.status!=='draft'){
+        // Drop any existing entry for this foreman+week (handles re-submit to a different manager)
+        Object.keys(existing.submissions).forEach(ek=>{
+          const p=ek.split(':');
+          if(p[0]===iso && (p[1]||'').toLowerCase()===myEmailLC){
+            delete existing.submissions[ek];
+          }
+        });
         const key=iso+':'+(auth.user?.email||'unknown')+':'+(wk.assignedManager||'');
         existing.submissions[key]=wk;
       }
@@ -518,6 +539,12 @@ async function loadSP(){
     if(data.submissions){
       const myEmail=(auth.user?.email||'').toLowerCase();
       const restoredDrafts={};
+      // KEY SCHEME for S.weeks:
+      //   iso-only key  (e.g. "2026-05-30")              → my own timesheet, used by Entry/Review/Submit
+      //   composite key (e.g. "2026-05-30:f@vh:m@vh")    → someone else's timesheet for me to approve
+      // The ":" in a key is the discriminator.
+      // Drop stale foreign entries on every reload so the manager queue reflects current SP state.
+      Object.keys(S.weeks).forEach(k=>{if(k.includes(':'))delete S.weeks[k];});
       Object.entries(data.submissions).forEach(([key,wk])=>{
         const parts=key.split(':');
         const iso=parts[0];
@@ -525,23 +552,20 @@ async function loadSP(){
         const managerEmail=(parts[2]||'').toLowerCase();
         const isMySubmission=foremanEmail===myEmail;
         const isForMe=managerEmail===myEmail;
-        if(auth.isAdmin||isForMe){
-          // Admins and assigned managers see all non-draft submissions
-          S.weeks[iso]=wk;
-        } else if(false){  // placeholder
-          // Manager sees weeks assigned to them
-          S.weeks[iso]=wk;
-        } else if(isMySubmission){
-          // Foreman sees their own submissions to check status
+        if(isMySubmission){
+          // My own submission — track by iso so my Review/Entry tabs work unchanged
           if(wk.status==='draft'){
-            // Returned by manager — restore to device
+            // Returned by manager — restore to device for fixing & resubmit
             S.weeks[iso]=wk;
             restoredDrafts[iso]=wk;
             toast('A timesheet was returned for your review.','error');
           } else {
-            // Always update from SP so foreman sees latest status (submitted→approved)
             S.weeks[iso]=wk;
           }
+        } else if(isForMe||auth.isAdmin){
+          // I'm the assigned manager, or admin viewing all — store under FULL composite key
+          // so multiple foremen's submissions for the same week each get their own slot.
+          S.weeks[key]=wk;
         }
       });
       if(Object.keys(restoredDrafts).length>0){
@@ -854,7 +878,7 @@ function initWeeks(){const sel=document.getElementById('ws');if(!sel)return;
   // Add surrounding weeks
   for(let i=-1;i<=4;i++){if(i===0)continue;const dt=new Date();dt.setDate(dt.getDate()+(6-dt.getDay())+i*7);const iso=dt.toISOString().split('T')[0];
     if(!ex.has(iso)){const o=document.createElement('option');o.value=iso;o.textContent=fw(iso);sel.appendChild(o);ex.add(iso);}if(!S.weeks[iso])S.weeks[iso]=bw();}
-  Object.keys(S.weeks).forEach(iso=>{if(!ex.has(iso)){const o=document.createElement('option');o.value=iso;o.textContent=fw(iso);sel.appendChild(o);ex.add(iso);}});
+  Object.keys(S.weeks).forEach(iso=>{if(iso.includes(':'))return;if(!ex.has(iso)){const o=document.createElement('option');o.value=iso;o.textContent=fw(iso);sel.appendChild(o);ex.add(iso);}});
   if(!S.currentWeek){const dt=new Date();dt.setDate(dt.getDate()+(6-dt.getDay()));S.currentWeek=dt.toISOString().split('T')[0];}sel.value=S.currentWeek;
 }
 function changeWeek(w){S.currentWeek=w;if(!S.weeks[w])S.weeks[w]=bw();adys={};render();updBadge();}
@@ -1130,27 +1154,63 @@ function subTS(){const wk=S.weeks[S.currentWeek];const by=document.getElementByI
   });
 }
 function rToDraft(){const wk=S.weeks[S.currentWeek];wk.status='draft';wk.submittedBy='';wk.submittedAt='';saveSP();updBadge();render();toast('Returned to draft.','success');}
-function rApproval(){const pend=Object.entries(S.weeks).filter(([,w])=>['submitted','approved','rejected'].includes(w.status));
+function rApproval(){
+  const myEmail=(auth.user?.email||'').toLowerCase();
+  // Foreign subs assigned to me (composite-keyed) — what I need to approve
+  const foreignPend=Object.entries(S.weeks).filter(([k,w])=>k.includes(':') && ['submitted','approved','rejected'].includes(w.status));
+  // My own subs (iso-keyed) — read-only status view
+  const ownPend=Object.entries(S.weeks).filter(([k,w])=>!k.includes(':') && ['submitted','approved','rejected'].includes(w.status));
   let h=`<div class="pg"><div class="ph" style="display:flex;align-items:flex-start;justify-content:space-between"><div><h1>Approvals</h1><p>Review and approve submitted timesheets.</p></div><button class="btn btn-sm" onclick="loadSP().then(()=>rApproval())" style="flex-shrink:0;margin-top:4px"><i class="ti ti-refresh"></i> Refresh</button></div>`;
-  if(!pend.length){h+=`<div class="nd"><i class="ti ti-shield-check"></i>No timesheets pending approval.</div>`;}
-  else{pend.forEach(([iso,wk])=>{const tot=Object.values(wk.entries).reduce((s,v)=>s+(parseFloat(v.hours)||0),0);h+=`<div class="card"><div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:12px"><div><strong style="font-size:16px;font-weight:700;letter-spacing:-.3px">${fw(iso)}</strong><br><span style="font-size:13px;color:var(--text2)">${wk.submittedBy||'—'} · ${wk.employees.length} employees · ${tot.toFixed(1)}h</span>${wk.assignedManager?`<br><span style="font-size:12px;color:var(--text3)">→ ${S.managers.find(m=>m.email===wk.assignedManager)?.name||wk.assignedManager}</span>`:''}</div><span class="sb sb-${wk.status.slice(0,2)}">${wk.status}</span></div>${wk.status==='submitted'&&auth.isAdmin?`<div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn btn-s" style="flex:1" onclick="appWk('${iso}')"><i class="ti ti-check"></i> Approve</button><button class="btn btn-d btn-sm" style="flex:1" onclick="retWk('${iso}')"><i class="ti ti-x"></i> Return</button><button class="btn btn-sm btn-d" style="width:100%;margin-top:6px" onclick="adminDeleteSubmission('${iso}')"><i class="ti ti-trash"></i> Delete</button></div>`:wk.status==='submitted'?`<div class="ib" style="margin:0"><i class="ti ti-clock"></i><span>Awaiting manager approval.</span></div>`:`<button class="btn btn-bl" onclick="vwWk('${iso}')"><i class="ti ti-eye"></i> View details</button>`}</div>`;});}
+  if(!foreignPend.length && !ownPend.length){
+    h+=`<div class="nd"><i class="ti ti-shield-check"></i>No timesheets pending approval.</div>`;
+  } else {
+    if(foreignPend.length){
+      h+=`<div style="font-size:13px;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:.4px;margin:4px 0 10px">For your approval</div>`;
+      foreignPend.forEach(([key,wk])=>{
+        const iso=key.split(':')[0];
+        const tot=Object.values(wk.entries).reduce((s,v)=>s+(parseFloat(v.hours)||0),0);
+        const canAct=wk.status==='submitted';
+        h+=`<div class="card"><div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:12px"><div><strong style="font-size:16px;font-weight:700;letter-spacing:-.3px">${fw(iso)}</strong><br><span style="font-size:13px;color:var(--text2)">${wk.submittedBy||'—'} · ${wk.employees.length} employees · ${tot.toFixed(1)}h</span></div><span class="sb sb-${wk.status.slice(0,2)}">${wk.status}</span></div>${canAct?`<div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn btn-s" style="flex:1" onclick="appWkK('${key}')"><i class="ti ti-check"></i> Approve</button><button class="btn btn-d btn-sm" style="flex:1" onclick="retWkK('${key}')"><i class="ti ti-x"></i> Return</button>${auth.isAdmin?`<button class="btn btn-sm btn-d" style="width:100%;margin-top:6px" onclick="adminDeleteSubmissionK('${key}')"><i class="ti ti-trash"></i> Delete</button>`:''}</div>`:`<div class="ib" style="margin:0"><i class="ti ti-info-circle"></i><span>Status: <strong>${wk.status}</strong>${wk.approvedBy?' · '+wk.approvedBy:''}</span></div>`}</div>`;
+      });
+    }
+    if(ownPend.length){
+      h+=`<div style="font-size:13px;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:.4px;margin:24px 0 10px">Your submitted timesheets</div>`;
+      ownPend.forEach(([iso,wk])=>{
+        const tot=Object.values(wk.entries).reduce((s,v)=>s+(parseFloat(v.hours)||0),0);
+        h+=`<div class="card"><div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:12px"><div><strong style="font-size:16px;font-weight:700;letter-spacing:-.3px">${fw(iso)}</strong><br><span style="font-size:13px;color:var(--text2)">${wk.employees.length} employees · ${tot.toFixed(1)}h</span>${wk.assignedManager?`<br><span style="font-size:12px;color:var(--text3)">→ ${S.managers.find(m=>m.email===wk.assignedManager)?.name||wk.assignedManager}</span>`:''}</div><span class="sb sb-${wk.status.slice(0,2)}">${wk.status}</span></div>${wk.status==='submitted'?`<div class="ib" style="margin:0"><i class="ti ti-clock"></i><span>Awaiting manager approval.</span></div>`:`<button class="btn btn-bl" onclick="vwWk('${iso}')"><i class="ti ti-eye"></i> View details</button>`}</div>`;
+      });
+    }
+  }
   h+=`</div>`;document.getElementById('mc').innerHTML=h;
 }
-function appWk(iso){const n=auth.user?auth.user.name:prompt('Your name:');if(!n)return;S.weeks[iso].status='approved';S.weeks[iso].approvedBy=n;S.weeks[iso].approvedAt=new Date().toISOString();
-  // Update SharePoint with all submitted/approved weeks
+function appWkK(key){const wk=S.weeks[key];if(!wk)return;const n=auth.user?auth.user.name:prompt('Your name:');if(!n)return;
+  wk.status='approved';wk.approvedBy=n;wk.approvedAt=new Date().toISOString();
   saveAllSubmittedSP();updBadge();render();toast('Approved!','success');}
-function retWk(iso){const r=prompt('Reason for returning:');if(r===null)return;S.weeks[iso].status='draft';S.weeks[iso].returnedAt=new Date().toISOString();if(r)S.weeks[iso].comments=(S.weeks[iso].comments||'')+'\nReturned: '+r;S.weeks[iso].submittedBy='';saveAllSubmittedSP();updBadge();render();toast('Returned to foreman — they will see it on next login.','success');}
+function retWkK(key){const wk=S.weeks[key];if(!wk)return;const r=prompt('Reason for returning:');if(r===null)return;
+  wk.status='draft';wk.returnedAt=new Date().toISOString();if(r)wk.comments=(wk.comments||'')+'\nReturned: '+r;
+  saveAllSubmittedSP();updBadge();render();toast('Returned to foreman — they will see it on next login.','success');}
+function adminDeleteSubmissionK(key){
+  if(!confirm('Delete this timesheet from SharePoint? This cannot be undone.'))return;
+  const p=key.split(':');
+  delete S.weeks[key];
+  removeFromSP(p[0],p[1]); // delete this foreman's record for that week only
+  updBadge();render();toast('Timesheet deleted.','success');
+}
+// Legacy iso-key handlers kept for any stale references — now no-ops to avoid silent overwrites.
+function appWk(iso){const n=auth.user?auth.user.name:prompt('Your name:');if(!n)return;if(!S.weeks[iso])return;S.weeks[iso].status='approved';S.weeks[iso].approvedBy=n;S.weeks[iso].approvedAt=new Date().toISOString();
+  saveAllSubmittedSP();updBadge();render();toast('Approved!','success');}
+function retWk(iso){const r=prompt('Reason for returning:');if(r===null)return;if(!S.weeks[iso])return;S.weeks[iso].status='draft';S.weeks[iso].returnedAt=new Date().toISOString();if(r)S.weeks[iso].comments=(S.weeks[iso].comments||'')+'\nReturned: '+r;S.weeks[iso].submittedBy='';saveAllSubmittedSP();updBadge();render();toast('Returned to foreman — they will see it on next login.','success');}
 function vwWk(iso){S.currentWeek=iso;document.getElementById('ws').value=iso;showPage('review');}
 function rExport(){if(!auth.isAdmin){document.getElementById('mc').innerHTML=`<div class="pg"><div class="nd"><i class="ti ti-lock"></i>Admins only.</div></div>`;return;}
   const app=Object.entries(S.weeks).filter(([,w])=>w.status==='approved');
   let h=`<div class="pg"><div class="ph" style="display:flex;align-items:flex-start;justify-content:space-between"><div><h1>Spectrum CSV Export</h1><p>Company code: <strong>VHI</strong></p></div>${app.length>0?'<button class=\"btn btn-sm btn-d\" onclick=\"clearAllExports()\"><i class=\"ti ti-trash\"></i> Clear all</button>':''}</div>`;
   if(!app.length)h+=`<div class="nd"><i class="ti ti-file-x"></i>No approved timesheets yet.</div>`;
-  else{app.forEach(([iso,wk])=>{const tot=Object.values(wk.entries).reduce((s,v)=>s+(parseFloat(v.hours)||0),0);h+=`<div class="card" style="display:flex;align-items:center;gap:12px"><div style="flex:1"><strong style="font-size:15px;font-weight:700;letter-spacing:-.2px">${fw(iso)}</strong><br><span style="font-size:13px;color:var(--text2)">${wk.employees.length} employees · ${tot.toFixed(1)}h · Approved by ${wk.approvedBy}</span></div><button class="btn btn-p btn-sm" onclick="expCSV('${iso}')"><i class="ti ti-download"></i> CSV</button><button class="btn btn-sm btn-d" onclick="clearExport('${iso}')" style="margin-left:4px"><i class="ti ti-trash"></i></button></div></div>`;});}
+  else{app.forEach(([k,wk])=>{const iso=k.split(':')[0];const tot=Object.values(wk.entries).reduce((s,v)=>s+(parseFloat(v.hours)||0),0);h+=`<div class="card" style="display:flex;align-items:center;gap:12px"><div style="flex:1"><strong style="font-size:15px;font-weight:700;letter-spacing:-.2px">${fw(iso)}</strong><br><span style="font-size:13px;color:var(--text2)">${wk.submittedBy?wk.submittedBy+' · ':''}${wk.employees.length} employees · ${tot.toFixed(1)}h · Approved by ${wk.approvedBy}</span></div><button class="btn btn-p btn-sm" onclick="expCSV('${k}')"><i class="ti ti-download"></i> CSV</button><button class="btn btn-sm btn-d" onclick="clearExport('${k}')" style="margin-left:4px"><i class="ti ti-trash"></i></button></div>`;});}
   h+=`<div class="card" style="background:var(--bg2)"><strong style="font-size:15px;font-weight:700;display:block;margin-bottom:12px">Export settings</strong><div class="fr"><label>Company code</label><input type="text" value="${S.settings.companyCode}" oninput="S.settings.companyCode=this.value"/></div><div class="fr" style="margin:0"><label>Batch year prefix</label><input type="text" value="${S.settings.batchPrefix}" oninput="S.settings.batchPrefix=this.value"/></div></div></div>`;
   document.getElementById('mc').innerHTML=h;
 }
 function gpw(iso){const d=new Date(iso+'T12:00:00');const s=new Date(d.getFullYear(),0,1);return Math.ceil(((d-s)/86400000+s.getDay()+1)/7);}
-function expCSV(iso){const wk=S.weeks[iso];const dates=wd(iso);const bc=S.settings.batchPrefix+String(gpw(iso)).padStart(2,'0');
+function expCSV(k){const iso=k.split(':')[0];const wk=S.weeks[k];if(!wk)return;const dates=wd(iso);const bc=S.settings.batchPrefix+String(gpw(iso)).padStart(2,'0');
   const hdr='Batch Code,Employee Code,Department,Pay Type,Hours,Job,Phase,Cost Type,Date,Message,Pay Rate Level ,Wage Code,Union/Pay Group,Workers Comp,State Tax Code,County Tax,Local Tax,Equipment Code,Equipment Hours,Quantity,Company Code,Pay Rate,Equip cost category,crew number,cost center,work order,site equipment,site component,contract,eq. work order';
   const rows=[hdr];
   wk.employees.forEach(eid=>{const emp=allEmps().find(e=>e.id===eid);if(!emp)return;
@@ -1192,17 +1252,25 @@ function rSettings(){let h=`<div class="pg"><div class="ph"><h1>Settings</h1></d
   }
   h+=`</div>`;document.getElementById('mc').innerHTML=h;
 }
-function clearExport(iso){
+function clearExport(k){
   if(!confirm('Remove this export from the list? The timesheet data will be deleted from SharePoint.'))return;
-  delete S.weeks[iso];
-  removeFromSP(iso);
+  const p=k.split(':');
+  delete S.weeks[k];
+  // If composite key, remove the specific foreman's record; else remove all for that week
+  if(p.length>=2 && p[1])removeFromSP(p[0],p[1]);
+  else removeFromSP(p[0]);
   render();toast('Export cleared.','success');
 }
 
 function clearAllExports(){
   if(!confirm('Clear all downloaded exports? This removes all approved timesheets from SharePoint.'))return;
-  const approved=Object.entries(S.weeks).filter(([,w])=>w.status==='approved').map(([iso])=>iso);
-  approved.forEach(iso=>{delete S.weeks[iso];removeFromSP(iso);});
+  const approved=Object.entries(S.weeks).filter(([,w])=>w.status==='approved').map(([k])=>k);
+  approved.forEach(k=>{
+    const p=k.split(':');
+    delete S.weeks[k];
+    if(p.length>=2 && p[1])removeFromSP(p[0],p[1]);
+    else removeFromSP(p[0]);
+  });
   render();toast('All exports cleared.','success');
 }
 
@@ -1222,27 +1290,34 @@ function deleteSubmission(){
   delete S.weeks[iso];
   // Remove from localStorage drafts too
   try{const d=JSON.parse(localStorage.getItem('vhts_drafts')||'{}');delete d[iso];localStorage.setItem('vhts_drafts',JSON.stringify(d));}catch(e){}
-  // Remove from SharePoint
-  removeFromSP(iso);
+  // Remove from SharePoint — only MY record for this week
+  removeFromSP(iso,auth.user?.email);
   initWeeks();render();toast('Timesheet deleted.','success');
 }
 
 function adminDeleteSubmission(iso){
-  if(!confirm('Delete this timesheet from SharePoint? This cannot be undone.'))return;
+  // Legacy iso-only delete kept for backward compat; deletes ALL records for this week.
+  if(!confirm('Delete ALL submissions for this week from SharePoint? This cannot be undone.'))return;
   delete S.weeks[iso];
   removeFromSP(iso);
   updBadge();render();toast('Timesheet deleted.','success');
 }
 
-async function removeFromSP(iso){
+async function removeFromSP(iso,foremanEmail){
   const tok=await getTok();if(!tok)return;
   try{
     const rGet=await fetch(`https://graph.microsoft.com/v1.0/sites/${SITE_ID}/drive/root:/${SFN}:/content`,{headers:{Authorization:'Bearer '+tok}});
     if(!rGet.ok)return;
     const data=await rGet.json();
     if(!data.submissions)return;
-    // Remove all keys for this week
-    Object.keys(data.submissions).forEach(k=>{if(k.startsWith(iso+':'))delete data.submissions[k];});
+    const target=(foremanEmail||'').toLowerCase();
+    // Remove keys matching iso (and foreman email if provided — caller almost always provides it now)
+    Object.keys(data.submissions).forEach(k=>{
+      const p=k.split(':');
+      if(p[0]!==iso)return;
+      if(target && (p[1]||'').toLowerCase()!==target)return;
+      delete data.submissions[k];
+    });
     await fetch(`https://graph.microsoft.com/v1.0/sites/${SITE_ID}/drive/root:/${SFN}:/content`,{method:'PUT',headers:{Authorization:'Bearer '+tok,'Content-Type':'application/json'},body:JSON.stringify(data)});
   }catch(e){console.error('removeFromSP:',e);}
 }
@@ -1328,7 +1403,7 @@ function addAdm(){const e=document.getElementById('na').value.trim().toLowerCase
 function rmAdm(i){S.adminEmails.splice(i,1);rSettings();}
 function addMgr(){const n=document.getElementById('nn').value.trim();const e=document.getElementById('ne').value.trim();if(!n||!e){toast('Name and email required.','error');return;}S.managers.push({name:n,email:e,title:''});rSettings();toast('Manager added.','success');}
 function rmMgr(i){S.managers.splice(i,1);rSettings();}
-function updBadge(){const n=Object.values(S.weeks).filter(w=>w.status==='submitted').length;const b=document.getElementById('pb');if(!b)return;if(n>0){b.style.display='inline-flex';b.textContent=n;}else b.style.display='none';}
+function updBadge(){const n=Object.entries(S.weeks).filter(([k,w])=>k.includes(':') && w.status==='submitted').length;const b=document.getElementById('pb');if(!b)return;if(n>0){b.style.display='inline-flex';b.textContent=n;}else b.style.display='none';}
 function showM(html,id='m'){const ex=document.getElementById(id);if(ex)ex.remove();const ov=document.createElement('div');ov.id=id;ov.className='mo';ov.onclick=e=>{if(e.target===ov)closeM();};ov.innerHTML=`<div class="md">${html}</div>`;document.body.appendChild(ov);}
 function closeM(){const m=document.querySelector('.mo');if(m)m.remove();}
 let toastT;
