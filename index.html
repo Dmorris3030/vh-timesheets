@@ -1171,7 +1171,13 @@ function rApproval(){
         const iso=key.split(':')[0];
         const tot=Object.values(wk.entries).reduce((s,v)=>s+(parseFloat(v.hours)||0),0);
         const canAct=wk.status==='submitted';
-        h+=`<div class="card"><div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:12px"><div><strong style="font-size:16px;font-weight:700;letter-spacing:-.3px">${fw(iso)}</strong><br><span style="font-size:13px;color:var(--text2)">${wk.submittedBy||'—'} · ${wk.employees.length} employees · ${tot.toFixed(1)}h</span></div><span class="sb sb-${wk.status.slice(0,2)}">${wk.status}</span></div>${canAct?`<div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn btn-s" style="flex:1" onclick="appWkK('${key}')"><i class="ti ti-check"></i> Approve</button><button class="btn btn-d btn-sm" style="flex:1" onclick="retWkK('${key}')"><i class="ti ti-x"></i> Return</button>${auth.isAdmin?`<button class="btn btn-sm btn-d" style="width:100%;margin-top:6px" onclick="adminDeleteSubmissionK('${key}')"><i class="ti ti-trash"></i> Delete</button>`:''}</div>`:`<div class="ib" style="margin:0"><i class="ti ti-info-circle"></i><span>Status: <strong>${wk.status}</strong>${wk.approvedBy?' · '+wk.approvedBy:''}</span></div>`}</div>`;
+        h+=`<div class="card"><div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:12px"><div><strong style="font-size:16px;font-weight:700;letter-spacing:-.3px">${fw(iso)}</strong><br><span style="font-size:13px;color:var(--text2)">${wk.submittedBy||'—'} · ${wk.employees.length} employees · ${tot.toFixed(1)}h</span></div><span class="sb sb-${wk.status.slice(0,2)}">${wk.status}</span></div>`;
+        h+=`<div style="display:flex;gap:6px;flex-wrap:wrap"><button class="btn btn-bl btn-sm" style="flex:1;min-width:80px" onclick="vwWkK('${key}')"><i class="ti ti-eye"></i> View</button>`;
+        if(canAct){
+          h+=`<button class="btn btn-s btn-sm" style="flex:1;min-width:80px" onclick="appWkK('${key}')"><i class="ti ti-check"></i> Approve</button><button class="btn btn-d btn-sm" style="flex:1;min-width:80px" onclick="retWkK('${key}')"><i class="ti ti-x"></i> Return</button>`;
+          if(auth.isAdmin)h+=`<button class="btn btn-sm btn-d" style="width:100%;margin-top:6px" onclick="adminDeleteSubmissionK('${key}')"><i class="ti ti-trash"></i> Delete</button>`;
+        }
+        h+=`</div></div>`;
       });
     }
     if(ownPend.length){
@@ -1183,6 +1189,56 @@ function rApproval(){
     }
   }
   h+=`</div>`;document.getElementById('mc').innerHTML=h;
+}
+function vwWkK(key){
+  const wk=S.weeks[key];if(!wk){toast('Timesheet not found.','error');return;}
+  const iso=key.split(':')[0];
+  const dates=wd(iso);
+  let tH=0,tE=0;
+  wk.employees.forEach(eid=>{dates.forEach(dt=>{const h=parseFloat(ge(wk,eid,dt,'hours'))||0;tH+=h;(wk.equipmentEntries[`${eid}:${dt}`]||[]).forEach(e=>tE+=parseFloat(e.hours)||0);});});
+  let h=`<div class="mh"></div><h2 style="font-size:18px;font-weight:700;margin-bottom:4px">Review Timesheet</h2>`;
+  h+=`<p style="font-size:13px;color:var(--text2);margin-bottom:2px">${fw(iso)}</p>`;
+  h+=`<p style="font-size:13px;color:var(--text2);margin-bottom:12px"><strong>Submitted by:</strong> ${wk.submittedBy||'—'}${wk.submittedAt?' · '+new Date(wk.submittedAt).toLocaleString():''}</p>`;
+  if(wk.comments){h+=`<div class="ib" style="margin-bottom:12px"><i class="ti ti-info-circle"></i><div><strong>Notes:</strong> ${wk.comments}</div></div>`;}
+  h+=`<div class="sg" style="margin-bottom:14px"><div class="sc"><div class="lbl">Employees</div><div class="val">${wk.employees.length}</div></div><div class="sc"><div class="lbl">Labor hrs</div><div class="val">${tH.toFixed(1)}</div></div><div class="sc"><div class="lbl">Equip hrs</div><div class="val">${tE.toFixed(1)}</div></div><div class="sc"><div class="lbl">Total</div><div class="val">${(tH+tE).toFixed(1)}</div></div></div>`;
+  // Per-employee with daily breakdown
+  wk.employees.forEach(eid=>{
+    const emp=allEmps().find(e=>e.id===eid);if(!emp)return;
+    const tot=ct(wk,eid);
+    h+=`<div class="card" style="margin-bottom:8px;padding:10px 12px"><div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px"><div><strong style="font-size:14px">${emp.name}</strong><br><span style="font-size:11px;color:var(--text2)">${emp.title}</span></div><div style="text-align:right"><strong style="font-size:15px">${tot.c.toFixed(1)}h</strong><br><span style="font-size:10px;color:var(--text3)">L:${tot.l.toFixed(1)} E:${tot.e.toFixed(1)}</span></div></div>`;
+    let hasDays=false;
+    dates.forEach(dt=>{
+      const en=wk.entries[`${eid}:${dt}`]||{};
+      const dayH=parseFloat(en.hours)||0;
+      const jls=getJobLines(wk,eid,dt);
+      const dayEq=wk.equipmentEntries[`${eid}:${dt}`]||[];
+      const has=dayH>0||(jls&&jls.length>0)||dayEq.length>0;
+      if(!has)return;
+      hasDays=true;
+      const d=new Date(dt+'T12:00:00');
+      const ds=d.toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'});
+      h+=`<div style="margin-top:5px;padding-top:5px;border-top:0.5px solid var(--border);font-size:12px"><strong>${ds}</strong>`;
+      if(en.start||en.stop){h+=` <span style="color:var(--text2)">${en.start||'?'}–${en.stop||'?'}${en.lunch?', lunch '+en.lunch+'h':''}</span>`;}
+      if(jls&&jls.length){
+        jls.forEach(ln=>{
+          h+=`<br><span style="color:var(--text2);margin-left:8px">${ln.job||'?'} P${ln.phase||'?'}: ${ln.hours||0}h</span>`;
+          if(ln.equipment&&ln.equipment.length){ln.equipment.forEach(eqi=>{if(eqi&&eqi.number&&eqi.hours)h+=` <span style="color:var(--text3)">[${eqi.number}: ${eqi.hours}h]</span>`;});}
+        });
+      }
+      h+=`</div>`;
+    });
+    if(!hasDays)h+=`<div style="font-size:11px;color:var(--text3);font-style:italic">No hours entered</div>`;
+    h+=`</div>`;
+  });
+  // Footer actions
+  h+=`<div class="mf">`;
+  if(wk.status==='submitted'){
+    h+=`<button class="btn btn-s" onclick="closeM();appWkK('${key}')"><i class="ti ti-check"></i> Approve</button> <button class="btn btn-d" onclick="closeM();retWkK('${key}')"><i class="ti ti-x"></i> Return</button> <button class="btn" onclick="closeM()">Close</button>`;
+  } else {
+    h+=`<button class="btn" onclick="closeM()">Close</button>`;
+  }
+  h+=`</div>`;
+  showM(h,'vwm');
 }
 function appWkK(key){const wk=S.weeks[key];if(!wk)return;const n=auth.user?auth.user.name:prompt('Your name:');if(!n)return;
   wk.status='approved';wk.approvedBy=n;wk.approvedAt=new Date().toISOString();
