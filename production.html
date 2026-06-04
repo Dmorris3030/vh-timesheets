@@ -113,7 +113,7 @@
   .auth-c .brand{justify-content:center;margin-bottom:18px}
   .auth-c h1{font-size:22px;font-weight:700;margin-bottom:8px;letter-spacing:-.5px}
   .auth-c p{color:var(--text2);font-size:14px;margin-bottom:22px;line-height:1.4}
-.vt{display:inline-flex;background:#f5f5f7;border-radius:8px;padding:3px;margin-bottom:14px;gap:2px}.vt button{font:inherit;font-size:13px;font-weight:600;padding:6px 14px;border:none;background:transparent;color:#666;cursor:pointer;border-radius:6px;transition:background .12s,color .12s;display:inline-flex;align-items:center;gap:6px}.vt button.on{background:#fff;color:#c8102e;box-shadow:0 1px 2px rgba(0,0,0,.06)}.vt button:not(.on):hover{color:#111}.day-card{background:#fff;border:1px solid #eaeaea;border-radius:8px;padding:12px 14px;margin-bottom:8px}.day-hdr{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:8px;font-weight:700;font-size:13px}.day-totals{font-weight:400;font-size:12px;color:#666}.day-cols{display:grid;grid-template-columns:1fr 1fr;gap:16px}.day-col-title{font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.3px;color:#666;margin-bottom:6px;padding-bottom:4px;border-bottom:1px solid #eaeaea}.day-row{display:flex;justify-content:space-between;align-items:baseline;padding:4px 0;font-size:13px;border-bottom:1px solid #f5f5f5}.day-row:last-child{border-bottom:none}.day-row.legacy{color:#999;font-style:italic}.day-name{flex:1;min-width:0}.day-name .day-sub{font-size:11px;color:#888;margin-left:4px}.day-hrs{font-weight:600;margin-left:8px;white-space:nowrap}.day-empty{font-size:12px;color:#888;padding:6px 0;font-style:italic}@media (max-width:640px){.day-cols{grid-template-columns:1fr;gap:8px}}</style>
+.vt{display:inline-flex;background:#f5f5f7;border-radius:8px;padding:3px;margin-bottom:14px;gap:2px}.vt button{font:inherit;font-size:13px;font-weight:600;padding:6px 14px;border:none;background:transparent;color:#666;cursor:pointer;border-radius:6px;transition:background .12s,color .12s;display:inline-flex;align-items:center;gap:6px}.vt button.on{background:#fff;color:#c8102e;box-shadow:0 1px 2px rgba(0,0,0,.06)}.vt button:not(.on):hover{color:#111}.day-card{background:#fff;border:1px solid #eaeaea;border-radius:8px;padding:12px 14px;margin-bottom:8px}.day-hdr{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:8px;font-weight:700;font-size:13px}.day-totals{font-weight:400;font-size:12px;color:#666}.day-cols{display:grid;grid-template-columns:1fr 1fr;gap:16px}.day-col-title{font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.3px;color:#666;margin-bottom:6px;padding-bottom:4px;border-bottom:1px solid #eaeaea}.day-row{display:flex;justify-content:space-between;align-items:baseline;padding:4px 0;font-size:13px;border-bottom:1px solid #f5f5f5}.day-row:last-child{border-bottom:none}.day-row.legacy{color:#999;font-style:italic}.day-name{flex:1;min-width:0}.day-name .day-sub{font-size:11px;color:#888;margin-left:4px}.day-hrs{font-weight:600;margin-left:8px;white-space:nowrap}.day-empty{font-size:12px;color:#888;padding:6px 0;font-style:italic}@media (max-width:640px){.day-cols{grid-template-columns:1fr;gap:8px}}.modal-ov{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:1000;display:flex;align-items:center;justify-content:center;padding:20px}.modal-pn{background:#fff;border-radius:12px;max-width:900px;width:100%;max-height:85vh;display:flex;flex-direction:column;box-shadow:0 8px 32px rgba(0,0,0,.2);overflow:hidden}.modal-hdr{display:flex;justify-content:space-between;align-items:center;padding:16px 20px;border-bottom:1px solid #eaeaea}.modal-hdr h2{margin:0;font-size:18px}.modal-body{padding:16px 20px;overflow:auto;flex:1}.modal-sec{margin-bottom:20px}.modal-sec h3{font-size:13px;font-weight:600;text-transform:uppercase;letter-spacing:.3px;color:#666;margin:0 0 10px}.bud-form{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:12px}.bud-form input,.bud-form select{font:inherit;font-size:13px;padding:8px 10px;border:1px solid #ddd;border-radius:6px;width:100%;box-sizing:border-box}.bud-form-actions{display:flex;justify-content:flex-end;gap:8px}.bud-form-actions .btn{padding:8px 16px}@media (max-width:640px){.bud-form{grid-template-columns:1fr 1fr}}</style>
 </head>
 <body>
 <div id="app"><div class="loading"><div class="spinner"></div><div>Loading...</div></div></div>
@@ -136,7 +136,7 @@ const TSJL_LIST='228b5d0b-c95c-4bd0-a9b2-b963d767b7d2';
 
 let mi;
 let auth={user:null,account:null,isAdmin:false,isManager:false,role:'foreman'};
-let S={view:'earth',rows:[],foremen:[],jobs:[],phases:[],selectedForeman:'',selectedJob:'',selectedPhase:'',dateFrom:null,dateTo:null,adminEmails:[],managers:[],budgets:{},jobLines:[]};
+let S={view:'earth',rows:[],foremen:[],jobs:[],phases:[],selectedForeman:'',selectedJob:'',selectedPhase:'',dateFrom:null,dateTo:null,adminEmails:[],managers:[],budgets:{},jobLines:[],showSettings:false};
 
 // === MSAL ===
 async function initMsal(){
@@ -221,7 +221,7 @@ async function loadBudgets(){
     if(!r.ok)return;
     const j=await r.json();
     S.budgets={};
-    (j.value||[]).map(it=>it.fields).forEach(b=>{S.budgets[b.JobNumber+'-'+b.Phase]=b;});
+    (j.value||[]).forEach(it=>{const b=Object.assign({__id:it.id},it.fields||{});S.budgets[b.JobNumber+'-'+b.Phase]=b;});
   }catch(e){console.warn('loadBudgets:',e);}
 }
 async function loadJobLines(){
@@ -397,10 +397,11 @@ function render(){
       <div class="brand"><div class="logo">VH</div><span>${S.view==='earth'?'Earthwork':'Utility'}</span></div>
       <div class="uline">
         <span class="nm">${esc(auth.user.name)}</span>${roleBadge}
-        <button class="btn btn-sm" onclick="signOut()" title="Sign out"><i class="ti ti-logout"></i></button>
+        ${auth.isAdmin?`<button class="btn btn-sm" onclick="toggleSettings()" title="Settings" style="margin-right:6px"><i class="ti ti-settings"></i></button>`:''}<button class="btn btn-sm" onclick="signOut()" title="Sign out"><i class="ti ti-logout"></i></button>
       </div>
     </div></div>
     <div class="container">
+      ${S.showSettings?renderSettingsModal():''}
       <div class="vt" role="tablist" aria-label="View">
         <button class="${S.view==='earth'?'on':''}" onclick="setView('earth')"><i class="ti ti-mountain"></i> Earthwork</button>
         <button class="${S.view==='util'?'on':''}" onclick="setView('util')"><i class="ti ti-tool"></i> Utility</button>
@@ -572,6 +573,73 @@ function showDetail(i){
 }
 function closeMo(){const m=document.querySelector('.mo');if(m)m.remove();}
 
+function toggleSettings(){S.showSettings=!S.showSettings;render();}
+function renderSettingsModal(){
+  const list=Object.values(S.budgets).sort((a,b)=>(''+(a.JobNumber||'')).localeCompare(b.JobNumber||'')||(''+(a.Phase||'')).localeCompare(b.Phase||''));
+  const rows=list.map(b=>'<tr>'+
+    '<td>'+esc(b.JobNumber||'')+(b.JobName?'<div style="font-size:11px;color:#666">'+esc(b.JobName)+'</div>':'')+'</td>'+
+    '<td>'+esc(b.Phase||'')+'</td>'+
+    '<td>'+esc(b.PhaseType||'')+'</td>'+
+    '<td class="num">'+(b.BidCost?fmtMoney(b.BidCost,0):'—')+'</td>'+
+    '<td class="num">'+(b.BidQty?fmtNum(b.BidQty):'—')+'</td>'+
+    '<td>'+esc(b.QtyUnit||'')+'</td>'+
+    '<td class="num">'+(b.BidHours?fmtNum(b.BidHours,1):'—')+'</td>'+
+    '<td><button class="btn btn-sm" onclick="deleteBudget(\''+b.__id+'\')" title="Delete"><i class="ti ti-trash"></i></button></td>'+
+  '</tr>').join('');
+  const tbl=list.length===0?'<div class="empty">No budgets yet. Add one above.</div>':
+    '<table class="tbl"><thead><tr><th>Job</th><th>Phase</th><th>Type</th><th class="num">Bid $</th><th class="num">Bid Qty</th><th>Unit</th><th class="num">Bid Hrs</th><th></th></tr></thead><tbody>'+rows+'</tbody></table>';
+  return '<div class="modal-ov" onclick="if(event.target===this)toggleSettings()">'+
+    '<div class="modal-pn">'+
+      '<div class="modal-hdr"><h2>Job Budgets</h2><button class="btn btn-sm" onclick="toggleSettings()" title="Close"><i class="ti ti-x"></i></button></div>'+
+      '<div class="modal-body">'+
+        '<div class="modal-sec"><h3>Add new budget</h3>'+
+          '<div class="bud-form">'+
+            '<input id="bud-jn" placeholder="Job Number (e.g. 2610)">'+
+            '<input id="bud-jname" placeholder="Job Name">'+
+            '<input id="bud-ph" placeholder="Phase (e.g. 300)">'+
+            '<select id="bud-pt"><option value="earth">earth</option><option value="utility">utility</option></select>'+
+            '<input id="bud-bc" type="number" placeholder="Bid Cost ($)" step="0.01">'+
+            '<input id="bud-bq" type="number" placeholder="Bid Qty" step="0.01">'+
+            '<select id="bud-qu"><option value="">unit</option><option value="CY">CY</option><option value="SY">SY</option><option value="LF">LF</option></select>'+
+            '<input id="bud-bh" type="number" placeholder="Bid Hours" step="0.01">'+
+          '</div>'+
+          '<div class="bud-form-actions"><button class="btn btn-p" onclick="saveBudget()"><i class="ti ti-plus"></i> Add Budget</button></div>'+
+        '</div>'+
+        '<div class="modal-sec"><h3>Existing budgets ('+list.length+')</h3>'+tbl+'</div>'+
+      '</div>'+
+    '</div>'+
+  '</div>';
+}
+async function saveBudget(){
+  const gv=id=>(document.getElementById(id)||{}).value||'';
+  const jn=gv('bud-jn').trim();const ph=gv('bud-ph').trim();
+  if(!jn||!ph){toast('Job Number and Phase required','err');return;}
+  const payload={Title:jn+'-'+ph,JobNumber:jn,Phase:ph,PhaseType:gv('bud-pt')||'earth'};
+  const jname=gv('bud-jname').trim();if(jname)payload.JobName=jname;
+  const bc=parseFloat(gv('bud-bc'));if(!isNaN(bc))payload.BidCost=bc;
+  const bq=parseFloat(gv('bud-bq'));if(!isNaN(bq))payload.BidQty=bq;
+  const qu=gv('bud-qu');if(qu)payload.QtyUnit=qu;
+  const bh=parseFloat(gv('bud-bh'));if(!isNaN(bh))payload.BidHours=bh;
+  try{
+    const tok=await getToken();if(!tok){toast('Auth failed','err');return;}
+    const url='https://graph.microsoft.com/v1.0/sites/'+FD_SITE+'/lists/'+BUDGETS_LIST+'/items';
+    const r=await fetch(url,{method:'POST',headers:{Authorization:'Bearer '+tok,'Content-Type':'application/json'},body:JSON.stringify({fields:payload})});
+    if(!r.ok){const t=await r.text();toast('Save failed: '+t.slice(0,120),'err');return;}
+    toast('Budget added','ok');
+    ['bud-jn','bud-jname','bud-ph','bud-bc','bud-bq','bud-bh'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});
+    await loadBudgets();render();
+  }catch(e){toast('Error: '+e.message,'err');}
+}
+async function deleteBudget(id){
+  if(!confirm('Delete this budget?'))return;
+  try{
+    const tok=await getToken();if(!tok){toast('Auth failed','err');return;}
+    const url='https://graph.microsoft.com/v1.0/sites/'+FD_SITE+'/lists/'+BUDGETS_LIST+'/items/'+id;
+    const r=await fetch(url,{method:'DELETE',headers:{Authorization:'Bearer '+tok}});
+    if(!r.ok){toast('Delete failed','err');return;}
+    toast('Deleted','ok');await loadBudgets();render();
+  }catch(e){toast('Error: '+e.message,'err');}
+}
 function setView(v){S.view=v;S.selectedPhase='';render();}
 function setForeman(v){S.selectedForeman=v;render();}
 function setJob(v){S.selectedJob=v;render();}
