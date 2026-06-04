@@ -1,0 +1,416 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#c8102e">
+<title>VH Production Dashboard</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@2.47.0/tabler-icons.min.css">
+<script src="https://alcdn.msauth.net/browser/2.38.3/js/msal-browser.min.js"></script>
+<style>
+  :root{
+    --bg:#fafafa; --bg2:#f0f0f0; --border:#e5e5e5;
+    --text:#111; --text2:#555; --text3:#888;
+    --red:#c8102e; --red-d:#a30d24;
+    --green:#16a34a; --amber:#d97706;
+    --shadow:0 1px 2px rgba(0,0,0,.04);
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{font-family:'Inter',-apple-system,BlinkMacSystemFont,sans-serif;color:var(--text);background:var(--bg);-webkit-font-smoothing:antialiased}
+  body{min-height:100vh;padding-bottom:env(safe-area-inset-bottom)}
+  /* Header */
+  .hdr{background:#fff;border-bottom:1px solid var(--border);padding:12px 16px;position:sticky;top:0;z-index:10}
+  .hdr-in{max-width:1000px;margin:0 auto;display:flex;align-items:center;justify-content:space-between;gap:10px}
+  .brand{display:flex;align-items:center;gap:10px;font-weight:700;font-size:16px;letter-spacing:-.3px}
+  .logo{width:30px;height:30px;background:var(--red);color:#fff;border-radius:6px;display:grid;place-items:center;font-size:13px;font-weight:800;flex-shrink:0}
+  .uline{font-size:13px;color:var(--text2);display:flex;align-items:center;gap:8px;min-width:0}
+  .uline .nm{font-weight:600;color:var(--text);max-width:130px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .rb{font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;background:var(--bg2);color:var(--text2);padding:3px 6px;border-radius:4px;flex-shrink:0}
+  .rb.admin{background:#fee;color:var(--red)}
+  .rb.manager{background:#fef3c7;color:var(--amber)}
+  .container{max-width:1000px;margin:0 auto;padding:14px 16px 32px}
+  /* Controls */
+  .ctrl{display:flex;flex-wrap:wrap;gap:10px;margin-bottom:14px;align-items:flex-end}
+  .cg{display:flex;flex-direction:column;gap:4px}
+  .cg label{font-size:10px;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:.4px}
+  .cg select,.cg input{font:inherit;font-size:14px;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:#fff;color:var(--text);min-width:0}
+  .cg select{min-width:150px;max-width:200px}
+  .cg.grow{flex:1}
+  /* Buttons */
+  .btn{font:inherit;font-size:13px;padding:8px 12px;border-radius:6px;border:1px solid var(--border);background:#fff;cursor:pointer;color:var(--text);display:inline-flex;align-items:center;gap:6px;white-space:nowrap}
+  .btn:hover{background:var(--bg2)}
+  .btn-p{background:var(--red);color:#fff;border-color:var(--red)}
+  .btn-p:hover{background:var(--red-d)}
+  .btn-sm{font-size:12px;padding:5px 10px}
+  /* KPI grid */
+  .kg{display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin-bottom:14px}
+  @media(min-width:520px){.kg{grid-template-columns:repeat(3,1fr)}}
+  @media(min-width:780px){.kg{grid-template-columns:repeat(6,1fr)}}
+  .k{background:#fff;border:1px solid var(--border);border-radius:8px;padding:12px;box-shadow:var(--shadow);min-width:0}
+  .k .lbl{font-size:10px;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:.4px;margin-bottom:6px}
+  .k .val{font-size:20px;font-weight:700;letter-spacing:-.5px;line-height:1.1}
+  .k .sub{font-size:10px;color:var(--text3);margin-top:3px}
+  .k.feat .val{font-size:24px}
+  .val.good{color:var(--green)}
+  .val.bad{color:var(--red)}
+  /* Sections */
+  .sec{background:#fff;border:1px solid var(--border);border-radius:8px;padding:14px;margin-bottom:14px;box-shadow:var(--shadow)}
+  .sec h2{font-size:14px;font-weight:700;margin-bottom:10px;letter-spacing:-.3px;color:var(--text)}
+  .sec .h2-sub{font-size:11px;color:var(--text3);font-weight:500;margin-left:6px}
+  /* Table */
+  .tbl{width:100%;font-size:13px;border-collapse:collapse}
+  .tbl thead th{font-size:10px;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:.4px;padding:8px 6px;text-align:left;border-bottom:1px solid var(--border)}
+  .tbl tbody td{padding:9px 6px;border-bottom:1px solid var(--bg2);font-variant-numeric:tabular-nums}
+  .tbl tbody tr:last-child td{border-bottom:none}
+  .tbl .num{text-align:right}
+  .tbl .vp{color:var(--red);font-weight:600}
+  .tbl .vn{color:var(--green);font-weight:600}
+  @media(max-width:600px){
+    .tbl thead{display:none}
+    .tbl,.tbl tbody,.tbl tr{display:block}
+    .tbl tbody tr{padding:10px 0;border-bottom:1px solid var(--border)}
+    .tbl tbody tr:last-child{border-bottom:none}
+    .tbl tbody td{display:flex;justify-content:space-between;padding:4px 0;border:none;font-size:13px}
+    .tbl tbody td::before{content:attr(data-label);font-size:11px;color:var(--text2);font-weight:600;text-transform:uppercase;letter-spacing:.3px}
+    .tbl tbody td.num{text-align:right}
+  }
+  /* Recent entries */
+  .e{padding:11px 0;border-bottom:1px solid var(--bg2);display:flex;justify-content:space-between;align-items:center;gap:10px;cursor:pointer;transition:background .12s}
+  .e:hover{background:#fafafa}
+  .e:last-child{border-bottom:none}
+  .e-main{flex:1;min-width:0}
+  .e-title{font-weight:600;font-size:14px;margin-bottom:2px;color:var(--text)}
+  .e-sub{font-size:11px;color:var(--text2)}
+  .e-yard{font-weight:700;font-size:14px;font-variant-numeric:tabular-nums;text-align:right;white-space:nowrap}
+  .e-yard .u{font-size:10px;color:var(--text3);font-weight:500;text-transform:uppercase}
+  /* Empty/loading */
+  .empty,.loading{padding:32px 16px;text-align:center;color:var(--text2);font-size:14px}
+  .spinner{display:inline-block;width:28px;height:28px;border:3px solid var(--bg2);border-top-color:var(--red);border-radius:50%;animation:spin .8s linear infinite;margin-bottom:10px}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  /* Modal */
+  .mo{position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:flex-end;justify-content:center;z-index:100;padding:0;animation:fadeIn .15s}
+  @media(min-width:600px){.mo{align-items:center;padding:20px}}
+  .md{background:#fff;width:100%;max-width:480px;border-radius:14px 14px 0 0;padding:20px;max-height:88vh;overflow-y:auto;animation:slideUp .2s}
+  @media(min-width:600px){.md{border-radius:12px;animation:none}}
+  @keyframes fadeIn{from{opacity:0}}
+  @keyframes slideUp{from{transform:translateY(20px)}}
+  .md h3{font-size:17px;font-weight:700;margin-bottom:4px;letter-spacing:-.3px}
+  .md .meta{font-size:12px;color:var(--text2);margin-bottom:14px}
+  .dr{display:flex;justify-content:space-between;align-items:flex-start;padding:8px 0;border-bottom:1px solid var(--bg2);font-size:13px;gap:12px}
+  .dr:last-of-type{border-bottom:none}
+  .dr .lk{color:var(--text2);flex-shrink:0}
+  .dr .vk{font-weight:600;text-align:right;font-variant-numeric:tabular-nums}
+  .mf{display:flex;justify-content:flex-end;gap:8px;margin-top:14px;padding-top:12px;border-top:1px solid var(--border)}
+  /* Toast */
+  .toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:#111;color:#fff;padding:10px 16px;border-radius:6px;font-size:13px;z-index:200;box-shadow:0 4px 20px rgba(0,0,0,.15);animation:fadeIn .15s}
+  .toast.err{background:var(--red)}
+  /* Auth screen */
+  .auth{display:grid;place-items:center;min-height:80vh;padding:20px}
+  .auth-c{background:#fff;border:1px solid var(--border);border-radius:12px;padding:32px 24px;max-width:380px;width:100%;text-align:center;box-shadow:var(--shadow)}
+  .auth-c .brand{justify-content:center;margin-bottom:18px}
+  .auth-c h1{font-size:22px;font-weight:700;margin-bottom:8px;letter-spacing:-.5px}
+  .auth-c p{color:var(--text2);font-size:14px;margin-bottom:22px;line-height:1.4}
+</style>
+</head>
+<body>
+<div id="app"><div class="loading"><div class="spinner"></div><div>Loading...</div></div></div>
+<div id="toasts"></div>
+<script>
+// === CONFIG ===
+const CLIENT_ID='127c307a-e672-4d13-b5e9-c3b96fb34759';
+const TENANT_ID='1585f578-f5d3-41e6-a437-9c59bd33fbcf';
+const SCOPES=['Sites.Read.All','User.Read'];
+const FD_SITE='valentiheld.sharepoint.com,faa2c371-4166-4fc1-aed9-bf6ff65c7034,d89c0495-1617-4429-b05b-7addf584b82e';
+const FD_LIST='0e317e27-adb1-4bef-b57a-cb0524e60981';
+const TS_SITE='valentiheld.sharepoint.com,155c9359-7fd3-4f2c-8c6a-b04a722b6f64,801969a1-b2a1-4f9a-8c3a-05ae5405e710';
+// Fallback role detection if vhts-state.json can't be loaded
+const FALLBACK_ADMINS=['dmorris@valentiheld.com','abewley@valentiheld.com'];
+const FALLBACK_MANAGERS=['jroe@valentiheld.com','jtrenkamp@valentiheld.com'];
+
+let mi;
+let auth={user:null,account:null,isAdmin:false,isManager:false,role:'foreman'};
+let S={rows:[],foremen:[],selectedForeman:'',dateFrom:null,dateTo:null,adminEmails:[],managers:[]};
+
+// === MSAL ===
+async function initMsal(){
+  mi=new msal.PublicClientApplication({
+    auth:{clientId:CLIENT_ID,authority:`https://login.microsoftonline.com/${TENANT_ID}`,redirectUri:window.location.origin+window.location.pathname},
+    cache:{cacheLocation:'localStorage'}
+  });
+  await mi.initialize();
+  await mi.handleRedirectPromise();
+  const accs=mi.getAllAccounts();
+  if(accs.length>0){
+    auth.account=accs[0];
+    auth.user={name:accs[0].name,email:(accs[0].username||'').toLowerCase()};
+    await loadRoles();
+    await loadData();
+    render();
+  } else {
+    renderAuth();
+  }
+}
+async function signIn(){await mi.loginRedirect({scopes:SCOPES,prompt:'select_account'});}
+async function signOut(){await mi.logoutRedirect();}
+async function getToken(){
+  try{const r=await mi.acquireTokenSilent({scopes:SCOPES,account:auth.account});return r.accessToken;}
+  catch(e){if(e instanceof msal.InteractionRequiredAuthError)await mi.acquireTokenRedirect({scopes:SCOPES,account:auth.account});return null;}
+}
+
+// === DATA ===
+async function loadRoles(){
+  // Try to load shared state from the timesheet app's VHTimesheets site
+  try{
+    const tok=await getToken();if(!tok)throw new Error('no token');
+    const r=await fetch(`https://graph.microsoft.com/v1.0/sites/${TS_SITE}/drive/root:/vhts-state.json:/content`,{headers:{Authorization:'Bearer '+tok}});
+    if(r.ok){
+      const j=await r.json();
+      S.adminEmails=(j.adminEmails||[]).map(e=>(e||'').toLowerCase());
+      S.managers=j.managers||[];
+    } else throw new Error('state file not found');
+  }catch(e){
+    console.warn('Using fallback role lists:',e.message);
+    S.adminEmails=FALLBACK_ADMINS.map(e=>e.toLowerCase());
+    S.managers=FALLBACK_MANAGERS.map(e=>({email:e}));
+  }
+  auth.isAdmin=S.adminEmails.includes(auth.user.email);
+  auth.isManager=S.managers.some(m=>(m.email||'').toLowerCase()===auth.user.email);
+  auth.role=auth.isAdmin?'admin':(auth.isManager?'manager':'foreman');
+  if(auth.role==='foreman')S.selectedForeman=auth.user.name;
+}
+
+async function loadData(){
+  try{
+    const tok=await getToken();if(!tok)return;
+    const now=new Date();
+    if(!S.dateFrom){const f=new Date(now);f.setDate(now.getDate()-30);S.dateFrom=isoDate(f);}
+    if(!S.dateTo)S.dateTo=isoDate(now);
+
+    const fields='Id,Title,Date,Foreman,Jobnumber,Phase,Yardage_x002f_production,Unit,BidCost,ActualCost,TotalCost,Bid_x0020_Cost_x0020_Per_x0020_Y,Actual_x0020_Cost_x0020_Per_x002,Labor_x0020_Hours,Crew_x0020_Size,Production_x0020_Hours,Equipment,STR_x0020_ID,Work_x0020_Type,Notes';
+    const url=`https://graph.microsoft.com/v1.0/sites/${FD_SITE}/lists/${FD_LIST}/items?$expand=fields($select=${fields})&$top=500`;
+    const r=await fetch(url,{headers:{Authorization:'Bearer '+tok}});
+    if(!r.ok)throw new Error('Graph '+r.status);
+    const j=await r.json();
+    S.rows=(j.value||[]).map(it=>it.fields).filter(f=>f&&f.Date);
+    S.foremen=[...new Set(S.rows.map(r=>r.Foreman).filter(Boolean))].sort();
+  }catch(e){
+    console.error('loadData:',e);
+    toast('Failed to load production data.','err');
+  }
+}
+
+// === HELPERS ===
+function isoDate(d){return d.toISOString().slice(0,10);}
+function fmtNum(n,d){d=d||0;if(!isFinite(n))return '—';return n.toLocaleString('en-US',{minimumFractionDigits:d,maximumFractionDigits:d});}
+function fmtMoney(n,d){d=d==null?2:d;if(!isFinite(n)||n===0)return '—';return '$'+n.toLocaleString('en-US',{minimumFractionDigits:d,maximumFractionDigits:d});}
+function fmtVar(v){if(!isFinite(v)||v===0)return '—';return (v<0?'-':'+')+'$'+Math.abs(v).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});}
+function fmtDate(s){if(!s)return '—';const d=new Date(s);return d.toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'});}
+function startOfWeek(d){const r=new Date(d);const day=r.getDay();r.setDate(r.getDate()-day);r.setHours(0,0,0,0);return r;}
+function esc(s){return String(s==null?'':s).replace(/[<>&"']/g,c=>({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;',"'":'&#39;'}[c]));}
+
+function filteredRows(){
+  const from=S.dateFrom?new Date(S.dateFrom+'T00:00:00'):null;
+  const to=S.dateTo?new Date(S.dateTo+'T23:59:59'):null;
+  return S.rows.filter(r=>{
+    const d=r.Date?new Date(r.Date):null;if(!d)return false;
+    if(from&&d<from)return false;
+    if(to&&d>to)return false;
+    if(S.selectedForeman&&r.Foreman!==S.selectedForeman)return false;
+    return true;
+  });
+}
+function thisWeekRows(){
+  const sow=startOfWeek(new Date());
+  return S.rows.filter(r=>{
+    if(S.selectedForeman&&r.Foreman!==S.selectedForeman)return false;
+    return r.Date&&new Date(r.Date)>=sow;
+  });
+}
+function aggregate(rows){
+  let yards=0,totalCost=0,bidCost=0,laborHours=0,prodHours=0;
+  rows.forEach(r=>{
+    const y=parseFloat(r.Yardage_x002f_production)||0;
+    yards+=y;
+    totalCost+=parseFloat(r.TotalCost)||0;
+    const bc=parseFloat(r.BidCost)||0;
+    const bcpy=parseFloat(r.Bid_x0020_Cost_x0020_Per_x0020_Y)||0;
+    bidCost+=bc>0?bc:(bcpy*y);
+    laborHours+=parseFloat(r.Labor_x0020_Hours)||0;
+    prodHours+=parseFloat(r.Production_x0020_Hours)||0;
+  });
+  const cpy=yards>0?totalCost/yards:0;
+  const bcpy=yards>0?bidCost/yards:0;
+  const variance=(cpy>0&&bcpy>0)?cpy-bcpy:0;
+  const productivity=laborHours>0?yards/laborHours:0;
+  return{yards,totalCost,bidCost,laborHours,prodHours,cpy,bcpy,variance,productivity};
+}
+
+// === RENDER ===
+function render(){
+  const rows=filteredRows();
+  const weekRows=thisWeekRows();
+  const wk=aggregate(weekRows);
+  const rng=aggregate(rows);
+
+  // Group by job+phase
+  const byJob={};
+  rows.forEach(r=>{
+    const k=`${r.Jobnumber||'?'}::${r.Phase||'?'}`;
+    if(!byJob[k])byJob[k]={job:r.Jobnumber||'?',phase:r.Phase||'?',rows:[]};
+    byJob[k].rows.push(r);
+  });
+  const jobList=Object.values(byJob).map(g=>({...g,agg:aggregate(g.rows)})).sort((a,b)=>b.agg.yards-a.agg.yards);
+
+  const recent=[...rows].sort((a,b)=>new Date(b.Date)-new Date(a.Date)).slice(0,20);
+  const showSelector=auth.isAdmin||auth.isManager;
+  const roleBadge=`<span class="rb ${auth.role}">${auth.role}</span>`;
+
+  document.getElementById('app').innerHTML=`
+    <div class="hdr"><div class="hdr-in">
+      <div class="brand"><div class="logo">VH</div><span>Production</span></div>
+      <div class="uline">
+        <span class="nm">${esc(auth.user.name)}</span>${roleBadge}
+        <button class="btn btn-sm" onclick="signOut()" title="Sign out"><i class="ti ti-logout"></i></button>
+      </div>
+    </div></div>
+    <div class="container">
+      <div class="ctrl">
+        ${showSelector?`
+          <div class="cg">
+            <label>Foreman</label>
+            <select onchange="setForeman(this.value)">
+              <option value="">All foremen</option>
+              ${S.foremen.map(f=>`<option value="${esc(f)}" ${f===S.selectedForeman?'selected':''}>${esc(f)}</option>`).join('')}
+            </select>
+          </div>`:''}
+        <div class="cg">
+          <label>From</label>
+          <input type="date" value="${S.dateFrom}" onchange="setDate('from',this.value)">
+        </div>
+        <div class="cg">
+          <label>To</label>
+          <input type="date" value="${S.dateTo}" onchange="setDate('to',this.value)">
+        </div>
+        <div class="cg" style="margin-left:auto">
+          <button class="btn btn-sm" onclick="refresh()"><i class="ti ti-refresh"></i> Refresh</button>
+        </div>
+      </div>
+
+      <div class="kg">
+        <div class="k feat"><div class="lbl">Yards This Week</div><div class="val">${fmtNum(wk.yards)}</div><div class="sub">${weekRows.length} entries · ${wk.laborHours.toFixed(1)}h labor</div></div>
+        <div class="k feat"><div class="lbl">Cost Variance</div><div class="val ${rng.variance<0?'good':(rng.variance>0?'bad':'')}">${fmtVar(rng.variance)}</div><div class="sub">$/CY actual vs bid</div></div>
+        <div class="k feat"><div class="lbl">Cost / Yard</div><div class="val">${fmtMoney(rng.cpy)}</div><div class="sub">range total</div></div>
+        <div class="k"><div class="lbl">Bid $/CY</div><div class="val">${fmtMoney(rng.bcpy)}</div></div>
+        <div class="k"><div class="lbl">Productivity</div><div class="val">${fmtNum(rng.productivity,1)}</div><div class="sub">CY / labor hr</div></div>
+        <div class="k"><div class="lbl">Labor Hours</div><div class="val">${fmtNum(rng.laborHours,1)}</div></div>
+      </div>
+
+      <div class="sec">
+        <h2>By Job &amp; Phase <span class="h2-sub">${S.dateFrom} → ${S.dateTo}</span></h2>
+        ${jobList.length===0?'<div class="empty">No production data in this range.</div>':`
+        <table class="tbl">
+          <thead><tr><th>Job</th><th>Phase</th><th class="num">Yards</th><th class="num">Hours</th><th class="num">$/CY Actual</th><th class="num">$/CY Bid</th><th class="num">Variance</th></tr></thead>
+          <tbody>
+            ${jobList.map(g=>{
+              const v=g.agg.variance;
+              const cls=v<0?'vn':(v>0?'vp':'');
+              return `<tr>
+                <td data-label="Job">${esc(g.job)}</td>
+                <td data-label="Phase">${esc(g.phase)}</td>
+                <td data-label="Yards" class="num">${fmtNum(g.agg.yards)}</td>
+                <td data-label="Hours" class="num">${fmtNum(g.agg.laborHours,1)}</td>
+                <td data-label="$/CY Actual" class="num">${fmtMoney(g.agg.cpy)}</td>
+                <td data-label="$/CY Bid" class="num">${fmtMoney(g.agg.bcpy)}</td>
+                <td data-label="Variance" class="num ${cls}">${fmtVar(v)}</td>
+              </tr>`;
+            }).join('')}
+          </tbody>
+        </table>`}
+      </div>
+
+      <div class="sec">
+        <h2>Recent Entries <span class="h2-sub">${recent.length} of ${rows.length}</span></h2>
+        ${recent.length===0?'<div class="empty">No entries.</div>':recent.map((r,i)=>{
+          const y=parseFloat(r.Yardage_x002f_production)||0;
+          return `<div class="e" onclick="showDetail(${i})">
+            <div class="e-main">
+              <div class="e-title">${esc(r.Jobnumber||'?')} · P${esc(r.Phase||'?')}</div>
+              <div class="e-sub">${fmtDate(r.Date)}${showSelector?' · '+esc(r.Foreman||'—'):''}</div>
+            </div>
+            <div class="e-yard">${fmtNum(y)} <span class="u">${esc(r.Unit||'CY')}</span></div>
+          </div>`;
+        }).join('')}
+      </div>
+    </div>
+  `;
+  window._recent=recent;
+}
+
+function renderAuth(){
+  document.getElementById('app').innerHTML=`
+    <div class="auth"><div class="auth-c">
+      <div class="brand"><div class="logo">VH</div><span>Production Dashboard</span></div>
+      <h1>Sign in to continue</h1>
+      <p>Use your Valenti Held account to view your production data.</p>
+      <button class="btn btn-p" style="width:100%;justify-content:center;padding:10px 14px" onclick="signIn()"><i class="ti ti-brand-microsoft"></i> Sign in with Microsoft</button>
+    </div></div>`;
+}
+
+function showDetail(i){
+  const r=window._recent[i];if(!r)return;
+  const y=parseFloat(r.Yardage_x002f_production)||0;
+  const total=parseFloat(r.TotalCost)||0;
+  const cpy=y>0&&total>0?total/y:0;
+  const bcpy=parseFloat(r.Bid_x0020_Cost_x0020_Per_x0020_Y)||0;
+  const v=cpy>0&&bcpy>0?cpy-bcpy:0;
+  const labor=parseFloat(r.Labor_x0020_Hours)||0;
+  const prod=parseFloat(r.Production_x0020_Hours)||0;
+  const rows=[
+    ['Yards / Quantity',fmtNum(y)+' '+esc(r.Unit||'CY')],
+    ['Total Cost',fmtMoney(total)],
+    ['Cost / Yard (Actual)',fmtMoney(cpy)],
+    ['Bid Cost / Yard',fmtMoney(bcpy)],
+    ['Variance ($/CY)',`<span class="${v<0?'vn':'vp'}">${fmtVar(v)}</span>`],
+    ['Labor Hours',fmtNum(labor,1)],
+    ['Production Hours',fmtNum(prod,1)],
+    r.Crew_x0020_Size?['Crew Size',esc(r.Crew_x0020_Size)]:null,
+    r.Work_x0020_Type?['Work Type',esc(r.Work_x0020_Type)]:null,
+    r.Equipment?['Equipment',esc(r.Equipment)]:null,
+    r.STR_x0020_ID?['STR ID',esc(r.STR_x0020_ID)]:null,
+    r.Notes?['Notes',esc(r.Notes)]:null
+  ].filter(Boolean);
+  const html=`
+    <h3>${esc(r.Jobnumber||'?')} · Phase ${esc(r.Phase||'?')}</h3>
+    <div class="meta">${fmtDate(r.Date)} · ${esc(r.Foreman||'—')}</div>
+    ${rows.map(([l,v])=>`<div class="dr"><span class="lk">${l}</span><span class="vk">${v}</span></div>`).join('')}
+    <div class="mf"><button class="btn" onclick="closeMo()">Close</button></div>`;
+  const mo=document.createElement('div');
+  mo.className='mo';
+  mo.onclick=e=>{if(e.target===mo)closeMo();};
+  mo.innerHTML=`<div class="md">${html}</div>`;
+  document.body.appendChild(mo);
+}
+function closeMo(){const m=document.querySelector('.mo');if(m)m.remove();}
+
+function setForeman(v){S.selectedForeman=v;render();}
+function setDate(which,v){if(which==='from')S.dateFrom=v;else S.dateTo=v;render();}
+async function refresh(){toast('Refreshing...');await loadData();render();toast('Updated.');}
+function toast(msg,type){
+  const t=document.createElement('div');
+  t.className='toast'+(type==='err'?' err':'');
+  t.textContent=msg;
+  document.getElementById('toasts').appendChild(t);
+  setTimeout(()=>t.remove(),2400);
+}
+
+initMsal().catch(e=>{
+  console.error(e);
+  document.getElementById('app').innerHTML=`<div class="auth"><div class="auth-c"><h1>Setup error</h1><p style="font-family:monospace;font-size:12px">${esc(e.message||String(e))}</p></div></div>`;
+});
+
+</script>
+</body>
+</html>
