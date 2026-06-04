@@ -758,6 +758,9 @@ async function submitProductionToSP(wk){
       const unit=p.unit||(p.yardsMovedTotal?'CY':p.areaFinished?'SY':'LF');
       const activity=p.activity||p.workType||p.bidItem||'';
       const cost=parseFloat(p.materialCost||p.totalCost||p.actualCost)||0;
+      // Derive totals when foreman only entered per-yard rates (Phase 300 form)
+      const bidCostVal=parseFloat(p.bidCost||0)||(parseFloat(p.bidCostPerYard||0)*qty)||0;
+      const actualCostVal=parseFloat(p.actualCost||0)||(parseFloat(p.actualCostPerYard||0)*qty)||0;
       const notesParts=[p.notes,p.weather?'Weather: '+p.weather:'',p.pipeSize?'Pipe: '+p.pipeSize:'',p.strId?'STR: '+p.strId:''].filter(Boolean);
       await fetch(`https://graph.microsoft.com/v1.0/sites/${site.id}/lists/${listId}/items`,{method:'POST',headers:{Authorization:'Bearer '+tok,'Content-Type':'application/json'},body:JSON.stringify({fields:{
           Title:`${p.job||'?'} P${entryPhase||'?'} ${p.date||''}`,
@@ -768,8 +771,8 @@ async function submitProductionToSP(wk){
           Unit:unit,
           Foreman:auth.user?.name||'',
           Date:p.date,
-          BidCost:parseFloat(p.bidCost||0)||0,
-          ActualCost:parseFloat(p.actualCost||0)||0,
+          BidCost:bidCostVal,
+          ActualCost:actualCostVal,
           TotalCost:parseFloat(p.totalCost||0)||0,
           Equipment:p.strId||'',
           EquipmentHours:getJobEquipHours(wk,p.date,p.job),
@@ -1130,11 +1133,11 @@ function rReview(){const wk=S.weeks[S.currentWeek];const dates=wd(S.currentWeek)
   h+=`<div class="card" style="padding:0;overflow:hidden">`;
   wk.employees.forEach((eid,idx)=>{const emp=allEmps().find(e=>e.id===eid);if(!emp)return;const{l,e,c}=ct(wk,eid);h+=`<div style="padding:13px 16px;${idx>0?'border-top:0.5px solid var(--border)':''}display:flex;align-items:center;justify-content:space-between"><div><strong style="font-size:14px">${emp.name}</strong><br><span style="font-size:12px;color:var(--text2)">${emp.title}</span></div><div style="text-align:right"><strong style="font-size:16px;font-weight:700;letter-spacing:-.3px">${c.toFixed(1)}h</strong><br><span style="font-size:11px;color:var(--text3)">L:${l.toFixed(1)} E:${e.toFixed(1)}</span></div></div>`;});
   h+=`</div>`;
-  if(wk.status==='draft'){h+=`<div class="card"><strong style="font-size:17px;font-weight:700;display:block;margin-bottom:6px;letter-spacing:-.3px">Submit for approval</strong><p style="font-size:14px;color:var(--text2);margin-bottom:16px">Managers will be notified by email. Timesheet locks until approved.</p>
+  if(wk.status==='draft'){h+=`<div class="card"><strong style="font-size:17px;font-weight:700;display:block;margin-bottom:6px;letter-spacing:-.3px">Submit for approval</strong><p style="font-size:14px;color:var(--text2);margin-bottom:16px">The selected manager will see this on their Approvals tab. Timesheet locks until approved.</p>
     <div class="fr"><label>Submitted by</label><input type="text" id="sb" placeholder="Your name" value="${auth.user?auth.user.name:''}"/></div>
     <div class="fr"><label>Notes (optional)</label><textarea id="sn" placeholder="Job numbers, special instructions..."></textarea></div>
     <div class="fr"><label>Send approval to</label>${S.managers.map((m,i)=>`<label style="display:flex;align-items:center;gap:12px;font-size:15px;margin-top:12px;cursor:pointer"><input type="radio" name="mgr" id="mg-${i}" value="${i}" ${i===0?'checked':''} style="width:22px;height:22px;accent-color:var(--accent)"/> <div>${m.name}<br><span style="font-size:13px;color:var(--text2)">${m.email}</span></div></label>`).join('')}</div>
-    <button class="btn btn-p btn-bl" style="margin-top:8px" id="sub-btn" onclick="this.disabled=true;this.textContent='Submitting...';subTS()"><i class="ti ti-send"></i> Submit & notify managers</button></div>`;}
+    <button class="btn btn-p btn-bl" style="margin-top:8px" id="sub-btn" onclick="this.disabled=true;this.textContent='Submitting...';subTS()"><i class="ti ti-send"></i> Submit for approval</button></div>`;}
   else{h+=`<div class="ib"><i class="ti ti-info-circle"></i><div>Status: <strong>${wk.status}</strong>${wk.submittedBy?' · '+wk.submittedBy:''}${wk.approvedBy?' · Approved by '+wk.approvedBy:''}<br><button class="btn btn-sm" style="margin-top:10px" onclick="rToDraft()"><i class="ti ti-arrow-back"></i> Return to draft</button> <button class=\"btn btn-sm btn-d\" onclick=\"deleteSubmission()\"><i class=\"ti ti-trash\"></i> Delete</button></div></div>`;}
   h+=`</div>`;document.getElementById('mc').innerHTML=h;
 }
@@ -1143,8 +1146,6 @@ function subTS(){const wk=S.weeks[S.currentWeek];const by=document.getElementByI
   const mgrs=[S.managers[parseInt(sel.value)]];if(!mgrs[0]){toast('Invalid manager selection.','error');return;}
   wk.status='submitted';wk.submittedBy=by;wk.submittedAt=new Date().toISOString();wk.comments=document.getElementById('sn').value;
   wk.assignedManager=mgrs[0].email; // Store which manager this is assigned to
-  const tot=Object.values(wk.entries).reduce((s,v)=>s+(parseFloat(v.hours)||0),0);
-  mgrs.forEach(m=>{const sub=encodeURIComponent(`Timesheet Approval — ${fw(S.currentWeek)}`);const bod=encodeURIComponent(`Hi ${m.name},\n\nPlease approve the timesheet for ${fw(S.currentWeek)}.\n\nSubmitted by: ${by}\nEmployees: ${wk.employees.length}\nLabor hours: ${tot.toFixed(1)}\nNotes: ${wk.comments||'None'}\n\nOpen the VH Timesheet App to approve or return.\n\nThank you`);window.open(`mailto:${m.email}?subject=${sub}&body=${bod}`);});
   // Push to SharePoint and remove from local drafts
   submitProductionToSP(wk);
   submitJobLinesToSP(wk);
