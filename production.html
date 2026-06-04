@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="theme-color" content="#c8102e">
-<title>VH Production Dashboard</title>
+<title>VH Earthwork Dashboard</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap">
@@ -132,7 +132,7 @@ const FALLBACK_MANAGERS=['jroe@valentiheld.com','jtrenkamp@valentiheld.com'];
 
 let mi;
 let auth={user:null,account:null,isAdmin:false,isManager:false,role:'foreman'};
-let S={rows:[],foremen:[],selectedForeman:'',dateFrom:null,dateTo:null,adminEmails:[],managers:[]};
+let S={rows:[],foremen:[],jobs:[],phases:[],selectedForeman:'',selectedJob:'',selectedPhase:'',dateFrom:null,dateTo:null,adminEmails:[],managers:[]};
 
 // === MSAL ===
 async function initMsal(){
@@ -197,8 +197,10 @@ async function loadData(){
     const r=await fetch(url,{headers:{Authorization:'Bearer '+tok}});
     if(!r.ok)throw new Error('Graph '+r.status);
     const j=await r.json();
-    S.rows=(j.value||[]).map(it=>it.fields).filter(f=>f&&f.Date);
+    S.rows=(j.value||[]).map(it=>it.fields).filter(f=>f&&f.Date&&(f.Phase==='300'||f.Phase==='310'));
     S.foremen=[...new Set(S.rows.map(r=>r.Foreman).filter(Boolean))].sort();
+    S.jobs=[...new Set(S.rows.map(r=>r.Jobnumber).filter(Boolean))].sort();
+    S.phases=[...new Set(S.rows.map(r=>r.Phase).filter(Boolean))].sort();
   }catch(e){
     console.error('loadData:',e);
     toast('Failed to load production data.','err');
@@ -222,6 +224,8 @@ function filteredRows(){
     if(from&&d<from)return false;
     if(to&&d>to)return false;
     if(S.selectedForeman&&r.Foreman!==S.selectedForeman)return false;
+    if(S.selectedJob&&r.Jobnumber!==S.selectedJob)return false;
+    if(S.selectedPhase&&r.Phase!==S.selectedPhase)return false;
     return true;
   });
 }
@@ -229,26 +233,46 @@ function thisWeekRows(){
   const sow=startOfWeek(new Date());
   return S.rows.filter(r=>{
     if(S.selectedForeman&&r.Foreman!==S.selectedForeman)return false;
+    if(S.selectedJob&&r.Jobnumber!==S.selectedJob)return false;
+    if(S.selectedPhase&&r.Phase!==S.selectedPhase)return false;
     return r.Date&&new Date(r.Date)>=sow;
   });
 }
+// All-time rows for the selected job/phase/foreman, ignoring date range.
+// Used by the "Accumulated Cost" and "Total Yards to Date" KPIs.
+function allTimeRows(){
+  return S.rows.filter(r=>{
+    if(S.selectedForeman&&r.Foreman!==S.selectedForeman)return false;
+    if(S.selectedJob&&r.Jobnumber!==S.selectedJob)return false;
+    if(S.selectedPhase&&r.Phase!==S.selectedPhase)return false;
+    return true;
+  });
+}
 function aggregate(rows){
-  let yards=0,totalCost=0,bidCost=0,laborHours=0,prodHours=0;
+  let yards=0,totalCost=0,bidYardsForBid=0,bidWeighted=0,laborHours=0,prodHours=0;
   rows.forEach(r=>{
     const y=parseFloat(r.Yardage_x002f_production)||0;
     yards+=y;
-    totalCost+=parseFloat(r.TotalCost)||0;
+    // TotalCost (entered by foreman in production form), fall back to ActualCost
+    // (populated on baseline rows from the historical import)
+    totalCost+=parseFloat(r.TotalCost)||parseFloat(r.ActualCost)||0;
+    // Bid $/CY — only include rows that actually have bid data; otherwise baseline
+    // rows (where bid was never entered) drag the weighted avg toward 0.
     const bc=parseFloat(r.BidCost)||0;
     const bcpy=parseFloat(r.Bid_x0020_Cost_x0020_Per_x0020_Y)||0;
-    bidCost+=bc>0?bc:(bcpy*y);
+    const effectiveBcpy=bcpy>0?bcpy:(bc>0&&y>0?bc/y:0);
+    if(effectiveBcpy>0&&y>0){
+      bidYardsForBid+=y;
+      bidWeighted+=effectiveBcpy*y;
+    }
     laborHours+=parseFloat(r.Labor_x0020_Hours)||0;
     prodHours+=parseFloat(r.Production_x0020_Hours)||0;
   });
   const cpy=yards>0?totalCost/yards:0;
-  const bcpy=yards>0?bidCost/yards:0;
+  const bcpy=bidYardsForBid>0?bidWeighted/bidYardsForBid:0;
   const variance=(cpy>0&&bcpy>0)?cpy-bcpy:0;
   const productivity=laborHours>0?yards/laborHours:0;
-  return{yards,totalCost,bidCost,laborHours,prodHours,cpy,bcpy,variance,productivity};
+  return{yards,totalCost,bidCost:bidWeighted,laborHours,prodHours,cpy,bcpy,variance,productivity};
 }
 
 // === RENDER ===
@@ -257,6 +281,9 @@ function render(){
   const weekRows=thisWeekRows();
   const wk=aggregate(weekRows);
   const rng=aggregate(rows);
+  const allTime=aggregate(allTimeRows());
+  // Label for the "to-date" KPIs — tells the user what scope they're seeing
+  const toDateLabel=S.selectedJob?`Job ${S.selectedJob}${S.selectedPhase?' P'+S.selectedPhase:''} to-date`:'All earthwork to-date';
 
   // Group by job+phase
   const byJob={};
@@ -273,7 +300,7 @@ function render(){
 
   document.getElementById('app').innerHTML=`
     <div class="hdr"><div class="hdr-in">
-      <div class="brand"><div class="logo">VH</div><span>Production</span></div>
+      <div class="brand"><div class="logo">VH</div><span>Earthwork</span></div>
       <div class="uline">
         <span class="nm">${esc(auth.user.name)}</span>${roleBadge}
         <button class="btn btn-sm" onclick="signOut()" title="Sign out"><i class="ti ti-logout"></i></button>
@@ -289,6 +316,20 @@ function render(){
               ${S.foremen.map(f=>`<option value="${esc(f)}" ${f===S.selectedForeman?'selected':''}>${esc(f)}</option>`).join('')}
             </select>
           </div>`:''}
+        <div class="cg">
+          <label>Job</label>
+          <select onchange="setJob(this.value)">
+            <option value="">All jobs</option>
+            ${S.jobs.map(j=>`<option value="${esc(j)}" ${j===S.selectedJob?'selected':''}>${esc(j)}</option>`).join('')}
+          </select>
+        </div>
+        <div class="cg">
+          <label>Phase</label>
+          <select onchange="setPhase(this.value)">
+            <option value="">All earth (300+310)</option>
+            ${S.phases.map(p=>`<option value="${esc(p)}" ${p===S.selectedPhase?'selected':''}>${esc(p)}</option>`).join('')}
+          </select>
+        </div>
         <div class="cg">
           <label>From</label>
           <input type="date" value="${S.dateFrom}" onchange="setDate('from',this.value)">
@@ -307,8 +348,8 @@ function render(){
         <div class="k feat"><div class="lbl">Cost Variance</div><div class="val ${rng.variance<0?'good':(rng.variance>0?'bad':'')}">${fmtVar(rng.variance)}</div><div class="sub">$/CY actual vs bid</div></div>
         <div class="k feat"><div class="lbl">Cost / Yard</div><div class="val">${fmtMoney(rng.cpy)}</div><div class="sub">range total</div></div>
         <div class="k"><div class="lbl">Bid $/CY</div><div class="val">${fmtMoney(rng.bcpy)}</div></div>
-        <div class="k"><div class="lbl">Productivity</div><div class="val">${fmtNum(rng.productivity,1)}</div><div class="sub">CY / labor hr</div></div>
-        <div class="k"><div class="lbl">Labor Hours</div><div class="val">${fmtNum(rng.laborHours,1)}</div></div>
+        <div class="k"><div class="lbl">Accumulated Cost</div><div class="val">${fmtMoney(allTime.totalCost,0)}</div><div class="sub">${esc(toDateLabel)}</div></div>
+        <div class="k"><div class="lbl">Yards to Date</div><div class="val">${fmtNum(allTime.yards)}</div><div class="sub">${esc(toDateLabel)}</div></div>
       </div>
 
       <div class="sec">
@@ -355,7 +396,7 @@ function render(){
 function renderAuth(){
   document.getElementById('app').innerHTML=`
     <div class="auth"><div class="auth-c">
-      <div class="brand"><div class="logo">VH</div><span>Production Dashboard</span></div>
+      <div class="brand"><div class="logo">VH</div><span>Earthwork Dashboard</span></div>
       <h1>Sign in to continue</h1>
       <p>Use your Valenti Held account to view your production data.</p>
       <button class="btn btn-p" style="width:100%;justify-content:center;padding:10px 14px" onclick="signIn()"><i class="ti ti-brand-microsoft"></i> Sign in with Microsoft</button>
@@ -399,6 +440,8 @@ function showDetail(i){
 function closeMo(){const m=document.querySelector('.mo');if(m)m.remove();}
 
 function setForeman(v){S.selectedForeman=v;render();}
+function setJob(v){S.selectedJob=v;render();}
+function setPhase(v){S.selectedPhase=v;render();}
 function setDate(which,v){if(which==='from')S.dateFrom=v;else S.dateTo=v;render();}
 async function refresh(){toast('Refreshing...');await loadData();render();toast('Updated.');}
 function toast(msg,type){
