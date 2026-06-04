@@ -9,7 +9,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@2.47.0/tabler-icons.min.css">
-<script src="https://alcdn.msauth.net/browser/2.38.3/js/msal-browser.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@azure/msal-browser@2.38.3/lib/msal-browser.min.js"></script>
 <style>
   :root{
     --bg:#fafafa; --bg2:#f0f0f0; --border:#e5e5e5;
@@ -136,6 +136,9 @@ let S={rows:[],foremen:[],selectedForeman:'',dateFrom:null,dateTo:null,adminEmai
 
 // === MSAL ===
 async function initMsal(){
+  if(typeof msal==='undefined'||!msal.PublicClientApplication){
+    throw new Error('MSAL library failed to load from CDN. Check network/CSP and retry.');
+  }
   mi=new msal.PublicClientApplication({
     auth:{clientId:CLIENT_ID,authority:`https://login.microsoftonline.com/${TENANT_ID}`,redirectUri:window.location.origin+window.location.pathname},
     cache:{cacheLocation:'localStorage'}
