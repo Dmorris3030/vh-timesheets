@@ -113,7 +113,7 @@
   .auth-c .brand{justify-content:center;margin-bottom:18px}
   .auth-c h1{font-size:22px;font-weight:700;margin-bottom:8px;letter-spacing:-.5px}
   .auth-c p{color:var(--text2);font-size:14px;margin-bottom:22px;line-height:1.4}
-</style>
+.vt{display:inline-flex;background:#f5f5f7;border-radius:8px;padding:3px;margin-bottom:14px;gap:2px}.vt button{font:inherit;font-size:13px;font-weight:600;padding:6px 14px;border:none;background:transparent;color:#666;cursor:pointer;border-radius:6px;transition:background .12s,color .12s;display:inline-flex;align-items:center;gap:6px}.vt button.on{background:#fff;color:#c8102e;box-shadow:0 1px 2px rgba(0,0,0,.06)}.vt button:not(.on):hover{color:#111}.day-card{background:#fff;border:1px solid #eaeaea;border-radius:8px;padding:12px 14px;margin-bottom:8px}.day-hdr{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:8px;font-weight:700;font-size:13px}.day-totals{font-weight:400;font-size:12px;color:#666}.day-cols{display:grid;grid-template-columns:1fr 1fr;gap:16px}.day-col-title{font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.3px;color:#666;margin-bottom:6px;padding-bottom:4px;border-bottom:1px solid #eaeaea}.day-row{display:flex;justify-content:space-between;align-items:baseline;padding:4px 0;font-size:13px;border-bottom:1px solid #f5f5f5}.day-row:last-child{border-bottom:none}.day-row.legacy{color:#999;font-style:italic}.day-name{flex:1;min-width:0}.day-name .day-sub{font-size:11px;color:#888;margin-left:4px}.day-hrs{font-weight:600;margin-left:8px;white-space:nowrap}.day-empty{font-size:12px;color:#888;padding:6px 0;font-style:italic}@media (max-width:640px){.day-cols{grid-template-columns:1fr;gap:8px}}</style>
 </head>
 <body>
 <div id="app"><div class="loading"><div class="spinner"></div><div>Loading...</div></div></div>
@@ -129,10 +129,14 @@ const TS_SITE='valentiheld.sharepoint.com,155c9359-7fd3-4f2c-8c6a-b04a722b6f64,8
 // Fallback role detection if vhts-state.json can't be loaded
 const FALLBACK_ADMINS=['dmorris@valentiheld.com','abewley@valentiheld.com'];
 const FALLBACK_MANAGERS=['jroe@valentiheld.com','jtrenkamp@valentiheld.com'];
+const EARTH_PHASES=['300','310'];
+const UTIL_PHASES=['400','450','500','600'];
+const BUDGETS_LIST='9d5a39ab-23ff-41f5-9dd5-40fe40f56323';
+const TSJL_LIST='228b5d0b-c95c-4bd0-a9b2-b963d767b7d2';
 
 let mi;
 let auth={user:null,account:null,isAdmin:false,isManager:false,role:'foreman'};
-let S={rows:[],foremen:[],jobs:[],phases:[],selectedForeman:'',selectedJob:'',selectedPhase:'',dateFrom:null,dateTo:null,adminEmails:[],managers:[]};
+let S={view:'earth',rows:[],foremen:[],jobs:[],phases:[],selectedForeman:'',selectedJob:'',selectedPhase:'',dateFrom:null,dateTo:null,adminEmails:[],managers:[],budgets:{},jobLines:[]};
 
 // === MSAL ===
 async function initMsal(){
@@ -151,6 +155,7 @@ async function initMsal(){
     auth.user={name:accs[0].name,email:(accs[0].username||'').toLowerCase()};
     await loadRoles();
     await loadData();
+    await Promise.all([loadBudgets(),loadJobLines()]);
     render();
   } else {
     renderAuth();
@@ -197,7 +202,8 @@ async function loadData(){
     const r=await fetch(url,{headers:{Authorization:'Bearer '+tok}});
     if(!r.ok)throw new Error('Graph '+r.status);
     const j=await r.json();
-    S.rows=(j.value||[]).map(it=>it.fields).filter(f=>f&&f.Date&&(f.Phase==='300'||f.Phase==='310'));
+    const allPhases=EARTH_PHASES.concat(UTIL_PHASES);
+    S.rows=(j.value||[]).map(it=>it.fields).filter(f=>f&&f.Date&&allPhases.includes(f.Phase));
     S.foremen=[...new Set(S.rows.map(r=>r.Foreman).filter(Boolean))].sort();
     S.jobs=[...new Set(S.rows.map(r=>r.Jobnumber).filter(Boolean))].sort();
     S.phases=[...new Set(S.rows.map(r=>r.Phase).filter(Boolean))].sort();
@@ -206,6 +212,91 @@ async function loadData(){
     toast('Failed to load production data.','err');
   }
 }
+
+async function loadBudgets(){
+  try{
+    const tok=await getToken();if(!tok)return;
+    const url='https://graph.microsoft.com/v1.0/sites/'+FD_SITE+'/lists/'+BUDGETS_LIST+'/items?$expand=fields($select=JobNumber,JobName,Phase,PhaseType,BidCost,BidQty,QtyUnit,BidHours)&$top=200';
+    const r=await fetch(url,{headers:{Authorization:'Bearer '+tok}});
+    if(!r.ok)return;
+    const j=await r.json();
+    S.budgets={};
+    (j.value||[]).map(it=>it.fields).forEach(b=>{S.budgets[b.JobNumber+'-'+b.Phase]=b;});
+  }catch(e){console.warn('loadBudgets:',e);}
+}
+async function loadJobLines(){
+  try{
+    const tok=await getToken();if(!tok)return;
+    const fields='WorkDate,EmployeeName,EmployeeTitle,Hours,Equipment,Jobnumber,Phase,SubmittedBy';
+    const url='https://graph.microsoft.com/v1.0/sites/'+FD_SITE+'/lists/'+TSJL_LIST+'/items?$expand=fields($select='+fields+')&$top=1000';
+    const r=await fetch(url,{headers:{Authorization:'Bearer '+tok}});
+    if(!r.ok)return;
+    const j=await r.json();
+    S.jobLines=(j.value||[]).map(it=>it.fields).filter(f=>f&&f.WorkDate);
+  }catch(e){console.warn('loadJobLines:',e);}
+}
+function parseEquipment(s){
+  if(!s)return [];
+  if(s.indexOf('[object Object]')>=0){
+    const count=s.split(',').length;
+    return [{name:'('+count+' unrecorded item'+(count>1?'s':'')+')',hours:0,legacy:true}];
+  }
+  try{const arr=JSON.parse(s);return Array.isArray(arr)?arr:[];}
+  catch(e){return [{name:String(s),hours:0}];}
+}
+function prepDailyBreakdown(){
+  const phases=viewPhases();
+  const from=S.dateFrom?new Date(S.dateFrom+'T00:00:00'):null;
+  const to=S.dateTo?new Date(S.dateTo+'T23:59:59'):null;
+  const passes=function(r,useDate){
+    if(phases.indexOf(r.Phase)<0)return false;
+    if(S.selectedJob&&r.Jobnumber!==S.selectedJob)return false;
+    if(S.selectedPhase&&r.Phase!==S.selectedPhase)return false;
+    if(useDate){
+      const d=r.WorkDate?new Date(r.WorkDate):null;if(!d)return false;
+      if(from&&d<from)return false;
+      if(to&&d>to)return false;
+    }
+    return true;
+  };
+  const inRange=S.jobLines.filter(r=>passes(r,true));
+  const allTime=S.jobLines.filter(r=>passes(r,false));
+  const byDate={};
+  inRange.forEach(r=>{
+    const dk=(r.WorkDate||"").slice(0,10);if(!dk)return;
+    if(!byDate[dk])byDate[dk]={date:dk,crew:{},equip:{}};
+    const labor=parseFloat(r.Hours)||0;
+    const empKey=r.EmployeeName||"Unknown";
+    if(!byDate[dk].crew[empKey])byDate[dk].crew[empKey]={name:empKey,title:r.EmployeeTitle||'',hours:0};
+    byDate[dk].crew[empKey].hours+=labor;
+    const eq=parseEquipment(r.Equipment);
+    eq.forEach(e=>{
+      const ek=e.name||"(unknown)";
+      if(!byDate[dk].equip[ek])byDate[dk].equip[ek]={name:ek,hours:0,legacy:!!e.legacy};
+      byDate[dk].equip[ek].hours+=parseFloat(e.hours)||0;
+    });
+  });
+  const days=Object.values(byDate).map(d=>{
+    const crewArr=Object.values(d.crew).sort((a,b)=>b.hours-a.hours);
+    const equipArr=Object.values(d.equip).sort((a,b)=>b.hours-a.hours);
+    const laborTotal=crewArr.reduce((s,c)=>s+c.hours,0);
+    const equipTotal=equipArr.reduce((s,e)=>s+e.hours,0);
+    const dt=new Date(d.date+'T00:00:00');
+    const dateLabel=dt.toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'});
+    return{date:d.date,dateLabel,crew:crewArr,equip:equipArr,laborTotal,equipTotal};
+  }).sort((a,b)=>new Date(b.date)-new Date(a.date));
+  const totalLabor=allTime.reduce((s,r)=>s+(parseFloat(r.Hours)||0),0);
+  let totalEquip=0;const dateSet=new Set();
+  allTime.forEach(r=>{
+    if(r.WorkDate)dateSet.add(r.WorkDate.slice(0,10));
+    parseEquipment(r.Equipment).forEach(e=>{totalEquip+=parseFloat(e.hours)||0;});
+  });
+  return{days,totalLabor,totalEquip,daysWorked:dateSet.size,rangeRowCount:inRange.length};
+}
+
+function viewPhases(){return S.view==='earth'?EARTH_PHASES:UTIL_PHASES;}
+function rowMatchesView(r){return viewPhases().indexOf(r.Phase)>=0;}
+function unitLabel(){return S.view==='earth'?'CY':'LF';}
 
 // === HELPERS ===
 function isoDate(d){return d.toISOString().slice(0,10);}
@@ -220,6 +311,7 @@ function filteredRows(){
   const from=S.dateFrom?new Date(S.dateFrom+'T00:00:00'):null;
   const to=S.dateTo?new Date(S.dateTo+'T23:59:59'):null;
   return S.rows.filter(r=>{
+    if(!rowMatchesView(r))return false;
     const d=r.Date?new Date(r.Date):null;if(!d)return false;
     if(from&&d<from)return false;
     if(to&&d>to)return false;
@@ -232,6 +324,7 @@ function filteredRows(){
 function thisWeekRows(){
   const sow=startOfWeek(new Date());
   return S.rows.filter(r=>{
+    if(!rowMatchesView(r))return false;
     if(S.selectedForeman&&r.Foreman!==S.selectedForeman)return false;
     if(S.selectedJob&&r.Jobnumber!==S.selectedJob)return false;
     if(S.selectedPhase&&r.Phase!==S.selectedPhase)return false;
@@ -242,6 +335,7 @@ function thisWeekRows(){
 // Used by the "Accumulated Cost" and "Total Yards to Date" KPIs.
 function allTimeRows(){
   return S.rows.filter(r=>{
+    if(!rowMatchesView(r))return false;
     if(S.selectedForeman&&r.Foreman!==S.selectedForeman)return false;
     if(S.selectedJob&&r.Jobnumber!==S.selectedJob)return false;
     if(S.selectedPhase&&r.Phase!==S.selectedPhase)return false;
@@ -283,7 +377,7 @@ function render(){
   const rng=aggregate(rows);
   const allTime=aggregate(allTimeRows());
   // Label for the "to-date" KPIs — tells the user what scope they're seeing
-  const toDateLabel=S.selectedJob?`Job ${S.selectedJob}${S.selectedPhase?' P'+S.selectedPhase:''} to-date`:'All earthwork to-date';
+  const toDateLabel=S.selectedJob?`Job ${S.selectedJob}${S.selectedPhase?' P'+S.selectedPhase:''} to-date`:`All ${S.view==='earth'?'earthwork':'utility'} to-date`;
 
   // Group by job+phase
   const byJob={};
@@ -300,13 +394,17 @@ function render(){
 
   document.getElementById('app').innerHTML=`
     <div class="hdr"><div class="hdr-in">
-      <div class="brand"><div class="logo">VH</div><span>Earthwork</span></div>
+      <div class="brand"><div class="logo">VH</div><span>${S.view==='earth'?'Earthwork':'Utility'}</span></div>
       <div class="uline">
         <span class="nm">${esc(auth.user.name)}</span>${roleBadge}
         <button class="btn btn-sm" onclick="signOut()" title="Sign out"><i class="ti ti-logout"></i></button>
       </div>
     </div></div>
     <div class="container">
+      <div class="vt" role="tablist" aria-label="View">
+        <button class="${S.view==='earth'?'on':''}" onclick="setView('earth')"><i class="ti ti-mountain"></i> Earthwork</button>
+        <button class="${S.view==='util'?'on':''}" onclick="setView('util')"><i class="ti ti-tool"></i> Utility</button>
+      </div>
       <div class="ctrl">
         ${showSelector?`
           <div class="cg">
@@ -326,7 +424,7 @@ function render(){
         <div class="cg">
           <label>Phase</label>
           <select onchange="setPhase(this.value)">
-            <option value="">All earth (300+310)</option>
+            <option value="">All ${S.view==='earth'?'earth (300+310)':'utility (400+500+600)'}</option>
             ${S.phases.map(p=>`<option value="${esc(p)}" ${p===S.selectedPhase?'selected':''}>${esc(p)}</option>`).join('')}
           </select>
         </div>
@@ -344,12 +442,21 @@ function render(){
       </div>
 
       <div class="kg">
+        ${S.view==='earth'?`
         <div class="k feat"><div class="lbl">Yards This Week</div><div class="val">${fmtNum(wk.yards)}</div><div class="sub">${weekRows.length} entries · ${wk.laborHours.toFixed(1)}h labor</div></div>
         <div class="k feat"><div class="lbl">Cost Variance</div><div class="val ${rng.variance<0?'good':(rng.variance>0?'bad':'')}">${fmtVar(rng.variance)}</div><div class="sub">$/CY actual vs bid</div></div>
         <div class="k feat"><div class="lbl">Cost / Yard</div><div class="val">${fmtMoney(rng.cpy)}</div><div class="sub">range total</div></div>
         <div class="k"><div class="lbl">Bid $/CY</div><div class="val">${fmtMoney(rng.bcpy)}</div></div>
         <div class="k"><div class="lbl">Accumulated Cost</div><div class="val">${fmtMoney(allTime.totalCost,0)}</div><div class="sub">${esc(toDateLabel)}</div></div>
         <div class="k"><div class="lbl">Yards to Date</div><div class="val">${fmtNum(allTime.yards)}</div><div class="sub">${esc(toDateLabel)}</div></div>
+        `:`
+        <div class="k feat"><div class="lbl">LF This Week</div><div class="val">${fmtNum(wk.yards)}</div><div class="sub">${weekRows.length} entries · ${wk.laborHours.toFixed(1)}h labor</div></div>
+        <div class="k feat"><div class="lbl">Hours / LF</div><div class="val">${rng.yards>0?fmtNum(rng.laborHours/rng.yards,2):'—'}</div><div class="sub">labor hrs per LF (range)</div></div>
+        <div class="k feat"><div class="lbl">Total Hours</div><div class="val">${fmtNum(rng.laborHours,1)}</div><div class="sub">labor hrs in range</div></div>
+        <div class="k"><div class="lbl">Bid Hrs/LF</div><div class="val">—</div><div class="sub">pending bid import</div></div>
+        <div class="k"><div class="lbl">Accumulated Hours</div><div class="val">${fmtNum(allTime.laborHours,1)}</div><div class="sub">${esc(toDateLabel)}</div></div>
+        <div class="k"><div class="lbl">LF to Date</div><div class="val">${fmtNum(allTime.yards)}</div><div class="sub">${esc(toDateLabel)}</div></div>
+        `}
       </div>
 
       <div class="sec">
@@ -373,6 +480,32 @@ function render(){
             }).join('')}
           </tbody>
         </table>`}
+      </div>
+
+      <div class="sec">
+        <h2>Daily Crew &amp; Equipment <span class="h2-sub">labor + equipment hours per day</span></h2>
+        ${(()=>{const dB=prepDailyBreakdown();return `
+          <div class="kg" style="margin-bottom:14px">
+            <div class="k"><div class="lbl">Labor Hours to Date</div><div class="val">${fmtNum(dB.totalLabor,1)}</div><div class="sub">${esc(toDateLabel)}</div></div>
+            <div class="k"><div class="lbl">Equipment Hours to Date</div><div class="val">${fmtNum(dB.totalEquip,1)}</div><div class="sub">${esc(toDateLabel)}</div></div>
+            <div class="k"><div class="lbl">Days Worked</div><div class="val">${dB.daysWorked}</div><div class="sub">${esc(toDateLabel)}</div></div>
+          </div>
+          ${dB.days.length===0?'<div class="empty">No timesheet data in this range.</div>':dB.days.map(d=>`
+            <div class="day-card">
+              <div class="day-hdr">${esc(d.dateLabel)}<span class="day-totals">crew ${fmtNum(d.laborTotal,1)}h · equip ${fmtNum(d.equipTotal,1)}h</span></div>
+              <div class="day-cols">
+                <div class="day-col">
+                  <div class="day-col-title">Crew (labor)</div>
+                  ${d.crew.length===0?'<div class="day-empty">no labor</div>':d.crew.map(c=>`<div class="day-row"><span class="day-name">${esc(c.name)}${c.title?`<span class="day-sub">${esc(c.title)}</span>`:''}</span><span class="day-hrs">${fmtNum(c.hours,1)}h</span></div>`).join('')}
+                </div>
+                <div class="day-col">
+                  <div class="day-col-title">Equipment</div>
+                  ${d.equip.length===0?'<div class="day-empty">no equipment</div>':d.equip.map(e=>`<div class="day-row${e.legacy?' legacy':''}"><span class="day-name">${esc(e.name)}</span><span class="day-hrs">${e.legacy?'':fmtNum(e.hours,1)+'h'}</span></div>`).join('')}
+                </div>
+              </div>
+            </div>
+          `).join('')}
+        `;})()}
       </div>
 
       <div class="sec">
@@ -439,6 +572,7 @@ function showDetail(i){
 }
 function closeMo(){const m=document.querySelector('.mo');if(m)m.remove();}
 
+function setView(v){S.view=v;S.selectedPhase='';render();}
 function setForeman(v){S.selectedForeman=v;render();}
 function setJob(v){S.selectedJob=v;render();}
 function setPhase(v){S.selectedPhase=v;render();}

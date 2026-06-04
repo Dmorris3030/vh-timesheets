@@ -841,7 +841,7 @@ async function submitJobLinesToSP(wk){
       for(const ln of lines){
         const hrs=parseFloat(ln.hours)||0;
         if(hrs===0&&!ln.job)continue;
-        const equipStr=(ln.equipment||[]).map(eq=>(eq&&(eq.id||eq.equipNum))||eq).filter(Boolean).join(', ');
+        const equipStr=JSON.stringify((ln.equipment||[]));
         const r=await fetch(`https://graph.microsoft.com/v1.0/sites/${site.id}/lists/${listId}/items`,{method:'POST',headers:{Authorization:'Bearer '+tok,'Content-Type':'application/json'},body:JSON.stringify({fields:{
           Title:`${weekIso}-${empId}-${workDate}-${ln.job||'x'}-${ln.phase||'x'}`,
           WeekIso:weekIso,
