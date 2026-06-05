@@ -734,7 +734,7 @@ function getJobEquipHours(wk,dt,jobNum){
 }
 
 // Submit production entries to Field Data SharePoint list
-async function submitProductionToSP(wk){
+async function submitProductionToSP(wk, silent){
   const tok=await getTok();if(!tok)return;
   if(!wk.production)return;
   const allEntries=prodEntries(wk);
@@ -751,6 +751,25 @@ async function submitProductionToSP(wk){
     if(!listR.ok)return;
     const listData=await listR.json();
     const listId=listData.value[0]?.id;if(!listId)return;
+    // Idempotency: delete prior rows for this (Foreman, week date range) before inserting.
+    // Lets us safely call this on a timer or on every submit without duplicating rows.
+    const foremanName=auth.user?.name||'';
+    const weekEnd=S.currentWeek;
+    if(foremanName&&weekEnd&&/^\d{4}-\d{2}-\d{2}$/.test(weekEnd)){
+      const endD=new Date(weekEnd+'T12:00:00');
+      const startD=new Date(endD);startD.setDate(endD.getDate()-6);
+      const startIso=startD.toISOString().split('T')[0];
+      try{
+        const filt=encodeURIComponent(`fields/Foreman eq '${foremanName.replace(/'/g,"''")}' and fields/Date ge '${startIso}T00:00:00Z' and fields/Date le '${weekEnd}T23:59:59Z'`);
+        const existR=await fetch(`https://graph.microsoft.com/v1.0/sites/${site.id}/lists/${listId}/items?$filter=${filt}&$top=999`,{headers:{Authorization:'Bearer '+tok,'Prefer':'HonorNonIndexedQueriesWarningMayFailRandomly'}});
+        if(existR.ok){
+          const existData=await existR.json();
+          for(const item of (existData.value||[])){
+            await fetch(`https://graph.microsoft.com/v1.0/sites/${site.id}/lists/${listId}/items/${item.id}`,{method:'DELETE',headers:{Authorization:'Bearer '+tok}});
+          }
+        }
+      }catch(e){console.warn('Field Data cleanup skipped:',e);}
+    }
     for(const p of entries){
       const totals=getJobTotals(wk,p.date,p.job);
       const qty=parseFloat(p.quantity||p.yardsMovedTotal||p.areaFinished)||0;
@@ -790,7 +809,7 @@ async function submitProductionToSP(wk){
           Notes:notesParts.join(' | ')
         }})});
     }
-    toast('Production data sent to Field Data.','success');
+    if(!silent)toast('Production data sent to Field Data.','success');
   }catch(e){console.error('Production submit error:',e);}
 }
 
@@ -798,7 +817,7 @@ async function submitProductionToSP(wk){
 // so Power BI can join against bid data for bid-vs-actual variance reporting.
 // One row per (employee, date, jobLine). Idempotent on re-submit: deletes the
 // (week, submitter) rows first, then inserts fresh.
-async function submitJobLinesToSP(wk){
+async function submitJobLinesToSP(wk, silent){
   const tok=await getTok();if(!tok)return;
   if(!wk||!wk.entries)return;
   try{
@@ -841,7 +860,7 @@ async function submitJobLinesToSP(wk){
       for(const ln of lines){
         const hrs=parseFloat(ln.hours)||0;
         if(hrs===0&&!ln.job)continue;
-        const equipStr=JSON.stringify((ln.equipment||[]));
+        const equipStr=JSON.stringify((ln.equipment||[]).filter(Boolean));
         const r=await fetch(`https://graph.microsoft.com/v1.0/sites/${site.id}/lists/${listId}/items`,{method:'POST',headers:{Authorization:'Bearer '+tok,'Content-Type':'application/json'},body:JSON.stringify({fields:{
           Title:`${weekIso}-${empId}-${workDate}-${ln.job||'x'}-${ln.phase||'x'}`,
           WeekIso:weekIso,
@@ -859,7 +878,7 @@ async function submitJobLinesToSP(wk){
         if(r.ok)inserted++;
       }
     }
-    if(inserted>0)toast(`Hours sent: ${inserted} row${inserted===1?'':'s'} to TimesheetJobLines.`,'success');
+    if(inserted>0&&!silent)toast(`Hours sent: ${inserted} row${inserted===1?'':'s'} to TimesheetJobLines.`,'success');
   }catch(e){console.error('submitJobLinesToSP:',e);}
 }
 
@@ -1481,22 +1500,28 @@ function closeM(){const m=document.querySelector('.mo');if(m)m.remove();}
 let toastT;
 function toast(msg,type=''){const old=document.querySelector('.toast');if(old)old.remove();const t=document.createElement('div');t.className='toast'+(type?' '+type:'');t.textContent=msg;document.body.appendChild(t);clearTimeout(toastT);toastT=setTimeout(()=>t.remove(),3000);}
 initApp();
-
 ;(function setupPeriodicSPSync(){
+  // Every 60s, if the current week's production or timesheet data has changed,
+  // silently push to the Field Data + TimesheetJobLines lists so the production
+  // dashboard sees real-time progress (instead of waiting for the weekly Submit).
   let lastSnap="";
   let isSyncing=false;
   setInterval(async function(){
     if(isSyncing)return;
     try{
-      if(typeof S==="undefined"||!S||!S.weeks)return;
-      if(typeof saveSP!=="function")return;
-      var ownKeys=Object.keys(S.weeks).filter(function(k){return /^\d{4}-\d{2}-\d{2}$/.test(k);});
-      if(ownKeys.length===0)return;
-      var cur=JSON.stringify(ownKeys.map(function(k){return [k,S.weeks[k]];}));
+      if(typeof S==="undefined"||!S||!S.weeks||!S.currentWeek)return;
+      if(typeof auth==="undefined"||!auth||!auth.user)return; // not signed in
+      const wk=S.weeks[S.currentWeek];
+      if(!wk)return;
+      if(typeof submitProductionToSP!=="function"||typeof submitJobLinesToSP!=="function")return;
+      // Detect change by serializing the parts that matter for SP writes
+      const cur=JSON.stringify({p:wk.production||{},e:wk.entries||{}});
       if(cur===lastSnap)return;
+      if(cur==='{"p":{},"e":{}}')return; // empty week, nothing to push
       isSyncing=true;
-      console.log("[VH] periodic SP sync - own weeks changed, calling saveSP");
-      await saveSP();
+      console.log("[VH] periodic SP sync — current week changed, pushing to SP lists");
+      await submitProductionToSP(wk,true);
+      await submitJobLinesToSP(wk,true);
       lastSnap=cur;
     }catch(e){console.warn("[VH] periodic SP sync failed:",e);}
     finally{isSyncing=false;}
