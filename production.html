@@ -376,15 +376,27 @@ function render(){
   const wk=aggregate(weekRows);
   const rng=aggregate(rows);
   const allTime=aggregate(allTimeRows());
-  // JobBudgets override: when a specific job+phase is selected and has a budget,
-  // use canonical bid rate/hours instead of foreman-entered weighted averages.
-  const _budKey=S.selectedJob&&S.selectedPhase?S.selectedJob+'-'+S.selectedPhase:null;
-  const _bud=_budKey?S.budgets[_budKey]:null;
-  if(_bud&&_bud.BidCost&&_bud.BidQty){
-    rng.bcpy=_bud.BidCost/_bud.BidQty;
+  const _activePhases=viewPhases();
+  const _matchingBuds=Object.values(S.budgets||{}).filter(b=>{
+    if(!b||!b.Phase)return false;
+    if(_activePhases.indexOf(b.Phase)<0)return false;
+    if(S.selectedJob&&b.JobNumber!==S.selectedJob)return false;
+    if(S.selectedPhase&&b.Phase!==S.selectedPhase)return false;
+    return true;
+  });
+  const _budTotals=_matchingBuds.reduce((acc,b)=>{
+    acc.bidCost+=parseFloat(b.BidCost)||0;
+    acc.bidQty+=parseFloat(b.BidQty)||0;
+    acc.bidHours+=parseFloat(b.BidHours)||0;
+    return acc;
+  },{bidCost:0,bidQty:0,bidHours:0});
+  if(_budTotals.bidCost>0&&_budTotals.bidQty>0){
+    rng.bcpy=_budTotals.bidCost/_budTotals.bidQty;
     rng.variance=rng.cpy>0?rng.cpy-rng.bcpy:0;
   }
-  const _bidHrsPerUnit=(_bud&&_bud.BidHours&&_bud.BidQty)?_bud.BidHours/_bud.BidQty:null;
+  const _bidHrsPerUnit=(_budTotals.bidHours>0&&_budTotals.bidQty>0)?_budTotals.bidHours/_budTotals.bidQty:null;
+  const _totalBidHours=_budTotals.bidHours;
+  const _totalBidQty=_budTotals.bidQty;
   // Label for the "to-date" KPIs — tells the user what scope they're seeing
   const toDateLabel=S.selectedJob?`Job ${S.selectedJob}${S.selectedPhase?' P'+S.selectedPhase:''} to-date`:`All ${S.view==='earth'?'earthwork':'utility'} to-date`;
 
@@ -465,7 +477,7 @@ function render(){
         <div class="k feat"><div class="lbl">LF This Week</div><div class="val">${fmtNum(wk.yards)}</div><div class="sub">${weekRows.length} entries · ${wk.laborHours.toFixed(1)}h labor</div></div>
         <div class="k feat"><div class="lbl">Hours / LF</div><div class="val">${rng.yards>0?fmtNum(rng.laborHours/rng.yards,2):'—'}</div><div class="sub">labor hrs per LF (range)</div></div>
         <div class="k feat"><div class="lbl">Total Hours</div><div class="val">${fmtNum(rng.laborHours,1)}</div><div class="sub">labor hrs in range</div></div>
-        <div class="k"><div class="lbl">Bid Hrs/LF</div><div class="val">${_bidHrsPerUnit!==null?fmtNum(_bidHrsPerUnit,3):'—'}</div><div class="sub">${_bidHrsPerUnit!==null?'from budget':'select job+phase'}</div></div>
+        <div class="k"><div class="lbl">Bid Hrs/LF</div><div class="val">${_bidHrsPerUnit!==null?fmtNum(_bidHrsPerUnit,3):'—'}</div><div class="sub">${_totalBidHours>0?fmtNum(_totalBidHours,0)+'h bid / '+fmtNum(_totalBidQty,0)+' LF':'no budget set'}</div></div>
         <div class="k"><div class="lbl">Accumulated Hours</div><div class="val">${fmtNum(allTime.laborHours,1)}</div><div class="sub">${esc(toDateLabel)}</div></div>
         <div class="k"><div class="lbl">LF to Date</div><div class="val">${fmtNum(allTime.yards)}</div><div class="sub">${esc(toDateLabel)}</div></div>
         `}
