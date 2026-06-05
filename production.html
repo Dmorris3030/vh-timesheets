@@ -271,7 +271,7 @@ function prepDailyBreakdown(){
     byDate[dk].crew[empKey].hours+=labor;
     const eq=parseEquipment(r.Equipment);
     eq.forEach(e=>{
-      const ek=e.name||e.id||e.equipNum||"(unknown)";
+      const ek=e.description||e.name||e.id||e.equipNum||"(unknown)";
       if(!byDate[dk].equip[ek])byDate[dk].equip[ek]={name:ek,hours:0,legacy:!!e.legacy};
       byDate[dk].equip[ek].hours+=parseFloat(e.hours)||0;
     });
