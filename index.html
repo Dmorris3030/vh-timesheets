@@ -318,7 +318,7 @@ const PHASE_TEMPLATES={
 const WEATHER_OPTIONS=['Clear','Partly Cloudy','Overcast','Light Rain','Heavy Rain','Snow','Windy','Extreme Heat'];
 
 let entryMode='timecards'; // 'timecards' or 'production'
-let S={currentWeek:'',weeks:{},photoRecipients:[],phaseLabels:{},managers:[{name:'Derek Morris',email:'dmorris@valentiheld.com',title:'Manager - Earthwork'},{name:'Joe Roe',email:'jroe@valentiheld.com',title:'Superintendent'},{name:'Jason Trenkamp',email:'jtrenkamp@valentiheld.com',title:'Supervisor - Utility'}],adminEmails:['dmorris@valentiheld.com','abewley@valentiheld.com'],customEmployees:[],settings:{companyCode:'VHI',batchPrefix:'26'}};
+let S={currentWeek:'',weeks:{},photoRecipients:[],phaseLabels:{},managers:[{name:'Derek Morris',email:'dmorris@valentiheld.com',title:'Manager - Earthwork'},{name:'Joe Roe',email:'jroe@valentiheld.com',title:'Superintendent'},{name:'Jason Trenkamp',email:'jtrenkamp@valentiheld.com',title:'Supervisor - Utility'}],adminEmails:['dmorris@valentiheld.com','abewley@valentiheld.com'],customEmployees:[],hiddenEmployees:[],settings:{companyCode:'VHI',batchPrefix:'26'}};
 let cp='entry',eqmc=0,adys={};
 
 // ── RELIABILITY INFRASTRUCTURE ───────────────────────────────────────────────
@@ -456,7 +456,7 @@ async function saveAllSubmittedSP(){
         existing.submissions[key]=wk;
       }
     });
-    existing.managers=S.managers;existing.adminEmails=S.adminEmails;existing.settings=S.settings;existing.customEmployees=S.customEmployees||[];existing.photoRecipients=S.photoRecipients||[];existing.phaseLabels=S.phaseLabels||{};
+    existing.managers=S.managers;existing.adminEmails=S.adminEmails;existing.settings=S.settings;existing.customEmployees=S.customEmployees||[];existing.hiddenEmployees=S.hiddenEmployees||[];existing.photoRecipients=S.photoRecipients||[];existing.phaseLabels=S.phaseLabels||{};
     const put=await fetch(`https://graph.microsoft.com/v1.0/sites/${SITE_ID}/drive/root:/${SFN}:/content`,{method:'PUT',headers:{Authorization:'Bearer '+tok,'Content-Type':'application/json'},body:JSON.stringify(existing)});
     if(!put.ok)throw new Error(await put.text());
   }catch(e){console.error('saveAllSubmittedSP:',e);}
@@ -478,7 +478,7 @@ function saveDraft(){
 async function saveSP(){
   const tok=await getTok();if(!tok){toast('Sign in to sync.','error');return;}setSS('busy');
   try{
-    let existing={submissions:{},managers:S.managers,adminEmails:S.adminEmails,settings:S.settings,customEmployees:S.customEmployees||[],photoRecipients:S.photoRecipients||[],phaseLabels:S.phaseLabels||{}};
+    let existing={submissions:{},managers:S.managers,adminEmails:S.adminEmails,settings:S.settings,customEmployees:S.customEmployees||[],hiddenEmployees:S.hiddenEmployees||[],photoRecipients:S.photoRecipients||[],phaseLabels:S.phaseLabels||{}};
     try{
       const rGet=await fetch(`https://graph.microsoft.com/v1.0/sites/${SITE_ID}/drive/root:/${SFN}:/content`,{headers:{Authorization:'Bearer '+tok}});
       if(rGet.ok){const d=await rGet.json();if(d&&d.submissions)existing.submissions=d.submissions;}
@@ -501,7 +501,7 @@ async function saveSP(){
     });
     if(S.adminEmails.map(e=>e.toLowerCase()).includes((auth.user?.email||'').toLowerCase())){
       existing.managers=S.managers;existing.adminEmails=S.adminEmails;existing.settings=S.settings;
-      existing.customEmployees=S.customEmployees||[];existing.photoRecipients=S.photoRecipients||[];existing.phaseLabels=S.phaseLabels||{};
+      existing.customEmployees=S.customEmployees||[];existing.hiddenEmployees=S.hiddenEmployees||[];existing.photoRecipients=S.photoRecipients||[];existing.phaseLabels=S.phaseLabels||{};
     }
     existing.savedAt=new Date().toISOString();
     const r=await fetch(`https://graph.microsoft.com/v1.0/sites/${SITE_ID}/drive/root:/${SFN}:/content`,{method:'PUT',headers:{Authorization:'Bearer '+tok,'Content-Type':'application/json'},body:JSON.stringify(existing)});
@@ -529,6 +529,7 @@ async function loadSP(){
     if(data.adminEmails)S.adminEmails=data.adminEmails;
     if(data.settings)S.settings={...S.settings,...data.settings};
     if(data.customEmployees)S.customEmployees=data.customEmployees;
+    if(data.hiddenEmployees)S.hiddenEmployees=data.hiddenEmployees;
     if(data.photoRecipients)S.photoRecipients=data.photoRecipients;
     if(data.phaseLabels)S.phaseLabels=data.phaseLabels;
     if(auth.user){auth.isAdmin=S.adminEmails.map(e=>e.toLowerCase()).includes(auth.user.email.toLowerCase());updNav();}
@@ -899,7 +900,7 @@ function fw(iso){const d=new Date(iso+'T12:00:00');d.setDate(d.getDate()-6);retu
 function fd(iso){const d=new Date(iso+'T12:00:00');return d.toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'});}
 function fs(iso){const d=new Date(iso+'T12:00:00');return`${d.getMonth()+1}/${d.getDate()}`;}
 function wd(we){if(!we||!/^\d{4}-\d{2}-\d{2}$/.test(we))return DK.map(()=>new Date().toISOString().split('T')[0]);const end=new Date(we+'T12:00:00');if(isNaN(end.getTime()))return DK.map(()=>new Date().toISOString().split('T')[0]);return DK.map((_,i)=>{const d=new Date(end);d.setDate(end.getDate()-(6-i));return d.toISOString().split('T')[0];});}
-function allEmps(){return [...EMPS,...(S.customEmployees||[])].filter((e,i,a)=>a.findIndex(x=>x.id===e.id)===i);}
+function allEmps(){const hid=S.hiddenEmployees||[];return [...EMPS,...(S.customEmployees||[])].filter((e,i,a)=>a.findIndex(x=>x.id===e.id)===i).filter(e=>!hid.includes(e.id));}
 function tmOpts(cur){var s='<option value=""'+(!cur?' selected':'')+'>--</option>';for(var h=4;h<=20;h++){for(var m=0;m<60;m+=15){var v=(h<10?'0':'')+h+':'+(m<10?'0':'')+m;var d12=h===0?12:h>12?h-12:h;var l=d12+':'+(m<10?'0':'')+m+(h<12?'a':'p');s+='<option value="'+v+'"'+(cur===v?' selected':'')+'>'+l+'</option>';}}return s;}
 function initWeeks(){const sel=document.getElementById('ws');if(!sel)return;
   // Get current week Saturday
@@ -996,6 +997,24 @@ function rEntry(){const wk=S.weeks[S.currentWeek];const dates=wd(S.currentWeek);
   let h=`<div class="pg">`;
   if(auth.user){h+=`<div class="syb"><span class="sd ok" style="flex-shrink:0"></span><span style="flex:1;font-size:13px">${auth.user.name}${auth.isAdmin?' <span class="rb adm" style="margin-left:4px">Admin</span>':''}</span><button class="btn btn-sm" onclick="saveDraft()" style="flex-shrink:0;font-size:12px">💾 Save</button><button class="btn btn-sm" onclick="loadSP()" style="flex-shrink:0;font-size:12px">↻ Sync</button></div>`;}
   else{h+=`<div class="syb"><span class="sd off" style="flex-shrink:0"></span><span style="flex:1;font-size:14px">Not signed in</span><button class="btn btn-p btn-sm" onclick="signIn()" style="flex-shrink:0">Sign in</button></div>`;}
+  // Return-reason banner: shown when the manager returned this week. Extracts the latest "Returned: <reason>"
+  // segment from wk.comments (where retWk/retWkK append it). Persists across resubmits so the foreman has
+  // context, and is hidden once wk.returnedAt is cleared (e.g. on next clean cycle).
+  if(wk.returnedAt && wk.status==='draft'){
+    const cm=wk.comments||'';
+    const matches=cm.match(/Returned:\s*([^\n]+)/g);
+    const reason=matches&&matches.length?matches[matches.length-1].replace(/^Returned:\s*/,'').trim():'';
+    const rd=new Date(wk.returnedAt);
+    const rdStr=isNaN(rd)?'':`${rd.toLocaleDateString()} at ${rd.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}`;
+    h+=`<div style="background:#fef3c7;border:1px solid #f59e0b;border-radius:var(--r3);padding:14px 16px;margin-bottom:14px;display:flex;gap:12px;align-items:flex-start">
+      <i class="ti ti-alert-triangle" style="color:#d97706;font-size:22px;flex-shrink:0;margin-top:2px"></i>
+      <div style="flex:1;min-width:0">
+        <strong style="color:#92400e;font-size:15px;display:block;margin-bottom:6px">Returned by manager — please review and resubmit</strong>
+        ${reason?`<div style="color:#78350f;font-size:14px;line-height:1.45"><strong>Reason:</strong> ${reason.replace(/</g,'&lt;')}</div>`:'<div style="color:#78350f;font-size:13px;font-style:italic">No reason provided.</div>'}
+        ${rdStr?`<div style="color:#a16207;font-size:11px;margin-top:6px">Returned ${rdStr}</div>`:''}
+      </div>
+    </div>`;
+  }
   if(ro)h+=`<div class="ib"><i class="ti ti-lock"></i><span>Timesheet is <strong>${wk.status}</strong>. Return to draft to edit.</span></div>`;
   h+=`<div style="display:flex;gap:0;background:var(--bg2);border-radius:var(--r3);padding:3px;margin-bottom:16px">
     <button class="btn" style="flex:1;min-height:38px;font-size:14px;font-weight:600;border-radius:9px;border:none;${entryMode==='timecards'?'background:var(--bg);box-shadow:0 1px 3px rgba(0,0,0,.1);color:var(--accent)':'background:transparent;color:var(--text2)'}" onclick="entryMode='timecards';rEntry()">Time Cards</button>
@@ -1316,6 +1335,13 @@ function gpw(iso){const d=new Date(iso+'T12:00:00');const s=new Date(d.getFullYe
 function expCSV(k){const iso=k.split(':')[0];const wk=S.weeks[k];if(!wk)return;const dates=wd(iso);const bc=S.settings.batchPrefix+String(gpw(iso)).padStart(2,'0');
   const hdr='Batch Code,Employee Code,Department,Pay Type,Hours,Job,Phase,Cost Type,Date,Message,Pay Rate Level ,Wage Code,Union/Pay Group,Workers Comp,State Tax Code,County Tax,Local Tax,Equipment Code,Equipment Hours,Quantity,Company Code,Pay Rate,Equip cost category,crew number,cost center,work order,site equipment,site component,contract,eq. work order';
   const rows=[hdr];
+  // CSV-escape a value (Message column may contain commas/quotes/newlines)
+  const csvEsc=(v)=>{const s=v==null?'':String(v);return /[",\n\r]/.test(s)?'"'+s.replace(/"/g,'""')+'"':s;};
+  // PTO keyword detection — matches Spectrum skill's pto_comment_keywords (settings.json)
+  // If a row's notes match ANY of these AND it has hours, emit pay type V (vacation/PTO)
+  // with no Department/Job/Phase/Cost Type and no equipment.
+  const PTO_KW=['PTO','PTE','VAC','VACATION','HOLIDAY','PAID TIME OFF','SICK','TIME OFF'];
+  const isPTO=(n)=>{if(!n)return false;const u=String(n).toUpperCase();return PTO_KW.some(kw=>u.indexOf(kw)>=0);};
   wk.employees.forEach(eid=>{const emp=allEmps().find(e=>e.id===eid);if(!emp)return;
     dates.forEach(dt=>{
       const en=wk.entries[`${eid}:${dt}`]||{};
@@ -1324,14 +1350,22 @@ function expCSV(k){const iso=k.split(':')[0];const wk=S.weeks[k];if(!wk)return;c
       const d=new Date(dt+'T12:00:00');const ds=`${d.getMonth()+1}/${d.getDate()}/${d.getFullYear()}`;const ct=emp.dept==='FLD'?'L':'';
       jobLines.forEach(ln=>{
         const lh=parseFloat(ln.hours)||0;const job=ln.job||'';const ph=ln.phase||'';
+        const cmt=csvEsc(ln.notes||'');
+        // V pay type — notes contain a PTO keyword AND row has hours → vacation/PTO row
+        if(isPTO(ln.notes)&&lh>0){
+          const vMsg=cmt||csvEsc('VACATION TIME OFF');
+          rows.push(`${bc},${emp.sc||emp.id},,V,${lh},,,,${ds},${vMsg},,,,,,,,,,,${S.settings.companyCode},,,,,,,,,,`);
+          return; // skip R + equipment ER rows for this line
+        }
         const calc=calcJobHours(ln);const laborHrs=calc.labor>0?calc.labor:lh;
-        if(laborHrs>0)rows.push(`${bc},${emp.sc||emp.id},${emp.dept},R,${laborHrs},${job},${ph},${ct},${ds},,,,,,,,,,,,${S.settings.companyCode},,,,,,,,,,`);
-        // Equipment tied to this job line
-        (ln.equipment||[]).forEach(x=>{if(x.hours>0)rows.push(`${bc},${emp.sc||emp.id},${emp.dept},ER,${x.hours},${job},${ph},${ct},${ds},,,,,,,,,${x.number},${x.hours},,${S.settings.companyCode},,,,,,,,,,`);});
+        if(laborHrs>0)rows.push(`${bc},${emp.sc||emp.id},${emp.dept},R,${laborHrs},${job},${ph},${ct},${ds},${cmt},,,,,,,,,,,${S.settings.companyCode},,,,,,,,,,`);
+        // Equipment tied to this job line — message follows the parent row
+        (ln.equipment||[]).forEach(x=>{if(x.hours>0)rows.push(`${bc},${emp.sc||emp.id},${emp.dept},ER,${x.hours},${job},${ph},${ct},${ds},${cmt},,,,,,,,${x.number},${x.hours},,${S.settings.companyCode},,,,,,,,,,`);});
       });
-      // Legacy day-level equipment (backwards compat) - use first job line's job/phase
+      // Legacy day-level equipment (backwards compat) - use first job line's job/phase/notes
       const firstJob=(jobLines[0]||{}).job||'';const firstPh=(jobLines[0]||{}).phase||'';
-      eq.forEach(x=>{if(x.hours>0)rows.push(`${bc},${emp.sc||emp.id},${emp.dept},ER,${x.hours},${firstJob},${firstPh},${ct},${ds},,,,,,,,,${x.number},${x.hours},,${S.settings.companyCode},,,,,,,,,,`);});
+      const firstNotes=csvEsc((jobLines[0]||{}).notes||'');
+      eq.forEach(x=>{if(x.hours>0)rows.push(`${bc},${emp.sc||emp.id},${emp.dept},ER,${x.hours},${firstJob},${firstPh},${ct},${ds},${firstNotes},,,,,,,,${x.number},${x.hours},,${S.settings.companyCode},,,,,,,,,,`);});
     });});
   const blob=new Blob([rows.join('\n')],{type:'text/csv'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=`time_cards_${iso}.csv`;a.click();toast('Downloaded!','success');
 }
@@ -1463,28 +1497,88 @@ function addPhotoRecipient(){
 function rmPhotoRecipient(i){S.photoRecipients.splice(i,1);rSettings();}
 
 function buildEmpSection(){
-  let s='<div class="card"><strong style="font-size:16px;font-weight:700;display:block;margin-bottom:6px;letter-spacing:-.2px">Employee roster</strong>';
-  s+='<p style="font-size:14px;color:var(--text2);margin-bottom:14px">Add employees not in the default roster. They appear in crew selection for all foremen.</p>';
+  const hiddenIds=S.hiddenEmployees||[];
   const ce=S.customEmployees||[];
-  if(ce.length===0){
-    s+='<p style="font-size:13px;color:var(--text3);text-align:center;padding:10px">No custom employees added yet.</p>';
+  const showHidden=!!S.__showHiddenEmps;
+  const search=(S.__empSearch||'').toLowerCase();
+  // Combine all employees with isCustom flag, sort by name
+  const all=[...EMPS.map(e=>({...e,isCustom:false})),...ce.map(e=>({...e,isCustom:true}))]
+    .filter((e,i,a)=>a.findIndex(x=>x.id===e.id)===i)
+    .sort((a,b)=>(a.name||'').localeCompare(b.name||''));
+  // Partition into active vs hidden
+  const visible=all.filter(e=>showHidden?hiddenIds.includes(e.id):!hiddenIds.includes(e.id));
+  let s='<div class="card"><strong style="font-size:16px;font-weight:700;display:block;margin-bottom:6px;letter-spacing:-.2px">Employee roster</strong>';
+  s+='<p style="font-size:14px;color:var(--text2);margin-bottom:14px">All employees available for crew selection. Remove employees who have left the company; you can restore them later.</p>';
+  // Search input + Show hidden toggle
+  const escAttr=v=>String(v||'').replace(/"/g,'&quot;');
+  s+='<div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap">';
+  s+='<input type="text" id="emp-search" value="'+escAttr(S.__empSearch||'')+'" placeholder="Search by name, title, or code..." oninput="filterEmps(this.value)" style="flex:1;min-width:200px;padding:11px 14px;font-size:15px;background:var(--bg2);border:0.5px solid var(--border);border-radius:var(--r3);color:var(--text);-webkit-appearance:none;font-family:inherit"/>';
+  s+='<button class="btn btn-sm" onclick="toggleShowHidden()">'+(showHidden?'<i class="ti ti-arrow-back-up"></i> Show active ('+(all.length-hiddenIds.length)+')':'<i class="ti ti-eye"></i> Show removed ('+hiddenIds.length+')')+'</button>';
+  s+='</div>';
+  if(visible.length===0){
+    s+='<p style="font-size:13px;color:var(--text3);text-align:center;padding:14px">'+(showHidden?'No removed employees.':'No employees match.')+'</p>';
   } else {
-    ce.forEach((e,i)=>{
-      s+='<div style="display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:0.5px solid var(--border)">';
-      s+='<div style="flex:1"><strong>'+e.name+'</strong><br>';
-      s+='<span style="font-size:12px;color:var(--text2)">'+e.title+' &middot; '+e.dept+' &middot; <strong>'+(e.sc||e.id)+'</strong></span></div>';
-      s+='<button class="btn btn-sm btn-d" onclick="rmCustomEmp('+i+')"><i class="ti ti-trash"></i></button></div>';
+    s+='<div id="emp-list" style="max-height:380px;overflow-y:auto;border:0.5px solid var(--border);border-radius:var(--r3);background:var(--bg2)">';
+    visible.forEach(e=>{
+      const searchText=((e.name||'')+' '+(e.title||'')+' '+(e.sc||e.id||'')+' '+(e.dept||'')).toLowerCase();
+      const matches=!search||searchText.includes(search);
+      const disp=matches?'flex':'none';
+      s+='<div class="emp-row" data-search="'+escAttr(searchText)+'" style="display:'+disp+';align-items:center;gap:10px;padding:10px 14px;border-bottom:0.5px solid var(--border)">';
+      s+='<div style="flex:1;min-width:0"><strong>'+(e.name||'')+'</strong>';
+      if(e.isCustom)s+=' <span style="font-size:10px;color:var(--text2);font-weight:normal;padding:2px 6px;background:var(--bg);border-radius:3px">CUSTOM</span>';
+      s+='<br><span style="font-size:12px;color:var(--text2)">'+(e.title||'')+' &middot; '+(e.dept||'')+' &middot; <strong>'+(e.sc||e.id||'')+'</strong></span></div>';
+      if(showHidden){
+        s+='<button class="btn btn-sm" onclick="restoreEmp(\''+e.id+'\')"><i class="ti ti-arrow-back-up"></i> Restore</button>';
+      } else if(e.isCustom){
+        const idx=ce.findIndex(x=>x.id===e.id);
+        s+='<button class="btn btn-sm btn-d" onclick="rmCustomEmp('+idx+')" title="Delete custom employee"><i class="ti ti-trash"></i></button>';
+      } else {
+        s+='<button class="btn btn-sm btn-d" onclick="hideDefaultEmp(\''+e.id+'\')" title="Remove from roster"><i class="ti ti-trash"></i></button>';
+      }
+      s+='</div>';
     });
+    s+='</div>';
   }
-  s+='<div style="margin-top:14px;display:flex;flex-direction:column;gap:8px">';
-  s+='<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">';
-  s+='<input type="text" id="ce-name" placeholder="Last, First" style="padding:11px 14px;font-size:15px;background:var(--bg2);border:0.5px solid var(--border);border-radius:var(--r3);color:var(--text);-webkit-appearance:none;font-family:inherit"/>';
-  s+='<input type="text" id="ce-code" placeholder="Spectrum code" style="padding:11px 14px;font-size:15px;background:var(--bg2);border:0.5px solid var(--border);border-radius:var(--r3);color:var(--text);-webkit-appearance:none;font-family:inherit"/></div>';
-  s+='<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">';
-  s+='<input type="text" id="ce-title" placeholder="Title (e.g. OPERATOR)" style="padding:11px 14px;font-size:15px;background:var(--bg2);border:0.5px solid var(--border);border-radius:var(--r3);color:var(--text);-webkit-appearance:none;font-family:inherit"/>';
-  s+='<select id="ce-dept" style="padding:11px 14px;font-size:15px;background:var(--bg2);border:0.5px solid var(--border);border-radius:var(--r3);color:var(--text);-webkit-appearance:none;font-family:inherit"><option value="FLD">FLD - Field</option><option value="SHP">SHP - Shop</option></select></div>';
-  s+='<button class="btn btn-p btn-bl" onclick="addCustomEmp()"><i class="ti ti-user-plus"></i> Add employee to roster</button></div></div>';
+  if(!showHidden){
+    s+='<div style="margin-top:14px;padding-top:14px;border-top:0.5px solid var(--border)"><strong style="font-size:14px;display:block;margin-bottom:10px">Add new employee</strong>';
+    s+='<div style="display:flex;flex-direction:column;gap:8px">';
+    s+='<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">';
+    s+='<input type="text" id="ce-name" placeholder="Last, First" style="padding:11px 14px;font-size:15px;background:var(--bg2);border:0.5px solid var(--border);border-radius:var(--r3);color:var(--text);-webkit-appearance:none;font-family:inherit"/>';
+    s+='<input type="text" id="ce-code" placeholder="Spectrum code" style="padding:11px 14px;font-size:15px;background:var(--bg2);border:0.5px solid var(--border);border-radius:var(--r3);color:var(--text);-webkit-appearance:none;font-family:inherit"/></div>';
+    s+='<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">';
+    s+='<input type="text" id="ce-title" placeholder="Title (e.g. OPERATOR)" style="padding:11px 14px;font-size:15px;background:var(--bg2);border:0.5px solid var(--border);border-radius:var(--r3);color:var(--text);-webkit-appearance:none;font-family:inherit"/>';
+    s+='<select id="ce-dept" style="padding:11px 14px;font-size:15px;background:var(--bg2);border:0.5px solid var(--border);border-radius:var(--r3);color:var(--text);-webkit-appearance:none;font-family:inherit"><option value="FLD">FLD - Field</option><option value="SHP">SHP - Shop</option></select></div>';
+    s+='<button class="btn btn-p btn-bl" onclick="addCustomEmp()"><i class="ti ti-user-plus"></i> Add employee to roster</button></div></div>';
+  }
+  s+='</div>';
   return s;
+}
+
+function filterEmps(q){
+  S.__empSearch=q;
+  const ql=String(q||'').toLowerCase();
+  document.querySelectorAll('#emp-list .emp-row').forEach(row=>{
+    const t=row.getAttribute('data-search')||'';
+    row.style.display=(!ql||t.includes(ql))?'flex':'none';
+  });
+}
+function toggleShowHidden(){
+  S.__showHiddenEmps=!S.__showHiddenEmps;
+  rSettings();
+}
+function hideDefaultEmp(id){
+  const emp=EMPS.find(e=>e.id===id)||(S.customEmployees||[]).find(e=>e.id===id);
+  if(!confirm('Remove '+(emp?emp.name:'this employee')+' from the active roster?\n\nThey will no longer appear in crew selection. You can restore them later via "Show removed".'))return;
+  if(!S.hiddenEmployees)S.hiddenEmployees=[];
+  if(!S.hiddenEmployees.includes(id))S.hiddenEmployees.push(id);
+  rSettings();
+  toast('Employee removed. Save settings to sync.','success');
+}
+function restoreEmp(id){
+  if(!S.hiddenEmployees)return;
+  S.hiddenEmployees=S.hiddenEmployees.filter(x=>x!==id);
+  rSettings();
+  toast('Employee restored. Save settings to sync.','success');
 }
 
 function addCustomEmp(){
