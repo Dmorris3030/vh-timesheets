@@ -735,6 +735,12 @@ function getJobEquipHours(wk,dt,jobNum){
 
 // Submit production entries to Field Data SharePoint list
 async function submitProductionToSP(wk, silent){
+  if(window.__VH_PROD_INFLIGHT)return;
+  window.__VH_PROD_INFLIGHT=true;
+  try{await _submitProductionToSPImpl(wk,silent);window.__VH_LAST_WRITE_AT=Date.now();}
+  finally{window.__VH_PROD_INFLIGHT=false;}
+}
+async function _submitProductionToSPImpl(wk, silent){
   const tok=await getTok();if(!tok)return;
   if(!wk.production)return;
   const allEntries=prodEntries(wk);
@@ -818,6 +824,12 @@ async function submitProductionToSP(wk, silent){
 // One row per (employee, date, jobLine). Idempotent on re-submit: deletes the
 // (week, submitter) rows first, then inserts fresh.
 async function submitJobLinesToSP(wk, silent){
+  if(window.__VH_JLW_INFLIGHT)return;
+  window.__VH_JLW_INFLIGHT=true;
+  try{await _submitJobLinesToSPImpl(wk,silent);window.__VH_LAST_WRITE_AT=Date.now();}
+  finally{window.__VH_JLW_INFLIGHT=false;}
+}
+async function _submitJobLinesToSPImpl(wk, silent){
   const tok=await getTok();if(!tok)return;
   if(!wk||!wk.entries)return;
   try{
@@ -1520,6 +1532,8 @@ initApp();
       const meEmail=(auth.user.email||'').toLowerCase();
       if(ownerEmail&&meEmail&&ownerEmail!==meEmail)return; // someone else's data
       if(typeof submitProductionToSP!=="function"||typeof submitJobLinesToSP!=="function")return;
+      // Cooldown: skip if any write happened in last 90s (let SP indexing catch up)
+      if(Date.now()-(window.__VH_LAST_WRITE_AT||0)<90000){console.log("[VH] periodic sync skipped — recent write within 90s");return;}
       // Detect change by serializing the parts that matter for SP writes
       const cur=JSON.stringify({p:wk.production||{},e:wk.entries||{}});
       if(cur===lastSnap)return;
