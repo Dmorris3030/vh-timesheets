@@ -1114,6 +1114,10 @@ function buildDayPanel(eid,dt,wk,ro,eqs,he){
       s+='<div></div>';
     }
     s+='</div>';
+    // Notes (per job line) — PTO/VAC/SICK/HOLIDAY keywords flip the row to pay type V on export
+    var nVal=(ln.notes||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    s+='<div style="margin-top:8px"><span class="fl" style="font-size:10px;margin-bottom:4px;display:block">Notes</span>';
+    s+='<textarea class="di" '+dis+' placeholder="Field conditions, issues, or PTO / VAC / SICK / HOLIDAY" style="height:54px;resize:none;font-size:14px;padding:8px 10px" data-eid="'+e+'" data-dt="'+d+'" data-ji="'+ji+'" data-f="notes" oninput="setJobLine(this.dataset.eid,this.dataset.dt,+this.dataset.ji,this.dataset.f,this.value)">'+nVal+'</textarea></div>';
     s+='</div>';
   });
   if(!ro){
