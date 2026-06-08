@@ -1511,8 +1511,14 @@ initApp();
     try{
       if(typeof S==="undefined"||!S||!S.weeks||!S.currentWeek)return;
       if(typeof auth==="undefined"||!auth||!auth.user)return; // not signed in
+      // Only sync if this is the current user's OWN submission. Block manager/admin
+      // foreign-views from rewriting another user's data under our SubmittedBy.
+      if(!/^\d{4}-\d{2}-\d{2}$/.test(S.currentWeek))return; // composite-key foreign view
       const wk=S.weeks[S.currentWeek];
       if(!wk)return;
+      const ownerEmail=(wk.submittedBy||'').toLowerCase();
+      const meEmail=(auth.user.email||'').toLowerCase();
+      if(ownerEmail&&meEmail&&ownerEmail!==meEmail)return; // someone else's data
       if(typeof submitProductionToSP!=="function"||typeof submitJobLinesToSP!=="function")return;
       // Detect change by serializing the parts that matter for SP writes
       const cur=JSON.stringify({p:wk.production||{},e:wk.entries||{}});
