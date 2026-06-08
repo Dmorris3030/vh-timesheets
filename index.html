@@ -860,7 +860,7 @@ async function submitJobLinesToSP(wk, silent){
       for(const ln of lines){
         const hrs=parseFloat(ln.hours)||0;
         if(hrs===0&&!ln.job)continue;
-        const equipStr=JSON.stringify((ln.equipment||[]).filter(Boolean).map(function(eq){const num=eq&&(eq.id||eq.equipNum);const reg=(typeof EQ!=='undefined'&&Array.isArray(EQ))?EQ.find(function(x){return String(x.number)===String(num);}):null;return Object.assign({},eq,{description:reg?reg.description:''});}));
+        const equipStr=JSON.stringify((ln.equipment||[]).filter(Boolean).map(function(eq){const num=eq&&(eq.number||eq.id||eq.equipNum);const reg=(typeof EQ!=='undefined'&&Array.isArray(EQ))?EQ.find(function(x){return String(x.number)===String(num);}):null;return Object.assign({},eq,{description:reg?reg.description:(eq.description||'')});}));
         const r=await fetch(`https://graph.microsoft.com/v1.0/sites/${site.id}/lists/${listId}/items`,{method:'POST',headers:{Authorization:'Bearer '+tok,'Content-Type':'application/json'},body:JSON.stringify({fields:{
           Title:`${weekIso}-${empId}-${workDate}-${ln.job||'x'}-${ln.phase||'x'}`,
           WeekIso:weekIso,
