@@ -56,6 +56,15 @@
   .k.feat .val{font-size:24px}
   .val.good{color:var(--green)}
   .val.bad{color:var(--red)}
+  .val .arr{font-size:14px;margin-right:2px;vertical-align:2px}
+  .pbar{height:3px;background:var(--bg2);border-radius:2px;margin-top:6px;overflow:hidden}
+  .pbarfill{height:100%;background:var(--red);transition:width .3s}
+  .hdr{position:sticky;top:0;z-index:20;background:#fff}
+  .dpre{display:flex;flex-wrap:wrap;gap:6px;margin:6px 0 14px}
+  .dpre button{font:inherit;font-size:11px;padding:5px 10px;border-radius:14px;border:1px solid var(--border);background:#fff;color:var(--text2);cursor:pointer}
+  .dpre button.on{background:var(--red);color:#fff;border-color:var(--red)}
+  .dpre button:hover:not(.on){background:var(--bg2)}
+  .dq{font-size:11px;color:var(--text3);margin:-8px 0 10px;padding:6px 10px;background:var(--bg2);border-radius:4px}
   /* Sections */
   .sec{background:#fff;border:1px solid var(--border);border-radius:8px;padding:14px;margin-bottom:14px;box-shadow:var(--shadow)}
   .sec h2{font-size:14px;font-weight:700;margin-bottom:10px;letter-spacing:-.3px;color:var(--text)}
@@ -202,7 +211,7 @@ async function loadData(){
     const r=await fetch(url,{headers:{Authorization:'Bearer '+tok}});
     if(!r.ok)throw new Error('Graph '+r.status);
     const j=await r.json();
-    const allPhases=EARTH_PHASES.concat(UTIL_PHASES);
+    const allPhases=EARTH_PHASES.concat(UTIL_PHASES) /* dirty filter applied below */;
     S.rows=(j.value||[]).map(it=>it.fields).filter(f=>f&&f.Date&&allPhases.includes(f.Phase));
     S.foremen=[...new Set(S.rows.map(r=>r.Foreman).filter(Boolean))].sort();
     S.jobs=[...new Set(S.rows.map(r=>r.Jobnumber).filter(Boolean))].sort();
@@ -465,27 +474,35 @@ function render(){
         </div>
       </div>
 
+      <div class="dpre">
+        <button class="${S.dpre==='week'?'on':''}" onclick="setDatePreset('week')">This Week</button>
+        <button class="${S.dpre==='lastWeek'?'on':''}" onclick="setDatePreset('lastWeek')">Last Week</button>
+        <button class="${S.dpre==='mtd'?'on':''}" onclick="setDatePreset('mtd')">MTD</button>
+        <button class="${S.dpre==='last30'?'on':''}" onclick="setDatePreset('last30')">Last 30</button>
+        <button class="${S.dpre==='ptd'?'on':''}" onclick="setDatePreset('ptd')">Project to Date</button>
+        <button class="${(!S.dpre||S.dpre==='custom')?'on':''}" onclick="setDatePreset('custom')">Custom</button>
+      </div>
       <div class="kg">
         ${S.view==='earth'?`
         <div class="k feat"><div class="lbl">Yards This Week</div><div class="val">${fmtNum(wk.yards)}</div><div class="sub">${weekRows.length} entries · ${wk.laborHours.toFixed(1)}h labor</div></div>
-        <div class="k feat"><div class="lbl">Cost Variance</div><div class="val ${rng.variance<0?'good':(rng.variance>0?'bad':'')}">${fmtVar(rng.variance)}</div><div class="sub">$/CY actual vs bid</div></div>
+        <div class="k feat"><div class="lbl">Cost Variance</div><div class="val ${rng.variance<0?'good':(rng.variance>0?'bad':'')}"><span class="arr">${rng.variance<0?'↓':rng.variance>0?'↑':''}</span>${fmtVar(rng.variance)}</div><div class="sub">${fmtMoney(rng.cpy)} actual vs ${fmtMoney(rng.bcpy)} bid</div></div>
         <div class="k feat"><div class="lbl">Cost / Yard</div><div class="val">${fmtMoney(rng.cpy)}</div><div class="sub">range total</div></div>
-        <div class="k"><div class="lbl">Bid $/CY</div><div class="val">${fmtMoney(rng.bcpy)}</div></div>
+        <div class="k feat"><div class="lbl">% Complete</div><div class="val">${_totalBidQty>0?(allTime.yards/_totalBidQty*100).toFixed(1)+'%':'—'}</div><div class="sub">${_totalBidQty>0?fmtNum(allTime.yards)+' / '+fmtNum(_totalBidQty)+' CY':'no bid set'}</div>${_totalBidQty>0?`<div class="pbar"><div class="pbarfill" style="width:${Math.min(allTime.yards/_totalBidQty*100,100)}%"></div></div>`:''}</div>
         <div class="k"><div class="lbl">Accumulated Cost</div><div class="val">${fmtMoney(allTime.totalCost,0)}</div><div class="sub">${esc(toDateLabel)}</div></div>
         <div class="k"><div class="lbl">Yards to Date</div><div class="val">${fmtNum(allTime.yards)}</div><div class="sub">${esc(toDateLabel)}</div></div>
         `:`
         <div class="k feat"><div class="lbl">LF This Week</div><div class="val">${fmtNum(wk.yards)}</div><div class="sub">${weekRows.length} entries · ${wk.laborHours.toFixed(1)}h labor</div></div>
-        <div class="k feat"><div class="lbl">Hours / LF</div><div class="val">${rng.yards>0?fmtNum(rng.laborHours/rng.yards,2):'—'}</div><div class="sub">labor hrs per LF (range)</div></div>
+        <div class="k feat"><div class="lbl">Hours / LF</div><div class="val">${rng.yards>0?fmtNum(rng.laborHours/rng.yards,2):'—'}</div><div class="sub">${rng.yards>0&&_bidHrsPerUnit!==null?fmtNum(rng.laborHours/rng.yards,3)+' actual vs '+fmtNum(_bidHrsPerUnit,3)+' bid':'labor hrs per LF'}</div></div>
         <div class="k feat"><div class="lbl">Total Hours</div><div class="val">${fmtNum(rng.laborHours,1)}</div><div class="sub">labor hrs in range</div></div>
-        <div class="k"><div class="lbl">Bid Hrs/LF</div><div class="val">${_bidHrsPerUnit!==null?fmtNum(_bidHrsPerUnit,3):'—'}</div><div class="sub">${_totalBidHours>0?fmtNum(_totalBidHours,0)+'h bid / '+fmtNum(_totalBidQty,0)+' LF':'no budget set'}</div></div>
+        <div class="k feat"><div class="lbl">% Complete</div><div class="val">${_totalBidQty>0?(allTime.yards/_totalBidQty*100).toFixed(1)+'%':'—'}</div><div class="sub">${_totalBidQty>0?fmtNum(allTime.yards)+' / '+fmtNum(_totalBidQty)+' LF':'no bid set'}</div>${_totalBidQty>0?`<div class="pbar"><div class="pbarfill" style="width:${Math.min(allTime.yards/_totalBidQty*100,100)}%"></div></div>`:''}</div>
         <div class="k"><div class="lbl">Accumulated Hours</div><div class="val">${fmtNum(allTime.laborHours,1)}</div><div class="sub">${esc(toDateLabel)}</div></div>
         <div class="k"><div class="lbl">LF to Date</div><div class="val">${fmtNum(allTime.yards)}</div><div class="sub">${esc(toDateLabel)}</div></div>
         `}
       </div>
 
-      <div class="sec">
+      <div class="sec" ${jobList.length<=1?'style="display:none"':''}>
         <h2>By Job &amp; Phase <span class="h2-sub">${S.dateFrom} → ${S.dateTo}</span></h2>
-        ${jobList.length===0?'<div class="empty">No production data in this range.</div>':`
+        ${jobList.length<=1?'':`
         <table class="tbl">
           <thead><tr><th>Job</th><th>Phase</th><th class="num">Yards</th><th class="num">Hours</th><th class="num">$/CY Actual</th><th class="num">$/CY Bid</th><th class="num">Variance</th></tr></thead>
           <tbody>
@@ -662,6 +679,28 @@ async function deleteBudget(id){
     if(!r.ok){toast('Delete failed','err');return;}
     toast('Deleted','ok');await loadBudgets();render();
   }catch(e){toast('Error: '+e.message,'err');}
+}
+function setDatePreset(preset){
+  S.dpre=preset;
+  const today=new Date();
+  const todayIso=isoDate(today);
+  if(preset==='week'){
+    const d=new Date(today);d.setDate(today.getDate()-today.getDay());
+    S.dateFrom=isoDate(d);S.dateTo=todayIso;
+  }else if(preset==='lastWeek'){
+    const d=new Date(today);d.setDate(today.getDate()-today.getDay()-7);
+    const e=new Date(d);e.setDate(d.getDate()+6);
+    S.dateFrom=isoDate(d);S.dateTo=isoDate(e);
+  }else if(preset==='mtd'){
+    S.dateFrom=isoDate(new Date(today.getFullYear(),today.getMonth(),1));S.dateTo=todayIso;
+  }else if(preset==='last30'){
+    const d=new Date(today);d.setDate(today.getDate()-30);
+    S.dateFrom=isoDate(d);S.dateTo=todayIso;
+  }else if(preset==='ptd'){
+    const dates=(S.rows||[]).map(r=>r.Date||r.fields&&r.fields.Date).filter(Boolean).sort();
+    S.dateFrom=dates.length?dates[0].slice(0,10):'2026-01-01';S.dateTo=todayIso;
+  }
+  render();
 }
 function setView(v){S.view=v;S.selectedPhase='';render();}
 function setForeman(v){S.selectedForeman=v;render();}
