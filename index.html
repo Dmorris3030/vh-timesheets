@@ -463,17 +463,25 @@ async function saveAllSubmittedSP(){
   }catch(e){console.error('saveAllSubmittedSP:',e);}
 }
 // Save draft to localStorage only (device-local, not shared)
+function _writeDrafts(){
+  const drafts={};
+  Object.entries(S.weeks).forEach(([iso,wk])=>{
+    if(iso.includes(':'))return; // foreign sub, not my draft
+    if(wk.status==='draft'||wk.status==='returned')drafts[iso]=wk;
+  });
+  localStorage.setItem('vhts_drafts',JSON.stringify(drafts));
+}
 function saveDraft(){
   try{
-    const drafts={};
-    Object.entries(S.weeks).forEach(([iso,wk])=>{
-      if(iso.includes(':'))return; // foreign sub, not my draft
-      if(wk.status==='draft'||wk.status==='returned')drafts[iso]=wk;
-    });
-    localStorage.setItem('vhts_drafts',JSON.stringify(drafts));
+    _writeDrafts();
     setSS('ok');toast('Draft saved.','success');
   }catch(e){toast('Could not save draft: '+e.message,'error');}
 }
+// Persist edits to localStorage without UI noise — used by the auto-save-on-edit path so a
+// foreman never loses changes to a returned/draft sheet if they close before resubmitting.
+function saveDraftSilent(){try{_writeDrafts();}catch(e){}}
+let _dsTimer=null;
+function saveDraftSoon(){clearTimeout(_dsTimer);_dsTimer=setTimeout(saveDraftSilent,500);}
 
 // Save settings + submitted weeks to SharePoint (shared)
 async function saveSP(){
@@ -515,10 +523,15 @@ async function saveSP(){
 async function loadSP(surface){
   const tok=await getTok();if(!tok)return;setSS('busy');
   try{
-    // 1. Load drafts from localStorage (this device only)
+    // 0. Snapshot the foreman's own in-progress sheets (draft/returned). These hold the
+    //    freshest unsaved edits and must NOT be clobbered by localStorage or the SharePoint
+    //    copy during a routine sync (e.g. navigating to Review to resubmit a returned sheet).
+    const memActive={};
+    Object.entries(S.weeks).forEach(([k,w])=>{if(!k.includes(':')&&w&&(w.status==='draft'||w.status==='returned'))memActive[k]=w;});
+    // 1. Load drafts from localStorage (this device only) — but keep fresher in-memory edits
     try{
       const drafts=JSON.parse(localStorage.getItem('vhts_drafts')||'{}');
-      Object.entries(drafts).forEach(([iso,wk])=>{S.weeks[iso]=wk;});
+      Object.entries(drafts).forEach(([iso,wk])=>{if(!memActive[iso])S.weeks[iso]=wk;});
     }catch(e){}
 
     // 2. Load submitted/approved from SharePoint (admins/managers) or own submissions
@@ -560,9 +573,21 @@ async function loadSP(surface){
           // A manager return sets status 'returned' (legacy returns used 'draft' + returnedAt).
           const isReturned=wk.status==='returned'||(wk.status==='draft'&&wk.returnedAt);
           if(isReturned){
-            wk.status='returned';
-            S.weeks[iso]=wk;
-            restoredDrafts[iso]=wk;
+            // If the foreman already has this returned sheet open with edits (same return cycle),
+            // keep their local copy. Only take the SharePoint copy if it's a NEWER return
+            // (manager returned again) or there's no local copy yet.
+            const mem=memActive[iso];
+            const spRA=wk.returnedAt||'';
+            const memRA=(mem&&mem.returnedAt)||'';
+            if(mem&&memRA&&spRA&&memRA>=spRA){
+              mem.status='returned';
+              S.weeks[iso]=mem;
+              restoredDrafts[iso]=mem;
+            } else {
+              wk.status='returned';
+              S.weeks[iso]=wk;
+              restoredDrafts[iso]=wk;
+            }
             returnedIsos.push(iso);
           } else {
             S.weeks[iso]=wk;
@@ -964,6 +989,7 @@ function setJobLine(eid,dt,idx,field,val){
   });
   const total=wk.entries[k].jobLines.reduce((s,l)=>s+(parseFloat(l.hours)||0),0);
   wk.entries[k].hours=total>0?String(total):'';
+  saveDraftSoon();
 }
 function addJobLine(eid,dt){
   const wk=S.weeks[S.currentWeek];const k=`${eid}:${dt}`;
@@ -972,6 +998,7 @@ function addJobLine(eid,dt){
   wk.entries[k].jobLines.push({job:'',phase:'',hours:'',equipment:[]});
   rTot(eid);
   refreshDayPanel(eid,dt);
+  saveDraftSilent();
 }
 function removeJobLine(eid,dt,idx){
   const wk=S.weeks[S.currentWeek];const k=`${eid}:${dt}`;
@@ -982,6 +1009,7 @@ function removeJobLine(eid,dt,idx){
   wk.entries[k].hours=total>0?String(total):'';
   rTot(eid);
   refreshDayPanel(eid,dt);
+  saveDraftSilent();
 }
 function refreshDayPanel(eid,dt){
   const wk=S.weeks[S.currentWeek];const ro=wk.status!=='draft'&&wk.status!=='returned';
@@ -1008,7 +1036,7 @@ function refreshDayPanel(eid,dt){
   // Update corner totals
   rTot(eid);
 }
-function se(eid,dt,f,v){const wk=S.weeks[S.currentWeek];const k=`${eid}:${dt}`;if(!wk.entries[k])wk.entries[k]={};if(v===''||v===null)delete wk.entries[k][f];else wk.entries[k][f]=v;}
+function se(eid,dt,f,v){const wk=S.weeks[S.currentWeek];const k=`${eid}:${dt}`;if(!wk.entries[k])wk.entries[k]={};if(v===''||v===null)delete wk.entries[k][f];else wk.entries[k][f]=v;saveDraftSoon();}
 function ct(wk,eid){const dates=wd(S.currentWeek);let l=0,e=0;dates.forEach(dt=>{const lines=getJobLines(wk,eid,dt);lines.forEach(ln=>{const c=calcJobHours(ln);l+=c.labor;e+=c.equip;});// legacy day-level equipment
 (wk.equipmentEntries&&wk.equipmentEntries[`${eid}:${dt}`]||[]).forEach(x=>e+=parseFloat(x.hours)||0);});return{l,e,c:l+e};}
 function rEntry(){const wk=S.weeks[S.currentWeek];const dates=wd(S.currentWeek);const ro=wk.status!=='draft'&&wk.status!=='returned';
@@ -1185,6 +1213,7 @@ function saveEQLine(eid,dt,ji){
   wk.entries[k].jobLines.forEach(function(ln){const c=calcJobHours(ln);ln.hours=c.total>0?String(c.total):'';});
   const total=wk.entries[k].jobLines.reduce((s,l)=>s+(parseFloat(l.hours)||0),0);
   wk.entries[k].hours=total>0?String(total):'';
+  saveDraftSilent();
   closeM();rEntry();
 }
 function showEQ(eid,dt){const wk=S.weeks[S.currentWeek];const k=`${eid}:${dt}`;const eqs=JSON.parse(JSON.stringify(wk.equipmentEntries[k]||[]));if(!eqs.length)eqs.push({number:'',hours:''});const emp=EMPS.find(e=>e.id===eid);eqmc=eqs.length;
@@ -1200,9 +1229,9 @@ function eqRow(eq,i){return`<div class="eqe" id="eqe-${i}"><div><label class="fl
 function addER(){const c=document.getElementById('eqr');const d=document.createElement('div');d.innerHTML=eqRow({number:'',hours:''},eqmc++);c.appendChild(d.firstChild);}
 function fEQ(q){const r=document.getElementById('eqres');if(!q){r.style.display='none';return;}const ql=q.toLowerCase();const hits=EQ.filter(e=>e.number.toLowerCase().startsWith(ql)||e.description.toLowerCase().includes(ql)).slice(0,10);if(!hits.length){r.style.display='none';return;}r.style.display='block';r.innerHTML=hits.map(e=>`<div class="sli" onclick="pkEQ('${e.number}')"><strong style="flex-shrink:0;font-size:14px">#${e.number}</strong><span style="color:var(--text2);margin-left:10px;font-size:13px">${e.description}</span></div>`).join('');}
 function pkEQ(num){const ins=document.querySelectorAll('[id^=eqn-]');let p=false;ins.forEach(i=>{if(!i.value&&!p){i.value=num;p=true;}});if(!p){addER();setTimeout(()=>{const ins=document.querySelectorAll('[id^=eqn-]');if(ins.length)ins[ins.length-1].value=num;},50);}document.getElementById('eqres').style.display='none';}
-function saveEQ(eid,dt){const wk=S.weeks[S.currentWeek];const k=`${eid}:${dt}`;const ns=document.querySelectorAll('[id^=eqn-]');const hs=document.querySelectorAll('[id^=eqh-]');const res=[];ns.forEach((n,i)=>{const num=n.value.trim();if(num)res.push({number:num,hours:parseFloat(hs[i]?hs[i].value:0)||0});});if(res.length)wk.equipmentEntries[k]=res;else delete wk.equipmentEntries[k];closeM();rEntry();}
+function saveEQ(eid,dt){const wk=S.weeks[S.currentWeek];const k=`${eid}:${dt}`;const ns=document.querySelectorAll('[id^=eqn-]');const hs=document.querySelectorAll('[id^=eqh-]');const res=[];ns.forEach((n,i)=>{const num=n.value.trim();if(num)res.push({number:num,hours:parseFloat(hs[i]?hs[i].value:0)||0});});if(res.length)wk.equipmentEntries[k]=res;else delete wk.equipmentEntries[k];saveDraftSilent();closeM();rEntry();}
 function showEM(){const wk=S.weeks[S.currentWeek];showM(`<div class="mh"></div><h2>Manage crew</h2><p>Select up to 20 employees for this week.</p><input class="si" type="search" inputmode="search" placeholder="Search name or title..." oninput="fEM(this.value)"/><div class="sl" id="eml" style="max-height:50dvh">${allEmps().map(emp=>`<label class="sli" style="cursor:pointer"><input type="checkbox" value="${emp.id}" ${wk.employees.includes(emp.id)?'checked':''} onchange="togEM(this)" style="width:22px;height:22px;flex-shrink:0;accent-color:var(--accent)"/><div style="margin-left:6px"><strong style="font-size:15px">${emp.name}</strong><br><span style="font-size:12px;color:var(--text2)">${emp.title} · ${emp.id}</span></div></label>`).join('')}</div><div style="font-size:13px;color:var(--text2);margin-top:12px;text-align:center" id="ect">${wk.employees.length}/20 selected</div><div class="mf"><button class="btn btn-p btn-bl" onclick="closeM();rEntry()">Done</button></div>`,'emm');}
-function togEM(cb){const wk=S.weeks[S.currentWeek];if(cb.checked){if(wk.employees.length>=20){cb.checked=false;toast('Max 20 employees.','error');return;}if(!wk.employees.includes(cb.value))wk.employees.push(cb.value);}else wk.employees=wk.employees.filter(e=>e!==cb.value);const c=document.getElementById('ect');if(c)c.textContent=wk.employees.length+'/20 selected';}
+function togEM(cb){const wk=S.weeks[S.currentWeek];if(cb.checked){if(wk.employees.length>=20){cb.checked=false;toast('Max 20 employees.','error');return;}if(!wk.employees.includes(cb.value))wk.employees.push(cb.value);}else wk.employees=wk.employees.filter(e=>e!==cb.value);const c=document.getElementById('ect');if(c)c.textContent=wk.employees.length+'/20 selected';saveDraftSilent();}
 function fEM(q){document.querySelectorAll('#eml label').forEach(item=>{item.style.display=(!q||item.textContent.toLowerCase().includes(q.toLowerCase()))?'flex':'none';});}
 function rReview(){const wk=S.weeks[S.currentWeek];const dates=wd(S.currentWeek);let tH=0,tD=0,tE=0;
   wk.employees.forEach(eid=>{dates.forEach(dt=>{const h=parseFloat(ge(wk,eid,dt,'hours'))||0;tH+=h;if(h>0)tD++;(wk.equipmentEntries[`${eid}:${dt}`]||[]).forEach(e=>tE+=parseFloat(e.hours)||0);});});
