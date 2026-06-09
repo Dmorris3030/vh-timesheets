@@ -135,6 +135,7 @@ select{font-size:12px;background:var(--bg2);border:0.5px solid var(--border);bor
 .sb-su{background:#e3f0fb;color:#0C447C}
 .sb-ap{background:#e6f3d8;color:#27500A}
 .sb-re{background:#fde8e8;color:#791F1F}
+.sb-rt{background:#fef3c7;color:#92400e}
 .eb{background:var(--bg);border:0.5px solid var(--border);border-radius:var(--r);margin-bottom:12px;overflow:hidden}
 .eh{background:var(--bg2);padding:12px 16px;display:flex;align-items:flex-start;justify-content:space-between}
 .ehl strong{font-size:15px;font-weight:600;display:block;letter-spacing:-.2px}
@@ -224,7 +225,7 @@ input[type=radio]:checked::after{content:'';position:absolute;left:5px;top:5px;w
   </div>
   <div class="mc" id="mc"><div class="nd"><i class="ti ti-loader"></i>Loading...</div></div>
   <nav class="bn">
-    <button class="nb active" id="nav-entry" onclick="showPage('entry')"><i class="ti ti-clipboard-text"></i><span>Entry</span></button>
+    <button class="nb active" id="nav-entry" onclick="showPage('entry')"><i class="ti ti-clipboard-text"></i><span>Entry</span><span class="nbg" id="eb" style="display:none">0</span></button>
     <button class="nb" id="nav-review" onclick="showPage('review')"><i class="ti ti-checklist"></i><span>Review</span></button>
     <button class="nb" id="nav-approval" onclick="showPage('approval')"><i class="ti ti-shield-check"></i><span>Approve</span><span class="nbg" id="pb" style="display:none">0</span></button>
     <button class="nb" id="nav-export" onclick="showPage('export')"><i class="ti ti-file-download"></i><span>Export</span></button>
@@ -361,7 +362,7 @@ function startAutoSave(){
   clearInterval(autoSaveTimer);
   autoSaveTimer=setInterval(()=>{
     const wk=S.weeks[S.currentWeek];
-    if(wk&&wk.status==='draft'&&wk.employees.length>0){
+    if(wk&&(wk.status==='draft'||wk.status==='returned')&&wk.employees.length>0){
       saveDraft();
     }
   },60000);
@@ -417,7 +418,7 @@ async function onIn(account){
     const em=(d.userPrincipalName||'').toLowerCase();
     auth.user={name:d.displayName||d.userPrincipalName,email:d.userPrincipalName,initials:(d.displayName||'U').split(' ').map(p=>p[0]).join('').slice(0,2).toUpperCase()};
     auth.isAdmin=S.adminEmails.map(e=>e.toLowerCase()).includes(em);
-    updUC();updNav();setSS('busy');await loadSP();render();startAutoSave();
+    updUC();updNav();setSS('busy');await loadSP(true);render();startAutoSave();
     toast('Signed in as '+auth.user.name+(auth.isAdmin?' · Admin':''),'success');
   }catch(e){console.error(e);}
 }
@@ -446,8 +447,8 @@ async function saveAllSubmittedSP(){
         // Foreign sub — k IS already the SP composite key. Write status as-is, including 'draft' so a "Return to foreman" flows back through SP.
         existing.submissions[k]=wk;
       } else {
-        // Own sub — skip drafts (own drafts live in localStorage), then find/build the exact composite key.
-        if(wk.status==='draft')return;
+        // Own sub — skip drafts/returned (those live in localStorage until resubmit), then find/build the exact composite key.
+        if(wk.status==='draft'||wk.status==='returned')return;
         const matchKey=Object.keys(existing.submissions).find(ek=>{
           const p=ek.split(':');
           return p[0]===k && (p[1]||'').toLowerCase()===myEmail;
@@ -467,7 +468,7 @@ function saveDraft(){
     const drafts={};
     Object.entries(S.weeks).forEach(([iso,wk])=>{
       if(iso.includes(':'))return; // foreign sub, not my draft
-      if(wk.status==='draft')drafts[iso]=wk;
+      if(wk.status==='draft'||wk.status==='returned')drafts[iso]=wk;
     });
     localStorage.setItem('vhts_drafts',JSON.stringify(drafts));
     setSS('ok');toast('Draft saved.','success');
@@ -487,7 +488,7 @@ async function saveSP(){
     const myEmailLC=(auth.user?.email||'unknown').toLowerCase();
     Object.entries(S.weeks).forEach(([iso,wk])=>{
       if(iso.includes(':'))return; // foreign sub, skip
-      if(wk.status&&wk.status!=='draft'){
+      if(wk.status&&wk.status!=='draft'&&wk.status!=='returned'){
         // Drop any existing entry for this foreman+week (handles re-submit to a different manager)
         Object.keys(existing.submissions).forEach(ek=>{
           const p=ek.split(':');
@@ -511,7 +512,7 @@ async function saveSP(){
 }
 
 
-async function loadSP(){
+async function loadSP(surface){
   const tok=await getTok();if(!tok)return;setSS('busy');
   try{
     // 1. Load drafts from localStorage (this device only)
@@ -540,6 +541,7 @@ async function loadSP(){
     if(data.submissions){
       const myEmail=(auth.user?.email||'').toLowerCase();
       const restoredDrafts={};
+      const returnedIsos=[];
       // KEY SCHEME for S.weeks:
       //   iso-only key  (e.g. "2026-05-30")              → my own timesheet, used by Entry/Review/Submit
       //   composite key (e.g. "2026-05-30:f@vh:m@vh")    → someone else's timesheet for me to approve
@@ -554,12 +556,14 @@ async function loadSP(){
         const isMySubmission=foremanEmail===myEmail;
         const isForMe=managerEmail===myEmail;
         if(isMySubmission){
-          // My own submission — track by iso so my Review/Entry tabs work unchanged
-          if(wk.status==='draft'){
-            // Returned by manager — restore to device for fixing & resubmit
+          // My own submission — track by iso so my Review/Entry tabs work unchanged.
+          // A manager return sets status 'returned' (legacy returns used 'draft' + returnedAt).
+          const isReturned=wk.status==='returned'||(wk.status==='draft'&&wk.returnedAt);
+          if(isReturned){
+            wk.status='returned';
             S.weeks[iso]=wk;
             restoredDrafts[iso]=wk;
-            toast('A timesheet was returned for your review.','error');
+            returnedIsos.push(iso);
           } else {
             S.weeks[iso]=wk;
           }
@@ -575,6 +579,15 @@ async function loadSP(){
           Object.assign(drafts,restoredDrafts);
           localStorage.setItem('vhts_drafts',JSON.stringify(drafts));
         }catch(e){}
+      }
+      // Surface returned sheets to the foreman: on startup, jump straight to the
+      // most recently returned week so they land on the banner. The Entry-nav badge
+      // (updBadge) keeps a standing flag regardless.
+      if(surface&&returnedIsos.length){
+        returnedIsos.sort((a,b)=>String((S.weeks[b]||{}).returnedAt||'').localeCompare(String((S.weeks[a]||{}).returnedAt||'')));
+        S.currentWeek=returnedIsos[0];cp='entry';
+        const n=returnedIsos.length;
+        toast(n===1?'A timesheet was returned — please fix and resubmit.':n+' timesheets were returned — please fix and resubmit.','error');
       }
     }
     initWeeks();updBadge();setSS('ok');
@@ -915,12 +928,13 @@ function initWeeks(){const sel=document.getElementById('ws');if(!sel)return;
   for(let i=-1;i<=4;i++){if(i===0)continue;const dt=new Date();dt.setDate(dt.getDate()+(6-dt.getDay())+i*7);const iso=dt.toISOString().split('T')[0];
     if(!ex.has(iso)){const o=document.createElement('option');o.value=iso;o.textContent=fw(iso);sel.appendChild(o);ex.add(iso);}if(!S.weeks[iso])S.weeks[iso]=bw();}
   Object.keys(S.weeks).forEach(iso=>{if(iso.includes(':'))return;if(!ex.has(iso)){const o=document.createElement('option');o.value=iso;o.textContent=fw(iso);sel.appendChild(o);ex.add(iso);}});
+  Array.from(sel.options).forEach(o=>{const w=S.weeks[o.value];o.textContent=(w&&w.status==='returned'?'⚠ ':'')+fw(o.value)+(w&&w.status==='returned'?' — Returned':'');});
   if(!S.currentWeek){const dt=new Date();dt.setDate(dt.getDate()+(6-dt.getDay()));S.currentWeek=dt.toISOString().split('T')[0];}sel.value=S.currentWeek;
 }
 function changeWeek(w){S.currentWeek=w;if(!S.weeks[w])S.weeks[w]=bw();adys={};render();updBadge();}
-function showPage(p){if(p==='export'&&!auth.isAdmin){toast('Admins only.','error');return;}cp=p;document.querySelectorAll('.nb[id^=nav-]').forEach(b=>b.classList.remove('active'));const nb=document.getElementById('nav-'+p);if(nb)nb.classList.add('active');if(p==='approval'||p==='review'){loadSP().then(()=>render());}else{render();}}
+function showPage(p){if(p==='export'&&!auth.isAdmin){toast('Admins only.','error');return;}cp=p;document.querySelectorAll('.nb[id^=nav-]').forEach(b=>b.classList.remove('active'));const nb=document.getElementById('nav-'+p);if(nb)nb.classList.add('active');if(p==='approval'||p==='review'){loadSP().then(()=>render());}else if(p==='entry'){render();loadSP().then(()=>{updBadge();render();});}else{render();}}
 function render(){const wk=S.weeks[S.currentWeek];const ts=document.getElementById('ts');
-  if(ts&&wk)ts.innerHTML=`<span class="sb sb-${wk.status.slice(0,2)}" style="font-size:11px;padding:3px 10px">${wk.status.charAt(0).toUpperCase()+wk.status.slice(1)}</span>`;
+  if(ts&&wk){const sc=wk.status==='returned'?'rt':wk.status.slice(0,2);ts.innerHTML=`<span class="sb sb-${sc}" style="font-size:11px;padding:3px 10px">${wk.status.charAt(0).toUpperCase()+wk.status.slice(1)}</span>`;}
   updNav();if(cp==='entry')rEntry();else if(cp==='review')rReview();else if(cp==='approval')rApproval();else if(cp==='export')rExport();else if(cp==='settings')rSettings();
 }
 function ge(wk,eid,dt,f){return(wk.entries[`${eid}:${dt}`]||{})[f]||'';}
@@ -966,7 +980,7 @@ function removeJobLine(eid,dt,idx){
   refreshDayPanel(eid,dt);
 }
 function refreshDayPanel(eid,dt){
-  const wk=S.weeks[S.currentWeek];const ro=wk.status!=='draft';
+  const wk=S.weeks[S.currentWeek];const ro=wk.status!=='draft'&&wk.status!=='returned';
   const dates=wd(S.currentWeek);
   const container=document.getElementById('dps-'+eid);if(!container)return;
   // Save current active day position
@@ -993,14 +1007,14 @@ function refreshDayPanel(eid,dt){
 function se(eid,dt,f,v){const wk=S.weeks[S.currentWeek];const k=`${eid}:${dt}`;if(!wk.entries[k])wk.entries[k]={};if(v===''||v===null)delete wk.entries[k][f];else wk.entries[k][f]=v;}
 function ct(wk,eid){const dates=wd(S.currentWeek);let l=0,e=0;dates.forEach(dt=>{const lines=getJobLines(wk,eid,dt);lines.forEach(ln=>{const c=calcJobHours(ln);l+=c.labor;e+=c.equip;});// legacy day-level equipment
 (wk.equipmentEntries&&wk.equipmentEntries[`${eid}:${dt}`]||[]).forEach(x=>e+=parseFloat(x.hours)||0);});return{l,e,c:l+e};}
-function rEntry(){const wk=S.weeks[S.currentWeek];const dates=wd(S.currentWeek);const ro=wk.status!=='draft';
+function rEntry(){const wk=S.weeks[S.currentWeek];const dates=wd(S.currentWeek);const ro=wk.status!=='draft'&&wk.status!=='returned';
   let h=`<div class="pg">`;
   if(auth.user){h+=`<div class="syb"><span class="sd ok" style="flex-shrink:0"></span><span style="flex:1;font-size:13px">${auth.user.name}${auth.isAdmin?' <span class="rb adm" style="margin-left:4px">Admin</span>':''}</span><button class="btn btn-sm" onclick="saveDraft()" style="flex-shrink:0;font-size:12px">💾 Save</button><button class="btn btn-sm" onclick="loadSP()" style="flex-shrink:0;font-size:12px">↻ Sync</button></div>`;}
   else{h+=`<div class="syb"><span class="sd off" style="flex-shrink:0"></span><span style="flex:1;font-size:14px">Not signed in</span><button class="btn btn-p btn-sm" onclick="signIn()" style="flex-shrink:0">Sign in</button></div>`;}
   // Return-reason banner: shown when the manager returned this week. Extracts the latest "Returned: <reason>"
   // segment from wk.comments (where retWk/retWkK append it). Persists across resubmits so the foreman has
   // context, and is hidden once wk.returnedAt is cleared (e.g. on next clean cycle).
-  if(wk.returnedAt && wk.status==='draft'){
+  if(wk.returnedAt && wk.status==='returned'){
     const cm=wk.comments||'';
     const matches=cm.match(/Returned:\s*([^\n]+)/g);
     const reason=matches&&matches.length?matches[matches.length-1].replace(/^Returned:\s*/,'').trim():'';
@@ -1187,7 +1201,7 @@ function rReview(){const wk=S.weeks[S.currentWeek];const dates=wd(S.currentWeek)
   h+=`<div class="card" style="padding:0;overflow:hidden">`;
   wk.employees.forEach((eid,idx)=>{const emp=allEmps().find(e=>e.id===eid);if(!emp)return;const{l,e,c}=ct(wk,eid);h+=`<div style="padding:13px 16px;${idx>0?'border-top:0.5px solid var(--border)':''}display:flex;align-items:center;justify-content:space-between"><div><strong style="font-size:14px">${emp.name}</strong><br><span style="font-size:12px;color:var(--text2)">${emp.title}</span></div><div style="text-align:right"><strong style="font-size:16px;font-weight:700;letter-spacing:-.3px">${c.toFixed(1)}h</strong><br><span style="font-size:11px;color:var(--text3)">L:${l.toFixed(1)} E:${e.toFixed(1)}</span></div></div>`;});
   h+=`</div>`;
-  if(wk.status==='draft'){h+=`<div class="card"><strong style="font-size:17px;font-weight:700;display:block;margin-bottom:6px;letter-spacing:-.3px">Submit for approval</strong><p style="font-size:14px;color:var(--text2);margin-bottom:16px">The selected manager will see this on their Approvals tab. Timesheet locks until approved.</p>
+  if(wk.status==='draft'||wk.status==='returned'){h+=`<div class="card"><strong style="font-size:17px;font-weight:700;display:block;margin-bottom:6px;letter-spacing:-.3px">Submit for approval</strong><p style="font-size:14px;color:var(--text2);margin-bottom:16px">The selected manager will see this on their Approvals tab. Timesheet locks until approved.</p>
     <div class="fr"><label>Submitted by</label><input type="text" id="sb" placeholder="Your name" value="${auth.user?auth.user.name:''}"/></div>
     <div class="fr"><label>Notes (optional)</label><textarea id="sn" placeholder="Job numbers, special instructions..."></textarea></div>
     <div class="fr"><label>Send approval to</label>${S.managers.map((m,i)=>`<label style="display:flex;align-items:center;gap:12px;font-size:15px;margin-top:12px;cursor:pointer"><input type="radio" name="mgr" id="mg-${i}" value="${i}" ${i===0?'checked':''} style="width:22px;height:22px;accent-color:var(--accent)"/> <div>${m.name}<br><span style="font-size:13px;color:var(--text2)">${m.email}</span></div></label>`).join('')}</div>
@@ -1198,7 +1212,7 @@ function rReview(){const wk=S.weeks[S.currentWeek];const dates=wd(S.currentWeek)
 function subTS(){const wk=S.weeks[S.currentWeek];const by=document.getElementById('sb').value.trim();if(!by){toast('Enter your name.','error');return;}
   const sel=document.querySelector('input[name=mgr]:checked');if(!sel){toast('Select a manager.','error');return;}
   const mgrs=[S.managers[parseInt(sel.value)]];if(!mgrs[0]){toast('Invalid manager selection.','error');return;}
-  wk.status='submitted';wk.submittedBy=by;wk.submittedAt=new Date().toISOString();wk.comments=document.getElementById('sn').value;
+  wk.status='submitted';wk.submittedBy=by;wk.submittedAt=new Date().toISOString();wk.comments=document.getElementById('sn').value;wk.returnedAt='';
   wk.assignedManager=mgrs[0].email; // Store which manager this is assigned to
   // Push to SharePoint and remove from local drafts
   submitProductionToSP(wk);
@@ -1313,8 +1327,8 @@ function appWkK(key){const wk=S.weeks[key];if(!wk)return;const n=auth.user?auth.
   wk.status='approved';wk.approvedBy=n;wk.approvedAt=new Date().toISOString();
   saveAllSubmittedSP();updBadge();render();toast('Approved!','success');}
 function retWkK(key){const wk=S.weeks[key];if(!wk)return;const r=prompt('Reason for returning:');if(r===null)return;
-  wk.status='draft';wk.returnedAt=new Date().toISOString();if(r)wk.comments=(wk.comments||'')+'\nReturned: '+r;
-  saveAllSubmittedSP();updBadge();render();toast('Returned to foreman — they will see it on next login.','success');}
+  wk.status='returned';wk.returnedAt=new Date().toISOString();if(r)wk.comments=(wk.comments||'')+'\nReturned: '+r;
+  saveAllSubmittedSP();updBadge();render();toast('Returned to foreman — they\'ll land on it next time they open the app.','success');}
 function adminDeleteSubmissionK(key){
   if(!confirm('Delete this timesheet from SharePoint? This cannot be undone.'))return;
   const p=key.split(':');
@@ -1325,7 +1339,7 @@ function adminDeleteSubmissionK(key){
 // Legacy iso-key handlers kept for any stale references — now no-ops to avoid silent overwrites.
 function appWk(iso){const n=auth.user?auth.user.name:prompt('Your name:');if(!n)return;if(!S.weeks[iso])return;S.weeks[iso].status='approved';S.weeks[iso].approvedBy=n;S.weeks[iso].approvedAt=new Date().toISOString();
   saveAllSubmittedSP();updBadge();render();toast('Approved!','success');}
-function retWk(iso){const r=prompt('Reason for returning:');if(r===null)return;if(!S.weeks[iso])return;S.weeks[iso].status='draft';S.weeks[iso].returnedAt=new Date().toISOString();if(r)S.weeks[iso].comments=(S.weeks[iso].comments||'')+'\nReturned: '+r;S.weeks[iso].submittedBy='';saveAllSubmittedSP();updBadge();render();toast('Returned to foreman — they will see it on next login.','success');}
+function retWk(iso){const r=prompt('Reason for returning:');if(r===null)return;if(!S.weeks[iso])return;S.weeks[iso].status='returned';S.weeks[iso].returnedAt=new Date().toISOString();if(r)S.weeks[iso].comments=(S.weeks[iso].comments||'')+'\nReturned: '+r;S.weeks[iso].submittedBy='';saveAllSubmittedSP();updBadge();render();toast('Returned to foreman.','success');}
 function vwWk(iso){S.currentWeek=iso;document.getElementById('ws').value=iso;showPage('review');}
 function rExport(){if(!auth.isAdmin){document.getElementById('mc').innerHTML=`<div class="pg"><div class="nd"><i class="ti ti-lock"></i>Admins only.</div></div>`;return;}
   const app=Object.entries(S.weeks).filter(([,w])=>w.status==='approved');
@@ -1604,7 +1618,8 @@ function addAdm(){const e=document.getElementById('na').value.trim().toLowerCase
 function rmAdm(i){S.adminEmails.splice(i,1);rSettings();}
 function addMgr(){const n=document.getElementById('nn').value.trim();const e=document.getElementById('ne').value.trim();if(!n||!e){toast('Name and email required.','error');return;}S.managers.push({name:n,email:e,title:''});rSettings();toast('Manager added.','success');}
 function rmMgr(i){S.managers.splice(i,1);rSettings();}
-function updBadge(){const n=Object.entries(S.weeks).filter(([k,w])=>k.includes(':') && w.status==='submitted').length;const b=document.getElementById('pb');if(!b)return;if(n>0){b.style.display='inline-flex';b.textContent=n;}else b.style.display='none';}
+function updBadge(){const n=Object.entries(S.weeks).filter(([k,w])=>k.includes(':') && w.status==='submitted').length;const b=document.getElementById('pb');if(b){if(n>0){b.style.display='inline-flex';b.textContent=n;}else b.style.display='none';}
+  const ret=Object.entries(S.weeks).filter(([k,w])=>!k.includes(':') && w.status==='returned').length;const eb=document.getElementById('eb');if(eb){if(ret>0){eb.style.display='inline-flex';eb.textContent=ret;}else eb.style.display='none';}}
 function showM(html,id='m'){const ex=document.getElementById(id);if(ex)ex.remove();const ov=document.createElement('div');ov.id=id;ov.className='mo';ov.onclick=e=>{if(e.target===ov)closeM();};ov.innerHTML=`<div class="md">${html}</div>`;document.body.appendChild(ov);}
 function closeM(){const m=document.querySelector('.mo');if(m)m.remove();}
 let toastT;
