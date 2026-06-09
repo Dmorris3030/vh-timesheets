@@ -914,6 +914,10 @@ function fd(iso){const d=new Date(iso+'T12:00:00');return d.toLocaleDateString('
 function fs(iso){const d=new Date(iso+'T12:00:00');return`${d.getMonth()+1}/${d.getDate()}`;}
 function wd(we){if(!we||!/^\d{4}-\d{2}-\d{2}$/.test(we))return DK.map(()=>new Date().toISOString().split('T')[0]);const end=new Date(we+'T12:00:00');if(isNaN(end.getTime()))return DK.map(()=>new Date().toISOString().split('T')[0]);return DK.map((_,i)=>{const d=new Date(end);d.setDate(end.getDate()-(6-i));return d.toISOString().split('T')[0];});}
 function allEmps(){const hid=S.hiddenEmployees||[];return [...EMPS,...(S.customEmployees||[])].filter((e,i,a)=>a.findIndex(x=>x.id===e.id)===i).filter(e=>!hid.includes(e.id));}
+// Resolve an employee for RENDERING a sheet that already lists them: search the FULL roster
+// (ignoring hiddenEmployees, tolerant of id type) and fall back to a stub so an editable card
+// always appears — a crew member on a returned/submitted sheet must never silently vanish.
+function empById(id){return [...EMPS,...(S.customEmployees||[])].find(e=>String(e.id)===String(id))||{id:id,name:String(id),title:''};}
 function tmOpts(cur){var s='<option value=""'+(!cur?' selected':'')+'>--</option>';for(var h=4;h<=20;h++){for(var m=0;m<60;m+=15){var v=(h<10?'0':'')+h+':'+(m<10?'0':'')+m;var d12=h===0?12:h>12?h-12:h;var l=d12+':'+(m<10?'0':'')+m+(h<12?'a':'p');s+='<option value="'+v+'"'+(cur===v?' selected':'')+'>'+l+'</option>';}}return s;}
 function initWeeks(){const sel=document.getElementById('ws');if(!sel)return;
   // Get current week Saturday
@@ -1008,6 +1012,12 @@ function se(eid,dt,f,v){const wk=S.weeks[S.currentWeek];const k=`${eid}:${dt}`;i
 function ct(wk,eid){const dates=wd(S.currentWeek);let l=0,e=0;dates.forEach(dt=>{const lines=getJobLines(wk,eid,dt);lines.forEach(ln=>{const c=calcJobHours(ln);l+=c.labor;e+=c.equip;});// legacy day-level equipment
 (wk.equipmentEntries&&wk.equipmentEntries[`${eid}:${dt}`]||[]).forEach(x=>e+=parseFloat(x.hours)||0);});return{l,e,c:l+e};}
 function rEntry(){const wk=S.weeks[S.currentWeek];const dates=wd(S.currentWeek);const ro=wk.status!=='draft'&&wk.status!=='returned';
+  if(!Array.isArray(wk.employees))wk.employees=[];
+  // Safety net: if the crew array was lost but day entries survived, rebuild it from the entry keys
+  // so a returned/restored sheet still shows its crew to edit.
+  if(!wk.employees.length&&wk.entries&&Object.keys(wk.entries).length){
+    wk.employees=[...new Set(Object.keys(wk.entries).map(k=>k.split(':')[0]).filter(Boolean))];
+  }
   let h=`<div class="pg">`;
   if(auth.user){h+=`<div class="syb"><span class="sd ok" style="flex-shrink:0"></span><span style="flex:1;font-size:13px">${auth.user.name}${auth.isAdmin?' <span class="rb adm" style="margin-left:4px">Admin</span>':''}</span><button class="btn btn-sm" onclick="saveDraft()" style="flex-shrink:0;font-size:12px">💾 Save</button><button class="btn btn-sm" onclick="loadSP()" style="flex-shrink:0;font-size:12px">↻ Sync</button></div>`;}
   else{h+=`<div class="syb"><span class="sd off" style="flex-shrink:0"></span><span style="flex:1;font-size:14px">Not signed in</span><button class="btn btn-p btn-sm" onclick="signIn()" style="flex-shrink:0">Sign in</button></div>`;}
@@ -1037,7 +1047,7 @@ function rEntry(){const wk=S.weeks[S.currentWeek];const dates=wd(S.currentWeek);
   if(entryMode==='production'){h+=buildProductionView(wk,dates,ro);h+='</div>';document.getElementById('mc').innerHTML=h;return;}
   h+=`<div style="display:flex;align-items:center;gap:10px;margin-bottom:16px"><strong style="font-size:16px;font-weight:700;letter-spacing:-.2px">Crew — ${wk.employees.length}/20</strong><button class="btn btn-sm" style="margin-left:auto" onclick="showEM()" ${ro?'disabled':''}><i class="ti ti-users"></i> Manage crew</button></div>`;
   if(!wk.employees.length){h+=`<div class="nd"><i class="ti ti-users"></i>No crew added.<br>Tap "Manage crew" to get started.</div>`;}
-  else{wk.employees.forEach(eid=>{const emp=allEmps().find(e=>e.id===eid);if(!emp)return;
+  else{wk.employees.forEach(eid=>{const emp=empById(eid);
     const{l,e,c}=ct(wk,eid);const ad=adys[eid]||0;
     const dhd=dates.map(dt=>{const en=wk.entries[`${eid}:${dt}`]||{};const eq=wk.equipmentEntries[`${eid}:${dt}`]||[];return en.hours||en.job||en.phase||eq.length>0;});
     h+=`<div class="eb"><div class="eh"><div class="ehl"><strong>${emp.name}</strong><small>${emp.title} · ${emp.id}</small></div><div class="et"><span class="cm">${c.toFixed(1)}h</span><span class="br">L:${l.toFixed(1)} E:${e.toFixed(1)}</span></div></div>
@@ -1199,7 +1209,7 @@ function rReview(){const wk=S.weeks[S.currentWeek];const dates=wd(S.currentWeek)
   let h=`<div class="pg"><div class="ph"><h1>Review & Submit</h1><p>${fw(S.currentWeek)}</p></div>`;
   h+=`<div class="sg"><div class="sc"><div class="lbl">Employees</div><div class="val">${wk.employees.length}</div></div><div class="sc"><div class="lbl">Labor hours</div><div class="val">${tH.toFixed(1)}</div></div><div class="sc"><div class="lbl">Equip hours</div><div class="val">${tE.toFixed(1)}</div></div><div class="sc"><div class="lbl">Total hours</div><div class="val">${(tH+tE).toFixed(1)}</div></div></div>`;
   h+=`<div class="card" style="padding:0;overflow:hidden">`;
-  wk.employees.forEach((eid,idx)=>{const emp=allEmps().find(e=>e.id===eid);if(!emp)return;const{l,e,c}=ct(wk,eid);h+=`<div style="padding:13px 16px;${idx>0?'border-top:0.5px solid var(--border)':''}display:flex;align-items:center;justify-content:space-between"><div><strong style="font-size:14px">${emp.name}</strong><br><span style="font-size:12px;color:var(--text2)">${emp.title}</span></div><div style="text-align:right"><strong style="font-size:16px;font-weight:700;letter-spacing:-.3px">${c.toFixed(1)}h</strong><br><span style="font-size:11px;color:var(--text3)">L:${l.toFixed(1)} E:${e.toFixed(1)}</span></div></div>`;});
+  wk.employees.forEach((eid,idx)=>{const emp=empById(eid);const{l,e,c}=ct(wk,eid);h+=`<div style="padding:13px 16px;${idx>0?'border-top:0.5px solid var(--border)':''}display:flex;align-items:center;justify-content:space-between"><div><strong style="font-size:14px">${emp.name}</strong><br><span style="font-size:12px;color:var(--text2)">${emp.title}</span></div><div style="text-align:right"><strong style="font-size:16px;font-weight:700;letter-spacing:-.3px">${c.toFixed(1)}h</strong><br><span style="font-size:11px;color:var(--text3)">L:${l.toFixed(1)} E:${e.toFixed(1)}</span></div></div>`;});
   h+=`</div>`;
   if(wk.status==='draft'||wk.status==='returned'){h+=`<div class="card"><strong style="font-size:17px;font-weight:700;display:block;margin-bottom:6px;letter-spacing:-.3px">Submit for approval</strong><p style="font-size:14px;color:var(--text2);margin-bottom:16px">The selected manager will see this on their Approvals tab. Timesheet locks until approved.</p>
     <div class="fr"><label>Submitted by</label><input type="text" id="sb" placeholder="Your name" value="${auth.user?auth.user.name:''}"/></div>
@@ -1282,7 +1292,7 @@ function vwWkK(key){
   h+=`<div class="sg" style="margin-bottom:14px"><div class="sc"><div class="lbl">Employees</div><div class="val">${wk.employees.length}</div></div><div class="sc"><div class="lbl">Labor hrs</div><div class="val">${tH.toFixed(1)}</div></div><div class="sc"><div class="lbl">Equip hrs</div><div class="val">${tE.toFixed(1)}</div></div><div class="sc"><div class="lbl">Total</div><div class="val">${(tH+tE).toFixed(1)}</div></div></div>`;
   // Per-employee with daily breakdown
   wk.employees.forEach(eid=>{
-    const emp=allEmps().find(e=>e.id===eid);if(!emp)return;
+    const emp=empById(eid);
     const tot=empTotals(eid);
     h+=`<div class="card" style="margin-bottom:8px;padding:10px 12px"><div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px"><div><strong style="font-size:14px">${emp.name}</strong><br><span style="font-size:11px;color:var(--text2)">${emp.title}</span></div><div style="text-align:right"><strong style="font-size:15px">${tot.c.toFixed(1)}h</strong><br><span style="font-size:10px;color:var(--text3)">L:${tot.l.toFixed(1)} E:${tot.e.toFixed(1)}</span></div></div>`;
     let hasDays=false;
@@ -1360,7 +1370,7 @@ function expCSV(k){const iso=k.split(':')[0];const wk=S.weeks[k];if(!wk)return;c
   // with no Department/Job/Phase/Cost Type and no equipment.
   const PTO_KW=['PTO','PTE','VAC','VACATION','HOLIDAY','PAID TIME OFF','SICK','TIME OFF'];
   const isPTO=(n)=>{if(!n)return false;const u=String(n).toUpperCase();return PTO_KW.some(kw=>u.indexOf(kw)>=0);};
-  wk.employees.forEach(eid=>{const emp=allEmps().find(e=>e.id===eid);if(!emp)return;
+  wk.employees.forEach(eid=>{const emp=empById(eid);
     dates.forEach(dt=>{
       const en=wk.entries[`${eid}:${dt}`]||{};
       const jobLines=en.jobLines&&en.jobLines.length>0?en.jobLines:(en.job||en.hours?[{job:en.job||'',phase:en.phase||'',hours:en.hours||''}]:[]);
