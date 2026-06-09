@@ -229,7 +229,7 @@ async function loadData(){
 async function loadBudgets(){
   try{
     const tok=await getToken();if(!tok)return;
-    const url='https://graph.microsoft.com/v1.0/sites/'+FD_SITE+'/lists/'+BUDGETS_LIST+'/items?$expand=fields($select=JobNumber,JobName,Phase,PhaseType,BidCost,BidQty,QtyUnit,BidHours)&$top=200';
+    const url='https://graph.microsoft.com/v1.0/sites/'+FD_SITE+'/lists/'+BUDGETS_LIST+'/items?$expand=fields($select=JobNumber,JobName,Phase,PhaseType,BidCost,BidQty,QtyUnit,BidHours,BidEquip,BidLabor,BidMaterial,BidFringe,BidBurden)&$top=200';
     const r=await fetch(url,{headers:{Authorization:'Bearer '+tok}});
     if(!r.ok)return;
     const j=await r.json();
@@ -432,12 +432,18 @@ function render(){
   });
   const _budTotals=_matchingBuds.reduce((acc,b)=>{
     acc.bidCost+=parseFloat(b.BidCost)||0;
+    // Field cost = equipment + labor + fringe + burden (excludes material, sub, other, profit)
+    acc.fieldCost+=(parseFloat(b.BidEquip)||0)+(parseFloat(b.BidLabor)||0)+(parseFloat(b.BidFringe)||0)+(parseFloat(b.BidBurden)||0);
+    acc.material+=parseFloat(b.BidMaterial)||0;
     acc.bidQty+=parseFloat(b.BidQty)||0;
     acc.bidHours+=parseFloat(b.BidHours)||0;
     return acc;
-  },{bidCost:0,bidQty:0,bidHours:0});
-  if(_budTotals.bidCost>0&&_budTotals.bidQty>0){
-    rng.bcpy=_budTotals.bidCost/_budTotals.bidQty;
+  },{bidCost:0,fieldCost:0,material:0,bidQty:0,bidHours:0});
+  // Prefer the field-cost basis when the category breakdown is entered; otherwise fall back
+  // to the single legacy BidCost. This is the "more accurate cost per unit" (no material).
+  const _bidCostBasis=_budTotals.fieldCost>0?_budTotals.fieldCost:_budTotals.bidCost;
+  if(_bidCostBasis>0&&_budTotals.bidQty>0){
+    rng.bcpy=_bidCostBasis/_budTotals.bidQty;
     rng.variance=rng.cpy>0?rng.cpy-rng.bcpy:0;
   }
   const _bidHrsPerUnit=(_budTotals.bidHours>0&&_budTotals.bidQty>0)?_budTotals.bidHours/_budTotals.bidQty:null;
@@ -679,13 +685,14 @@ function renderSettingsModal(){
     '<td>'+esc(b.Phase||'')+'</td>'+
     '<td>'+esc(b.PhaseType||'')+'</td>'+
     '<td class="num">'+(b.BidCost?fmtMoney(b.BidCost,0):'—')+'</td>'+
+    '<td class="num">'+((function(){const f=(parseFloat(b.BidEquip)||0)+(parseFloat(b.BidLabor)||0)+(parseFloat(b.BidFringe)||0)+(parseFloat(b.BidBurden)||0);return f>0?fmtMoney(f,0):'—';})())+'</td>'+
     '<td class="num">'+(b.BidQty?fmtNum(b.BidQty):'—')+'</td>'+
     '<td>'+esc(b.QtyUnit||'')+'</td>'+
     '<td class="num">'+(b.BidHours?fmtNum(b.BidHours,1):'—')+'</td>'+
     '<td><button class="btn btn-sm" onclick="deleteBudget(\''+b.__id+'\')" title="Delete"><i class="ti ti-trash"></i></button></td>'+
   '</tr>').join('');
   const tbl=list.length===0?'<div class="empty">No budgets yet. Add one above.</div>':
-    '<table class="tbl"><thead><tr><th>Job</th><th>Phase</th><th>Type</th><th class="num">Bid $</th><th class="num">Bid Qty</th><th>Unit</th><th class="num">Bid Hrs</th><th></th></tr></thead><tbody>'+rows+'</tbody></table>';
+    '<table class="tbl"><thead><tr><th>Job</th><th>Phase</th><th>Type</th><th class="num">Bid $</th><th class="num">Field $</th><th class="num">Bid Qty</th><th>Unit</th><th class="num">Bid Hrs</th><th></th></tr></thead><tbody>'+rows+'</tbody></table>';
   return '<div class="modal-ov" onclick="if(event.target===this)toggleSettings()">'+
     '<div class="modal-pn">'+
       '<div class="modal-hdr"><h2>Job Budgets</h2><button class="btn btn-sm" onclick="toggleSettings()" title="Close"><i class="ti ti-x"></i></button></div>'+
@@ -696,10 +703,15 @@ function renderSettingsModal(){
             '<input id="bud-jname" placeholder="Job Name">'+
             '<input id="bud-ph" placeholder="Phase (e.g. 300)">'+
             '<select id="bud-pt"><option value="earth">earth</option><option value="utility">utility</option></select>'+
-            '<input id="bud-bc" type="number" placeholder="Bid Cost ($)" step="0.01">'+
+            '<input id="bud-bc" type="number" placeholder="Bid Cost (total, optional)" step="0.01">'+
             '<input id="bud-bq" type="number" placeholder="Bid Qty" step="0.01">'+
             '<select id="bud-qu"><option value="">unit</option><option value="CY">CY</option><option value="SY">SY</option><option value="LF">LF</option></select>'+
             '<input id="bud-bh" type="number" placeholder="Bid Hours" step="0.01">'+
+            '<input id="bud-eq" type="number" placeholder="Equip ($)" step="0.01">'+
+            '<input id="bud-lb" type="number" placeholder="Labor ($)" step="0.01">'+
+            '<input id="bud-mt" type="number" placeholder="Material ($)" step="0.01">'+
+            '<input id="bud-fr" type="number" placeholder="Fringe ($)" step="0.01">'+
+            '<input id="bud-bd" type="number" placeholder="Burden ($)" step="0.01">'+
           '</div>'+
           '<div class="bud-form-actions"><button class="btn btn-p" onclick="saveBudget()"><i class="ti ti-plus"></i> Add Budget</button></div>'+
         '</div>'+
@@ -718,13 +730,18 @@ async function saveBudget(){
   const bq=parseFloat(gv('bud-bq'));if(!isNaN(bq))payload.BidQty=bq;
   const qu=gv('bud-qu');if(qu)payload.QtyUnit=qu;
   const bh=parseFloat(gv('bud-bh'));if(!isNaN(bh))payload.BidHours=bh;
+  const eq=parseFloat(gv('bud-eq'));if(!isNaN(eq))payload.BidEquip=eq;
+  const lb=parseFloat(gv('bud-lb'));if(!isNaN(lb))payload.BidLabor=lb;
+  const mt=parseFloat(gv('bud-mt'));if(!isNaN(mt))payload.BidMaterial=mt;
+  const fr=parseFloat(gv('bud-fr'));if(!isNaN(fr))payload.BidFringe=fr;
+  const bd=parseFloat(gv('bud-bd'));if(!isNaN(bd))payload.BidBurden=bd;
   try{
     const tok=await getToken();if(!tok){toast('Auth failed','err');return;}
     const url='https://graph.microsoft.com/v1.0/sites/'+FD_SITE+'/lists/'+BUDGETS_LIST+'/items';
     const r=await fetch(url,{method:'POST',headers:{Authorization:'Bearer '+tok,'Content-Type':'application/json'},body:JSON.stringify({fields:payload})});
     if(!r.ok){const t=await r.text();toast('Save failed: '+t.slice(0,120),'err');return;}
     toast('Budget added','ok');
-    ['bud-jn','bud-jname','bud-ph','bud-bc','bud-bq','bud-bh'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});
+    ['bud-jn','bud-jname','bud-ph','bud-bc','bud-bq','bud-bh','bud-eq','bud-lb','bud-mt','bud-fr','bud-bd'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});
     await loadBudgets();render();
   }catch(e){toast('Error: '+e.message,'err');}
 }
