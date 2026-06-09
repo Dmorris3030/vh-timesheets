@@ -536,9 +536,9 @@ function render(){
         <div class="k"><div class="lbl">Yards to Date</div><div class="val">${fmtNum(allTime.yards)}</div><div class="sub">${esc(toDateLabel)}</div></div>
         `:`
         <div class="k feat"><div class="lbl">LF</div><div class="val">${fmtNum(rng.yards)}</div><div class="sub">${rows.length} entries · ${rng.laborHours.toFixed(1)}h labor · in range</div></div>
-        <div class="k feat"><div class="lbl">Actual Cost / LF</div><div class="val">${fmtMoney(_utilActualCpf)}</div><div class="sub">${_utilActualCpf>0?`<span class="${_utilCostVar<0?'good':(_utilCostVar>0?'bad':'')}">${fmtVar(_utilCostVar)} vs bid</span> · ${fmtNum(_actualHrsPerFt,3)} vs ${fmtNum(_bidHrsPerUnit,3)} hrs/LF`:'needs bid $/LF + bid hrs'}</div></div>
-        <div class="k feat"><div class="lbl">Bid Cost / LF</div><div class="val">${fmtMoney(rng.bcpy)}</div><div class="sub">set bid rate</div></div>
-        <div class="k feat"><div class="lbl">Structures Set</div><div class="val">${_structures}</div><div class="sub">unique structures · in range</div></div>
+        <div class="k feat"><div class="lbl">Cost Variance / LF</div><div class="val ${_utilCostVar<0?'good':(_utilCostVar>0?'bad':'')}"><span class="arr">${_utilCostVar<0?'↓':_utilCostVar>0?'↑':''}</span>${_utilActualCpf>0?fmtVar(_utilCostVar):'—'}</div><div class="sub">${_utilActualCpf>0?fmtMoney(_utilActualCpf)+' actual vs '+fmtMoney(rng.bcpy)+' bid':'needs bid $/LF + bid hrs'}</div></div>
+        <div class="k feat" onclick="showStructures()" style="cursor:pointer" title="View structures set"><div class="lbl">Structures Set</div><div class="val">${_structures}</div><div class="sub">${_structures>0?'tap to view list':'unique structures · in range'}</div></div>
+        <div class="k feat"><div class="lbl">Prod Hours vs Bid</div><div class="val ${_totalBidHours>0?(allTime.prodHours<=_totalBidHours?'good':'bad'):''}">${fmtNum(allTime.prodHours,1)}</div><div class="sub">${_totalBidHours>0?'of '+fmtNum(_totalBidHours,1)+' bid hrs · '+(allTime.prodHours/_totalBidHours*100).toFixed(0)+'%':'no bid hrs set'}</div></div>
         <div class="k"><div class="lbl">% Complete</div><div class="val">${_totalBidQty>0?(allTime.yards/_totalBidQty*100).toFixed(1)+'%':'—'}</div><div class="sub">${_totalBidQty>0?fmtNum(allTime.yards)+' / '+fmtNum(_totalBidQty)+' LF':'no bid set'}</div>${_totalBidQty>0?`<div class="pbar"><div class="pbarfill" style="width:${Math.min(allTime.yards/_totalBidQty*100,100)}%"></div></div>`:''}</div>
         <div class="k"><div class="lbl">LF to Date</div><div class="val">${fmtNum(allTime.yards)}</div><div class="sub">${esc(toDateLabel)}</div></div>
         `}
@@ -647,6 +647,29 @@ function showDetail(i){
   document.body.appendChild(mo);
 }
 function closeMo(){const m=document.querySelector('.mo');if(m)m.remove();}
+function showStructures(){
+  const rows=filteredRows();
+  const byStr={};
+  rows.forEach(r=>{
+    const id=r.STR_x0020_ID;if(!id)return;
+    if(!byStr[id])byStr[id]={id:id,job:r.Jobnumber||'?',phases:new Set(),dates:new Set(),workTypes:new Set(),foremen:new Set(),lf:0,last:''};
+    const g=byStr[id];
+    if(r.Phase)g.phases.add(r.Phase);
+    const dk=(r.Date||'').slice(0,10);if(dk){g.dates.add(dk);if(dk>g.last)g.last=dk;}
+    if(r.Work_x0020_Type)g.workTypes.add(r.Work_x0020_Type);
+    if(r.Foreman)g.foremen.add(r.Foreman);
+    g.lf+=parseFloat(r.Yardage_x002f_production)||0;
+  });
+  const list=Object.values(byStr).sort((a,b)=>(b.last||'').localeCompare(a.last||''));
+  const showSel=auth.isAdmin||auth.isManager;
+  const body=list.length?list.map(g=>{
+    const sub=[g.job+(g.phases.size?' · P'+[...g.phases].join('/'):''),g.workTypes.size?[...g.workTypes].join(', '):'',(showSel&&g.foremen.size)?[...g.foremen].join(', '):''].filter(Boolean).join(' · ');
+    const right=(g.lf>0?fmtNum(g.lf)+' LF':'—')+(g.last?'<br><span style="font-size:11px;color:var(--text3);font-weight:500">'+fmtDate(g.last)+'</span>':'');
+    return `<div class="dr"><span class="lk"><strong style="color:var(--text)">STR ${esc(g.id)}</strong><br><span style="font-size:11px">${esc(sub)}</span></span><span class="vk">${right}</span></div>`;
+  }).join(''):'<div class="empty">No structures set in this range.</div>';
+  const html=`<h3>Structures Set <span style="font-weight:600;color:var(--text2);font-size:14px">· ${list.length}</span></h3><div class="meta">${S.dateFrom} → ${S.dateTo}${S.selectedJob?' · Job '+esc(S.selectedJob):''}</div>${body}<div class="mf"><button class="btn" onclick="closeMo()">Close</button></div>`;
+  const mo=document.createElement('div');mo.className='mo';mo.onclick=e=>{if(e.target===mo)closeMo();};mo.innerHTML=`<div class="md">${html}</div>`;document.body.appendChild(mo);
+}
 
 function toggleSettings(){S.showSettings=!S.showSettings;render();}
 function renderSettingsModal(){
