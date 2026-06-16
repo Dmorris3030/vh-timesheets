@@ -902,7 +902,7 @@ async function abRender(reset){
   const base=page.getViewport({scale:1,rotation:abRot()});AB.baseW=base.width;AB.baseH=base.height;
   if(reset){AB.zoom=1;AB.fitBase=Math.min((cW-12)/AB.baseW,(cH-12)/AB.baseH);}const fit=AB.fitBase||Math.min((cW-12)/AB.baseW,(cH-12)/AB.baseH);
   AB.cssW=AB.baseW*fit*AB.zoom;AB.cssH=AB.baseH*fit*AB.zoom;
-  let rs=fit*AB.zoom*AB_DPR;const tot=(AB.baseW*rs)*(AB.baseH*rs);if(tot>AB_MAXPIX)rs*=Math.sqrt(AB_MAXPIX/tot);AB.backing=rs;
+  let rs=fit*AB.zoom*AB_DPR;const _md=4096/Math.max(AB.baseW,AB.baseH);if(rs>_md)rs=_md;const tot=(AB.baseW*rs)*(AB.baseH*rs);if(tot>AB_MAXPIX)rs*=Math.sqrt(AB_MAXPIX/tot);AB.backing=rs;
   const vp=page.getViewport({scale:rs,rotation:abRot()});
   const pc=document.getElementById('ab-pdf'),oc=document.getElementById('ab-ink');
   [pc,oc].forEach(c=>{c.width=Math.round(vp.width);c.height=Math.round(vp.height);c.style.width=AB.cssW+'px';c.style.height=AB.cssH+'px';});

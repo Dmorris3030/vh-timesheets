@@ -839,7 +839,7 @@ async function mkRender(reset){
   const base=page.getViewport({scale:1,rotation:mkRot()});MK.baseW=base.width;MK.baseH=base.height;
   if(reset){MK.zoom=1;MK.fitBase=(cW-12)/MK.baseW;}const fit=MK.fitBase||(cW-12)/MK.baseW;
   MK.cssW=MK.baseW*fit*MK.zoom;MK.cssH=MK.baseH*fit*MK.zoom;
-  let rs=fit*MK.zoom*MK_DPR;const tot=(MK.baseW*rs)*(MK.baseH*rs);if(tot>MK_MAXPIX)rs*=Math.sqrt(MK_MAXPIX/tot);MK.backing=rs;
+  let rs=fit*MK.zoom*MK_DPR;const _md=4096/Math.max(MK.baseW,MK.baseH);if(rs>_md)rs=_md;const tot=(MK.baseW*rs)*(MK.baseH*rs);if(tot>MK_MAXPIX)rs*=Math.sqrt(MK_MAXPIX/tot);MK.backing=rs;
   const vp=page.getViewport({scale:rs,rotation:mkRot()});
   const pc=document.getElementById('mk-pdf'),oc=document.getElementById('mk-ink');
   [pc,oc].forEach(function(c){c.width=Math.round(vp.width);c.height=Math.round(vp.height);c.style.width=MK.cssW+'px';c.style.height=MK.cssH+'px';});
