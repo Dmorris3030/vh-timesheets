@@ -842,9 +842,9 @@ function renderAsBuilt(){
       </div>
       <div style="display:flex;gap:12px;align-items:stretch;flex-wrap:wrap">
         <div id="ab-wrap" style="flex:1;min-width:300px;position:relative;overflow:hidden;background:#e9e9e9;border:1px solid var(--border);border-radius:8px;touch-action:none;cursor:grab;height:calc(100vh - 150px);min-height:420px">
-          <div id="ab-stack" style="position:absolute;left:0;top:0;transform-origin:0 0">
-            <canvas id="ab-pdf" style="display:block;background:#fff"></canvas>
-            <canvas id="ab-ink" style="position:absolute;left:0;top:0"></canvas>
+          <div id="ab-stack" style="position:absolute;left:0;top:0;transform-origin:0 0;touch-action:none">
+            <canvas id="ab-pdf" style="display:block;background:#fff;touch-action:none"></canvas>
+            <canvas id="ab-ink" style="position:absolute;left:0;top:0;touch-action:none"></canvas>
           </div>
           <div id="ab-status" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#777;font-size:14px;text-align:center;padding:20px"></div>
         </div>
@@ -951,7 +951,7 @@ function abTotals(){
   const dEl=document.getElementById('ab-days');if(dEl){const dk=Object.keys(days).sort();
     dEl.innerHTML=dk.length?dk.map(d=>`<div class="dr"><span class="lk">${esc(d)}</span><span class="vk" style="font-weight:500;color:var(--text3)">${esc(days[d])}</span></div>`).join(''):'<div style="color:var(--text3)">No days in range.</div>';}
 }
-function abBindView(){const w=abWrap();if(!w)return;
+function abBindView(){const w=abWrap();if(!w)return;['gesturestart','gesturechange','gestureend'].forEach(ev=>w.addEventListener(ev,e=>e.preventDefault(),{passive:false}));
   w.addEventListener('wheel',e=>{e.preventDefault();const r=w.getBoundingClientRect();abSetZoom(AB.zoom*(e.deltaY<0?1.15:0.87),e.clientX-r.left,e.clientY-r.top);},{passive:false});
   w.addEventListener('mousedown',e=>{AB.panning=true;AB.sx=e.clientX-AB.tx;AB.sy=e.clientY-AB.ty;});
   w.addEventListener('touchstart',e=>{if(e.touches.length===2){e.preventDefault();AB.gOn=true;const a=e.touches[0],b=e.touches[1];AB.gd=Math.max(1,Math.hypot(b.clientX-a.clientX,b.clientY-a.clientY));const r=w.getBoundingClientRect();const mx=(a.clientX+b.clientX)/2-r.left,my=(a.clientY+b.clientY)/2-r.top;AB.gnx=(mx-AB.tx)/AB.cssW;AB.gny=(my-AB.ty)/AB.cssH;AB.lf=1;}},{passive:false});

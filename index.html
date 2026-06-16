@@ -1020,12 +1020,12 @@ function mkBuildOverlay(){
      '<button id="mk-save" onclick="mkSave()" style="margin-left:auto;background:#2563eb;font-weight:700;border:none;color:#fff;border-radius:7px;padding:7px 14px;cursor:pointer;font-size:14px">Save</button>'+
    '</div>'+
    '<div id="mk-wrap" style="flex:1;overflow:hidden;background:#3a3a3a;position:relative;touch-action:none">'+
-     '<div id="mk-stack" style="position:absolute;left:0;top:0;transform-origin:0 0"><canvas id="mk-pdf" style="display:block;background:#fff"></canvas><canvas id="mk-ink" style="position:absolute;left:0;top:0"></canvas></div>'+
+     '<div id="mk-stack" style="position:absolute;left:0;top:0;transform-origin:0 0;touch-action:none"><canvas id="mk-pdf" style="display:block;background:#fff;touch-action:none"></canvas><canvas id="mk-ink" style="position:absolute;left:0;top:0;touch-action:none"></canvas></div>'+
      '<div id="mk-status" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#bbb;font-size:14px;text-align:center;padding:20px"></div>'+
      '<div id="mk-measure" style="position:absolute;left:10px;bottom:10px;z-index:30;background:rgba(18,18,18,.82);color:#ffd400;font-weight:700;font-size:14px;padding:8px 12px;border-radius:10px;max-width:80vw"></div>'+
    '</div>';
   document.body.appendChild(o);
-  const oc=document.getElementById('mk-ink');const w=document.getElementById('mk-wrap');
+  const oc=document.getElementById('mk-ink');const w=document.getElementById('mk-wrap');['gesturestart','gesturechange','gestureend'].forEach(function(ev){w.addEventListener(ev,function(e){e.preventDefault();},{passive:false});});
   w.addEventListener('touchstart',mkDown,{passive:false});w.addEventListener('touchmove',mkMove,{passive:false});w.addEventListener('touchend',mkEnd);w.addEventListener('touchcancel',mkEnd);
   oc.addEventListener('mousedown',mkDown);
   if(!MK.winBound){MK.winBound=true;
