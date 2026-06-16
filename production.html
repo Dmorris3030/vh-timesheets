@@ -123,6 +123,8 @@
   .auth-c h1{font-size:22px;font-weight:700;margin-bottom:8px;letter-spacing:-.5px}
   .auth-c p{color:var(--text2);font-size:14px;margin-bottom:22px;line-height:1.4}
 .vt{display:inline-flex;background:#f5f5f7;border-radius:8px;padding:3px;margin-bottom:14px;gap:2px}.vt button{font:inherit;font-size:13px;font-weight:600;padding:6px 14px;border:none;background:transparent;color:#666;cursor:pointer;border-radius:6px;transition:background .12s,color .12s;display:inline-flex;align-items:center;gap:6px}.vt button.on{background:#fff;color:#c8102e;box-shadow:0 1px 2px rgba(0,0,0,.06)}.vt button:not(.on):hover{color:#111}.day-card{background:#fff;border:1px solid #eaeaea;border-radius:8px;padding:12px 14px;margin-bottom:8px}.day-hdr{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:8px;font-weight:700;font-size:13px}.day-totals{font-weight:400;font-size:12px;color:#666}.day-cols{display:grid;grid-template-columns:1fr 1fr;gap:16px}.day-col-title{font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.3px;color:#666;margin-bottom:6px;padding-bottom:4px;border-bottom:1px solid #eaeaea}.day-row{display:flex;justify-content:space-between;align-items:baseline;padding:4px 0;font-size:13px;border-bottom:1px solid #f5f5f5}.day-row:last-child{border-bottom:none}.day-row.legacy{color:#999;font-style:italic}.day-name{flex:1;min-width:0}.day-name .day-sub{font-size:11px;color:#888;margin-left:4px}.day-hrs{font-weight:600;margin-left:8px;white-space:nowrap}.day-empty{font-size:12px;color:#888;padding:6px 0;font-style:italic}@media (max-width:640px){.day-cols{grid-template-columns:1fr;gap:8px}}.modal-ov{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:1000;display:flex;align-items:center;justify-content:center;padding:20px}.modal-pn{background:#fff;border-radius:12px;max-width:900px;width:100%;max-height:85vh;display:flex;flex-direction:column;box-shadow:0 8px 32px rgba(0,0,0,.2);overflow:hidden}.modal-hdr{display:flex;justify-content:space-between;align-items:center;padding:16px 20px;border-bottom:1px solid #eaeaea}.modal-hdr h2{margin:0;font-size:18px}.modal-body{padding:16px 20px;overflow:auto;flex:1}.modal-sec{margin-bottom:20px}.modal-sec h3{font-size:13px;font-weight:600;text-transform:uppercase;letter-spacing:.3px;color:#666;margin:0 0 10px}.bud-form{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:12px}.bud-form input,.bud-form select{font:inherit;font-size:13px;padding:8px 10px;border:1px solid #ddd;border-radius:6px;width:100%;box-sizing:border-box}.bud-form-actions{display:flex;justify-content:flex-end;gap:8px}.bud-form-actions .btn{padding:8px 16px}@media (max-width:640px){.bud-form{grid-template-columns:1fr 1fr}}summary.day-hdr{cursor:pointer;list-style:none;outline:none;user-select:none}summary.day-hdr::-webkit-details-marker{display:none}summary.day-hdr::before{content:'\25B8';color:#c8102e;margin-right:7px;font-size:11px}details[open]>summary.day-hdr::before{content:'\25BE'}details.day-card[open]>summary.day-hdr{margin-bottom:10px;padding-bottom:8px;border-bottom:1px solid #eaeaea}.day-date{flex:1;min-width:0}.day-prod{margin-bottom:12px}.day-prod .day-row.prod-row{cursor:pointer}.day-prod .day-row.prod-row:hover{background:#fafafa}.day-prod .day-row.prod-row{align-items:flex-start}.day-name .prod-title{display:block}.prod-meta{font-size:11px;color:#666;margin-top:2px;line-height:1.4}.prod-note{font-size:11px;color:#888;font-style:italic;margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%}.day-hrs .u{font-size:10px;color:#999;font-weight:500;text-transform:uppercase;margin-left:1px}</style>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js"></script>
 </head>
 <body>
 <div id="app"><div class="loading"><div class="spinner"></div><div>Loading...</div></div></div>
@@ -417,6 +419,7 @@ function aggregate(rows){
 
 // === RENDER ===
 function render(){
+  if(S.view==='asbuilt'){renderAsBuilt();return;}
   const rows=filteredRows();
   const weekRows=thisWeekRows();
   const wk=aggregate(weekRows);
@@ -487,6 +490,7 @@ function render(){
       <div class="vt" role="tablist" aria-label="View">
         <button class="${S.view==='earth'?'on':''}" onclick="setView('earth')"><i class="ti ti-mountain"></i> Earthwork</button>
         <button class="${S.view==='util'?'on':''}" onclick="setView('util')"><i class="ti ti-tool"></i> Utility</button>
+        <button class="${S.view==='asbuilt'?'on':''}" onclick="setView('asbuilt')"><i class="ti ti-map-2"></i> As-Built</button>
       </div>
       <div class="ctrl">
         ${showSelector?`
@@ -790,6 +794,189 @@ function toast(msg,type){
   document.getElementById('toasts').appendChild(t);
   setTimeout(()=>t.remove(),2400);
 }
+
+// ===== AS-BUILT PLAN VIEW (dashboard, additive) ===========================
+const AB_COLORS={'300':'#8a5a2b','310':'#8a5a2b','400':'#ff8800','450':'#9333ea','500':'#1faa4b','600':'#1466d6'};
+const AB_PLABEL={'300':'Earthwork','310':'Fine Grade','400':'Storm','450':'Force Main','500':'Sanitary','600':'Watermain'};
+const AB_UNIT={'300':'CY','310':'SY','400':'LF','450':'LF','500':'LF','600':'LF'};
+const AB_ROOT='JobPlans';
+const AB_DPR=Math.min(window.devicePixelRatio||1,2.5),AB_MAXPIX=14e6;
+let AB={pdfDoc:null,baseW:1,baseH:1,backing:1,cssW:1,cssH:1,zoom:1,tx:0,ty:0,userRot:0,pdfRotate:0,
+  plans:[],planIdx:0,marks:[],job:null,panning:false,sx:0,sy:0,gOn:false,gd:0,gnx:0,gny:0,lmx:0,lmy:0,lf:1,winBound:false};
+function abC(v,a,b){return Math.min(b,Math.max(a,v));}
+function abRot(){return (AB.pdfRotate+AB.userRot)%360;}
+function abWrap(){return document.getElementById('ab-wrap');}
+function abSetStatus(t){const s=document.getElementById('ab-status');if(s){s.innerHTML=t||'';s.style.display=t?'flex':'none';}}
+
+function renderAsBuilt(){
+  const roleBadge=`<span class="rb ${auth.role}">${auth.role}</span>`;
+  document.getElementById('app').innerHTML=`
+    <div class="hdr"><div class="hdr-in">
+      <div class="brand"><div class="logo">VH</div><span>As-Built</span></div>
+      <div class="uline"><span class="nm">${esc(auth.user.name)}</span>${roleBadge}
+        <button class="btn btn-sm" onclick="signOut()" title="Sign out"><i class="ti ti-logout"></i></button></div>
+    </div></div>
+    <div class="container" style="max-width:none;padding:10px 12px">
+      <div class="vt" role="tablist" aria-label="View">
+        <button onclick="setView('earth')"><i class="ti ti-mountain"></i> Earthwork</button>
+        <button onclick="setView('util')"><i class="ti ti-tool"></i> Utility</button>
+        <button class="on"><i class="ti ti-map-2"></i> As-Built</button>
+      </div>
+      <div class="ctrl">
+        <div class="cg"><label>Job</label>
+          <select onchange="abSelectJob(this.value)">
+            <option value="">Select job…</option>
+            ${S.jobs.map(j=>`<option value="${esc(j)}" ${j===S.selectedJob?'selected':''}>${esc(j)}</option>`).join('')}
+          </select></div>
+        <div class="cg"><label>Sheet</label><select id="ab-sheet" onchange="abPickPlan(this.value)"><option>—</option></select></div>
+        <div class="cg"><label>From</label><input type="date" value="${S.dateFrom||''}" onchange="abSetDate('from',this.value)"></div>
+        <div class="cg"><label>To</label><input type="date" value="${S.dateTo||''}" onchange="abSetDate('to',this.value)"></div>
+        <div class="cg" style="margin-left:auto;flex-direction:row;gap:6px;align-items:flex-end">
+          <button class="btn btn-sm" onclick="abZoom(1.3)">+</button>
+          <button class="btn btn-sm" onclick="abZoom(0.77)">−</button>
+          <button class="btn btn-sm" onclick="abFit()">Fit</button>
+          <button class="btn btn-sm" onclick="abRotate()"><i class="ti ti-rotate"></i></button>
+          <button class="btn btn-sm" onclick="abDownload()"><i class="ti ti-download"></i></button>
+          <button class="btn btn-p btn-sm" onclick="abPrint()"><i class="ti ti-printer"></i> Print</button>
+        </div>
+      </div>
+      <div style="display:flex;gap:12px;align-items:stretch;flex-wrap:wrap">
+        <div id="ab-wrap" style="flex:1;min-width:300px;position:relative;overflow:hidden;background:#e9e9e9;border:1px solid var(--border);border-radius:8px;touch-action:none;cursor:grab;min-height:62vh">
+          <div id="ab-stack" style="position:absolute;left:0;top:0;transform-origin:0 0">
+            <canvas id="ab-pdf" style="display:block;background:#fff"></canvas>
+            <canvas id="ab-ink" style="position:absolute;left:0;top:0"></canvas>
+          </div>
+          <div id="ab-status" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#777;font-size:14px;text-align:center;padding:20px"></div>
+        </div>
+        <div style="width:280px;flex-shrink:0;display:flex;flex-direction:column;gap:12px">
+          <div class="sec" style="margin:0"><h2>Quantities to date <span class="h2-sub" id="ab-range"></span></h2><div id="ab-totals" style="font-size:13px;color:var(--text2)">Select a job.</div></div>
+          <div class="sec" style="margin:0"><h2>Days on record</h2><div id="ab-days" style="font-size:13px;color:var(--text2)">—</div></div>
+        </div>
+      </div>
+    </div>`;
+  abBindView();
+  abSetStatus(S.selectedJob?'Loading…':'Select a job to view its as-built plan.');
+  if(S.selectedJob)abLoadJob();else abTotals();
+}
+function abSelectJob(v){S.selectedJob=v;abLoadJob();}
+function abSetDate(which,v){if(which==='from')S.dateFrom=v;else S.dateTo=v;abOverlay();}
+
+async function abLoadJob(){
+  const job=S.selectedJob;AB.job=job;AB.marks=[];AB.plans=[];AB.pdfDoc=null;
+  if(!job){abSetStatus('Select a job to view its as-built plan.');abTotals();return;}
+  abSetStatus('Loading plans…');
+  const tok=await getToken();if(!tok){abSetStatus('Sign-in required.');return;}
+  try{
+    const r=await fetch(`https://graph.microsoft.com/v1.0/sites/${TS_SITE}/drive/root:/${AB_ROOT}/${encodeURIComponent(job)}:/children`,{headers:{Authorization:'Bearer '+tok}});
+    if(r.status===404){abSetStatus(`No plans for job ${esc(job)} yet.<br>Upload plan PDFs to ${AB_ROOT}/${esc(job)} in SharePoint.`);abTotals();return;}
+    if(!r.ok)throw new Error('plans '+r.status);
+    const d=await r.json();
+    AB.plans=(d.value||[]).filter(c=>c.file&&/\.pdf$/i.test(c.name||''));
+    if(!AB.plans.length){abSetStatus(`No plan PDFs in ${AB_ROOT}/${esc(job)}.`);abTotals();return;}
+  }catch(e){console.error(e);abSetStatus('Could not load plans.');return;}
+  const sel=document.getElementById('ab-sheet');if(sel)sel.innerHTML=AB.plans.map((p,i)=>`<option value="${i}">${esc(p.name.replace(/\.pdf$/i,''))}</option>`).join('');
+  await abLoadMarks(tok);
+  await abPickPlan(0);
+}
+async function abLoadMarks(tok){
+  AB.marks=[];
+  try{
+    const r=await fetch(`https://graph.microsoft.com/v1.0/sites/${TS_SITE}/drive/root:/${AB_ROOT}/${encodeURIComponent(AB.job)}/Marks:/children?$top=400`,{headers:{Authorization:'Bearer '+tok}});
+    if(r.ok){const d=await r.json();const files=(d.value||[]).filter(c=>c.file&&/\.json$/i.test(c.name||''));
+      for(const f of files){try{const u=f['@microsoft.graph.downloadUrl'];AB.marks.push(await (await fetch(u)).json());}catch(e){}}}
+  }catch(e){}
+}
+async function abPickPlan(i){
+  AB.planIdx=+i;abSetStatus('Rendering…');
+  try{
+    const f=AB.plans[AB.planIdx];const u=f['@microsoft.graph.downloadUrl'];
+    const buf=await (await fetch(u)).arrayBuffer();
+    pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+    AB.pdfDoc=await pdfjsLib.getDocument({data:buf.slice(0)}).promise;
+    AB.userRot=0;await abRender(true);abSetStatus('');abTotals();
+  }catch(e){console.error(e);abSetStatus('Could not open plan PDF.');}
+}
+async function abRender(reset){
+  if(!AB.pdfDoc)return;const page=await AB.pdfDoc.getPage(1);AB.pdfRotate=page.rotate||0;
+  const w=abWrap();const cW=w.clientWidth;if(cW<10){setTimeout(()=>abRender(reset),60);return;}
+  const base=page.getViewport({scale:1,rotation:abRot()});AB.baseW=base.width;AB.baseH=base.height;
+  const fit=(cW-12)/AB.baseW;if(reset)AB.zoom=1;
+  AB.cssW=AB.baseW*fit*AB.zoom;AB.cssH=AB.baseH*fit*AB.zoom;
+  let rs=fit*AB.zoom*AB_DPR;const tot=(AB.baseW*rs)*(AB.baseH*rs);if(tot>AB_MAXPIX)rs*=Math.sqrt(AB_MAXPIX/tot);AB.backing=rs;
+  const vp=page.getViewport({scale:rs,rotation:abRot()});
+  const pc=document.getElementById('ab-pdf'),oc=document.getElementById('ab-ink');
+  [pc,oc].forEach(c=>{c.width=Math.round(vp.width);c.height=Math.round(vp.height);c.style.width=AB.cssW+'px';c.style.height=AB.cssH+'px';});
+  const ctx=pc.getContext('2d');ctx.clearRect(0,0,pc.width,pc.height);
+  await page.render({canvasContext:ctx,viewport:vp}).promise;
+  if(reset){const cH=w.clientHeight;AB.tx=AB.cssW<cW?(cW-AB.cssW)/2:0;AB.ty=AB.cssH<cH?(cH-AB.cssH)/2:0;}
+  abApply();abOverlay();
+}
+function abApply(){const w=abWrap(),cW=w.clientWidth,cH=w.clientHeight;
+  AB.tx=AB.cssW<=cW?(cW-AB.cssW)/2:abC(AB.tx,cW-AB.cssW,0);
+  AB.ty=AB.cssH<=cH?(cH-AB.cssH)/2:abC(AB.ty,cH-AB.cssH,0);
+  document.getElementById('ab-stack').style.transform=`translate(${AB.tx}px,${AB.ty}px)`;}
+async function abSetZoom(nz,ax,ay){nz=abC(nz,0.5,12);if(Math.abs(nz-AB.zoom)<1e-3)return;const nx=(ax-AB.tx)/AB.cssW,ny=(ay-AB.ty)/AB.cssH;AB.zoom=nz;await abRender(false);AB.tx=ax-nx*AB.cssW;AB.ty=ay-ny*AB.cssH;abApply();abOverlay();}
+function abZoom(f){const w=abWrap();abSetZoom(AB.zoom*f,w.clientWidth/2,w.clientHeight/2);}
+async function abFit(){AB.zoom=1;await abRender(true);abOverlay();}
+function abRotate(){const t=p=>[1-(p[1]!=null?p[1]:p.y),(p[0]!=null?p[0]:p.x)];AB.marks.forEach(m=>(m.strokes||[]).forEach(st=>{st.pts=(st.pts||[]).map(t);}));AB.userRot=(AB.userRot+90)%360;abRender(true);}
+
+function abInRange(d){const f=S.dateFrom,t=S.dateTo;if(f&&d<f)return false;if(t&&d>t)return false;return true;}
+function abShown(){return AB.marks.filter(m=>abInRange((m.date||'').slice(0,10)));}
+function abArr(ctx,x1,y1,x2,y2,sz,col){const a=Math.atan2(y2-y1,x2-x1);ctx.save();ctx.globalAlpha=.95;ctx.fillStyle=col;
+  ctx.beginPath();ctx.moveTo(x2,y2);ctx.lineTo(x2-sz*Math.cos(a-.45),y2-sz*Math.sin(a-.45));ctx.lineTo(x2-sz*Math.cos(a+.45),y2-sz*Math.sin(a+.45));ctx.closePath();ctx.fill();ctx.restore();}
+function abXY(p){return{x:(p[0]!=null?p[0]:p.x),y:(p[1]!=null?p[1]:p.y)};}
+function abPaint(ctx,W,H,sc){ctx.lineCap='round';ctx.lineJoin='round';
+  abShown().forEach(m=>{(m.strokes||[]).forEach(st=>{const col=st.color||AB_COLORS[st.phase]||'#c8102e';
+    ctx.strokeStyle=col;ctx.globalAlpha=st.kind==='line'?.85:.4;ctx.lineWidth=(st.width||3)*sc;
+    const pts=(st.pts||[]).map(abXY);ctx.beginPath();pts.forEach((p,i)=>{const x=p.x*W,y=p.y*H;i?ctx.lineTo(x,y):ctx.moveTo(x,y);});ctx.stroke();
+    if(st.kind==='line'&&pts.length>=2){const n=pts.length;abArr(ctx,pts[n-2].x*W,pts[n-2].y*H,pts[n-1].x*W,pts[n-1].y*H,14*sc,col);}});});
+  ctx.globalAlpha=1;}
+function abOverlay(){const oc=document.getElementById('ab-ink');if(!oc)return;const ctx=oc.getContext('2d');ctx.clearRect(0,0,oc.width,oc.height);abPaint(ctx,oc.width,oc.height,AB.backing);abTotals();}
+
+function abLen(st,W,H){const pts=(st.pts||[]).map(abXY);let L=0;for(let i=1;i<pts.length;i++){const a=pts[i-1],b=pts[i];L+=Math.hypot((b.x-a.x)*W,(b.y-a.y)*H);}return L;}
+function abArea(st,W,H){const pts=(st.pts||[]).map(abXY);let A=0;for(let i=0;i<pts.length;i++){const a=pts[i],b=pts[(i+1)%pts.length];A+=(a.x*W)*(b.y*H)-(b.x*W)*(a.y*H);}return Math.abs(A)/2;}
+function abFmt(n){return Math.round(n).toLocaleString();}
+function abTotals(){
+  const W=AB.baseW,H=AB.baseH;const agg={};let haul=0;const days={};
+  abShown().forEach(m=>{const fpp=m.ftPerPoint||0;const dk=(m.date||'').slice(0,10);if(dk)days[dk]=m.foreman||'';
+    (m.strokes||[]).forEach(st=>{const ph=st.phase||m.phase;const unit=AB_UNIT[ph]||'LF';
+      if(st.kind==='line'){const lf=abLen(st,W,H)*fpp;if(ph==='300'||ph==='310')haul+=lf;else agg[ph]=(agg[ph]||0)+lf;}
+      else{const sf=abArea(st,W,H)*fpp*fpp;if(unit==='CY')agg[ph]=(agg[ph]||0)+sf*(st.depth||1)/27;else if(unit==='SY')agg[ph]=(agg[ph]||0)+sf/9;else agg[ph]=(agg[ph]||0)+sf;}});});
+  const rEl=document.getElementById('ab-range');if(rEl)rEl.textContent=(S.dateFrom||'start')+' → '+(S.dateTo||'today');
+  const tEl=document.getElementById('ab-totals');if(tEl){let h='';const keys=Object.keys(agg).sort();
+    if(!keys.length&&!haul)h='<div style="color:var(--text3)">No marks in this date range.</div>';
+    keys.forEach(p=>{h+=`<div class="dr"><span class="lk"><span style="display:inline-block;width:11px;height:11px;border-radius:3px;background:${AB_COLORS[p]||'#999'};margin-right:6px;vertical-align:-1px"></span>${p} ${AB_PLABEL[p]||''}</span><span class="vk">${abFmt(agg[p])} ${AB_UNIT[p]||''}</span></div>`;});
+    if(haul)h+=`<div class="dr"><span class="lk">Earthwork haul</span><span class="vk">${abFmt(haul)} LF</span></div>`;
+    tEl.innerHTML=h;}
+  const dEl=document.getElementById('ab-days');if(dEl){const dk=Object.keys(days).sort();
+    dEl.innerHTML=dk.length?dk.map(d=>`<div class="dr"><span class="lk">${esc(d)}</span><span class="vk" style="font-weight:500;color:var(--text3)">${esc(days[d])}</span></div>`).join(''):'<div style="color:var(--text3)">No days in range.</div>';}
+}
+function abBindView(){const w=abWrap();if(!w)return;
+  w.addEventListener('wheel',e=>{e.preventDefault();const r=w.getBoundingClientRect();abSetZoom(AB.zoom*(e.deltaY<0?1.15:0.87),e.clientX-r.left,e.clientY-r.top);},{passive:false});
+  w.addEventListener('mousedown',e=>{AB.panning=true;AB.sx=e.clientX-AB.tx;AB.sy=e.clientY-AB.ty;});
+  w.addEventListener('touchstart',e=>{if(e.touches.length===2){e.preventDefault();AB.gOn=true;const a=e.touches[0],b=e.touches[1];AB.gd=Math.hypot(b.clientX-a.clientX,b.clientY-a.clientY);const r=w.getBoundingClientRect();const mx=(a.clientX+b.clientX)/2-r.left,my=(a.clientY+b.clientY)/2-r.top;AB.gnx=(mx-AB.tx)/AB.cssW;AB.gny=(my-AB.ty)/AB.cssH;AB.lf=1;}},{passive:false});
+  w.addEventListener('touchmove',e=>{if(AB.gOn&&e.touches.length>=2){e.preventDefault();const a=e.touches[0],b=e.touches[1];const f=Math.hypot(b.clientX-a.clientX,b.clientY-a.clientY)/AB.gd;const r=w.getBoundingClientRect();const mx=(a.clientX+b.clientX)/2-r.left,my=(a.clientY+b.clientY)/2-r.top;AB.lmx=mx;AB.lmy=my;AB.lf=f;document.getElementById('ab-stack').style.transform=`translate(${mx-AB.gnx*AB.cssW*f}px,${my-AB.gny*AB.cssH*f}px) scale(${f})`;}},{passive:false});
+  w.addEventListener('touchend',async e=>{if(AB.gOn&&e.touches.length<2){AB.zoom=abC(AB.zoom*AB.lf,0.5,12);await abRender(false);AB.tx=AB.lmx-AB.gnx*AB.cssW;AB.ty=AB.lmy-AB.gny*AB.cssH;abApply();abOverlay();AB.gOn=false;}});
+  if(!AB.winBound){AB.winBound=true;
+    window.addEventListener('mousemove',e=>{if(!AB.panning)return;AB.tx=e.clientX-AB.sx;AB.ty=e.clientY-AB.sy;abApply();});
+    window.addEventListener('mouseup',()=>{AB.panning=false;});}
+}
+async function abCombinedPDF(){
+  const {PDFDocument,rgb,StandardFonts}=PDFLib;const out=await PDFDocument.create();const EXP=3;
+  const page=await AB.pdfDoc.getPage(1);const vp=page.getViewport({scale:EXP,rotation:abRot()});
+  const cv=document.createElement('canvas');cv.width=Math.round(vp.width);cv.height=Math.round(vp.height);
+  const cx=cv.getContext('2d');await page.render({canvasContext:cx,viewport:vp}).promise;
+  abPaint(cx,cv.width,cv.height,EXP);
+  const lbl=(S.dateFrom||'start')+' → '+(S.dateTo||'today');
+  const bh=Math.round(20*EXP);cx.fillStyle='rgba(255,255,255,.9)';cx.fillRect(0,0,cv.width,bh);
+  cx.fillStyle='#111';cx.font='700 '+Math.round(11*EXP)+'px Arial';cx.textBaseline='middle';
+  cx.fillText('Job '+(AB.job||'')+' — As-built ('+lbl+')',8*EXP,bh/2);
+  const png=cv.toDataURL('image/png');const img=await out.embedPng(png);
+  const pg=out.addPage([cv.width/EXP,cv.height/EXP]);pg.drawImage(img,{x:0,y:0,width:cv.width/EXP,height:cv.height/EXP});
+  return await out.save();
+}
+async function abDownload(){if(!AB.pdfDoc)return;const bytes=await abCombinedPDF();const blob=new Blob([bytes],{type:'application/pdf'});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download='Job'+(AB.job||'')+'_asbuilt_'+(S.dateTo||'')+'.pdf';document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),5000);}
+async function abPrint(){if(!AB.pdfDoc)return;const bytes=await abCombinedPDF();const blob=new Blob([bytes],{type:'application/pdf'});const url=URL.createObjectURL(blob);const w=window.open(url);if(w){w.addEventListener('load',()=>{try{w.focus();w.print();}catch(e){}});}setTimeout(()=>URL.revokeObjectURL(url),60000);}
 
 initMsal().catch(e=>{
   console.error(e);

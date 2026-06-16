@@ -208,6 +208,8 @@ input[type=radio]{-webkit-appearance:none;appearance:none;width:22px;height:22px
 input[type=radio]:checked{background:var(--accent);border-color:var(--accent)}
 input[type=radio]:checked::after{content:'';position:absolute;left:5px;top:5px;width:8px;height:8px;background:#fff;border-radius:50%}
 </style>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js"></script>
 </head>
 <body>
 <div class="app">
@@ -250,7 +252,7 @@ const FD_LIST_NAME='Field Data';
 const PHASE_TEMPLATES={
   '300':{label:'Mass Earthwork',fields:[
     {id:'bidItem',label:'Bid Item',type:'text',span:2},
-    {id:'haulDistance',label:'Haul Distance (miles)',type:'number'},
+    {id:'haulDistance',label:'Haul Distance (ft)',type:'number'},
     {id:'yardsMovedTotal',label:'Total Yards Moved (CY)',type:'number'},
     {id:'weather',label:'Weather',type:'weather'},
     {id:'bidCostPerYard',label:'Bid Cost Per Yard ($)',type:'currency'},
@@ -743,6 +745,7 @@ function buildProductionView(wk,dates,ro){
       // Notes
       s+='<div><span class="fl" style="font-size:10px;margin-bottom:4px;display:block">Notes</span>';
       s+='<textarea class="di" '+(ro?'disabled':'')+' placeholder="Field conditions, issues..." style="height:60px;resize:none;font-size:14px" data-id="'+entry.id+'" data-f="notes" oninput="setProdField(+this.dataset.id,this.dataset.f,this.value)">'+(entry.notes||'')+'</textarea></div>';
+      if(!ro)s+='<button class="btn btn-bl" style="margin-top:10px;width:100%;justify-content:center" data-eid="'+entry.id+'" onclick="openMarkup(+this.dataset.eid)"><i class="ti ti-highlight"></i> Mark up plan</button>';
       s+='</div>';
     });
     if(!ro){
@@ -754,6 +757,283 @@ function buildProductionView(wk,dates,ro){
     s+='<div class="acts"><button class="btn btn-bl" onclick="saveDraft()"><i class="ti ti-device-floppy"></i> Save production</button></div>';
   }
   return s;
+}
+
+// ===== PLAN MARKUP (field app) ============================================
+// Foreman marks today's progress on the job plan. Saves a flattened dated PDF
+// AND a marks-data JSON to SharePoint, persists the sheet scale once, and
+// auto-fills the production entry (haul ft for 300, SY for 310, LF for utility).
+const MK_PLANS_ROOT='JobPlans';
+const MK_COLORS={'300':'#8a5a2b','310':'#8a5a2b','400':'#ff8800','450':'#9333ea','500':'#1faa4b','600':'#1466d6'};
+const MK_LABEL={'300':'Earthwork','310':'Fine Grade','400':'Storm','450':'Force Main','500':'Sanitary','600':'Watermain'};
+const MK_DPR=Math.min(window.devicePixelRatio||1,3),MK_MAXPIX=14e6,MK_ZMIN=0.5,MK_ZMAX=12;
+let MK=null;
+function mkClamp(v,a,b){return Math.min(b,Math.max(a,v));}
+function mkMode(ph){return (ph==='300'||ph==='310')?'area':'line';}
+function mkRot(){return (MK.pdfRotate+MK.userRot)%360;}
+function mkSheetBase(name){return (name||'plan').replace(/\.pdf$/i,'').replace(/[^A-Za-z0-9_-]+/g,'_');}
+function mkDriveUrl(path){return 'https://graph.microsoft.com/v1.0/sites/'+SITE_ID+'/drive/root:/'+path;}
+
+async function openMarkup(entryId){
+  const wk=S.weeks[S.currentWeek];
+  const entry=prodEntries(wk).find(function(e){return e.id==entryId;});
+  if(!entry){toast('Entry not found','error');return;}
+  const job=(entry.job||'').trim();
+  if(!job){toast('Enter a job number first','error');return;}
+  if(!navigator.onLine){toast("You're offline — plan markup needs a connection.",'error');return;}
+  if(!window.pdfjsLib||!window.PDFLib){toast('Plan tools still loading — try again in a moment.','error');return;}
+  const tok=await getTok();if(!tok){toast('Sign in to mark up plans.','error');return;}
+  toast('Loading plans for job '+job+'…');
+  let plans=[];
+  try{
+    const r=await fetch(mkDriveUrl(MK_PLANS_ROOT+'/'+encodeURIComponent(job)+':/children'),{headers:{Authorization:'Bearer '+tok}});
+    if(r.status===404){toast('No plans for job '+job+' yet — office adds them to '+MK_PLANS_ROOT+'/'+job,'error');return;}
+    if(!r.ok){toast('Could not load plans ('+r.status+')','error');return;}
+    const d=await r.json();
+    plans=(d.value||[]).filter(function(c){return c.file&&/\.pdf$/i.test(c.name||'');});
+  }catch(e){console.error('mk plans',e);toast('Could not load plans.','error');return;}
+  if(!plans.length){toast('No PDF plans in '+MK_PLANS_ROOT+'/'+job,'error');return;}
+  MK={entryId:entryId,job:job,phase:entry.phase,date:entry.date,plans:plans,planIdx:0,
+    color:MK_COLORS[entry.phase]||'#c8102e',width:3,markKind:mkMode(entry.phase),
+    zoom:1,tx:0,ty:0,baseW:1,baseH:1,backing:1,cssW:1,cssH:1,pdfRotate:0,userRot:0,
+    strokes:[],redo:[],drawing:false,cur:null,gOn:false,gd:0,gnx:0,gny:0,lmx:0,lmy:0,lf:1,panning:false,sx:0,sy:0,winBound:false,
+    ftPerPoint:0,calibrating:false,calibPts:[],calibLine:null,pdfDoc:null,bytes:null,
+    foreman:(typeof auth!=='undefined'&&auth.user&&auth.user.name)||''};
+  mkBuildOverlay();
+  await mkPickPlan(0);
+}
+
+async function mkFileBytes(idx){
+  const f=MK.plans[idx];const u=f['@microsoft.graph.downloadUrl']||f.downloadUrl;
+  if(u)return await (await fetch(u)).arrayBuffer();
+  const tok=await getTok();
+  return await (await fetch('https://graph.microsoft.com/v1.0/sites/'+SITE_ID+'/drive/items/'+f.id+'/content',{headers:{Authorization:'Bearer '+tok}})).arrayBuffer();
+}
+async function mkPickPlan(i){
+  MK.planIdx=+i;mkStatus('Rendering…');
+  try{
+    const buf=await mkFileBytes(MK.planIdx);MK.bytes=buf;
+    pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+    MK.pdfDoc=await pdfjsLib.getDocument({data:buf.slice(0)}).promise;
+    MK.userRot=0;MK.strokes=[];MK.redo=[];MK.calibLine=null;
+    await mkLoadScale();
+    await mkRender(true);mkStatus('');mkMeasure();mkSyncScale();
+  }catch(e){console.error('mk pick',e);mkStatus('Could not open plan PDF.');}
+}
+
+function mkScalePath(){return MK_PLANS_ROOT+'/'+encodeURIComponent(MK.job)+'/'+encodeURIComponent(mkSheetBase(MK.plans[MK.planIdx].name)+'.scale.json');}
+async function mkLoadScale(){
+  MK.ftPerPoint=0;
+  try{const tok=await getTok();const r=await fetch(mkDriveUrl(mkScalePath()+':/content'),{headers:{Authorization:'Bearer '+tok}});
+    if(r.ok){const j=await r.json();if(j&&j.ftPerPoint>0)MK.ftPerPoint=j.ftPerPoint;}}catch(e){}
+}
+async function mkSaveScale(){
+  try{const tok=await getTok();
+    await fetch(mkDriveUrl(mkScalePath()+':/content'),{method:'PUT',headers:{Authorization:'Bearer '+tok,'Content-Type':'application/json'},
+      body:JSON.stringify({ftPerPoint:MK.ftPerPoint,setBy:MK.foreman,date:new Date().toISOString()})});}catch(e){console.warn('save scale',e);}
+}
+
+async function mkRender(reset){
+  if(!MK.pdfDoc)return;const page=await MK.pdfDoc.getPage(1);MK.pdfRotate=page.rotate||0;
+  const w=document.getElementById('mk-wrap');const cW=w.clientWidth;if(cW<10){setTimeout(function(){mkRender(reset);},60);return;}
+  const base=page.getViewport({scale:1,rotation:mkRot()});MK.baseW=base.width;MK.baseH=base.height;
+  const fit=(cW-12)/MK.baseW;if(reset)MK.zoom=1;
+  MK.cssW=MK.baseW*fit*MK.zoom;MK.cssH=MK.baseH*fit*MK.zoom;
+  let rs=fit*MK.zoom*MK_DPR;const tot=(MK.baseW*rs)*(MK.baseH*rs);if(tot>MK_MAXPIX)rs*=Math.sqrt(MK_MAXPIX/tot);MK.backing=rs;
+  const vp=page.getViewport({scale:rs,rotation:mkRot()});
+  const pc=document.getElementById('mk-pdf'),oc=document.getElementById('mk-ink');
+  [pc,oc].forEach(function(c){c.width=Math.round(vp.width);c.height=Math.round(vp.height);c.style.width=MK.cssW+'px';c.style.height=MK.cssH+'px';});
+  const ctx=pc.getContext('2d');ctx.clearRect(0,0,pc.width,pc.height);
+  await page.render({canvasContext:ctx,viewport:vp}).promise;
+  if(reset){const cH=w.clientHeight;MK.tx=MK.cssW<cW?(cW-MK.cssW)/2:0;MK.ty=MK.cssH<cH?(cH-MK.cssH)/2:0;}
+  mkApply();mkRedraw();
+}
+function mkApply(){const w=document.getElementById('mk-wrap'),cW=w.clientWidth,cH=w.clientHeight;
+  MK.tx=MK.cssW<=cW?(cW-MK.cssW)/2:mkClamp(MK.tx,cW-MK.cssW,0);
+  MK.ty=MK.cssH<=cH?(cH-MK.cssH)/2:mkClamp(MK.ty,cH-MK.cssH,0);
+  document.getElementById('mk-stack').style.transform='translate('+MK.tx+'px,'+MK.ty+'px)';}
+function mkLive(x,y,s){document.getElementById('mk-stack').style.transform='translate('+x+'px,'+y+'px) scale('+s+')';}
+async function mkSetZoom(nz,ax,ay){nz=mkClamp(nz,MK_ZMIN,MK_ZMAX);if(Math.abs(nz-MK.zoom)<1e-3)return;
+  const nx=(ax-MK.tx)/MK.cssW,ny=(ay-MK.ty)/MK.cssH;MK.zoom=nz;await mkRender(false);MK.tx=ax-nx*MK.cssW;MK.ty=ay-ny*MK.cssH;mkApply();mkRedraw();}
+function mkZoom(f){const w=document.getElementById('mk-wrap');mkSetZoom(MK.zoom*f,w.clientWidth/2,w.clientHeight/2);}
+async function mkFit(){MK.zoom=1;await mkRender(true);mkRedraw();}
+function mkRotate(){const t=function(p){return{x:1-p.y,y:p.x};};
+  MK.strokes.forEach(function(s){s.pts=s.pts.map(t);});MK.redo.forEach(function(s){s.pts=s.pts.map(t);});
+  if(MK.calibLine)MK.calibLine={p1:t(MK.calibLine.p1),p2:t(MK.calibLine.p2)};MK.calibPts=MK.calibPts.map(t);
+  MK.userRot=(MK.userRot+90)%360;mkRender(true);}
+
+function mkStyle(ctx,st,sc){ctx.lineCap='round';ctx.lineJoin='round';ctx.strokeStyle=st.color;
+  if(st.kind==='line'){ctx.globalAlpha=.85;ctx.lineWidth=st.width*sc;}else{ctx.globalAlpha=.4;ctx.lineWidth=st.width*sc;}}
+function mkArrow(ctx,x1,y1,x2,y2,sz,col){const a=Math.atan2(y2-y1,x2-x1);ctx.save();ctx.globalAlpha=.95;ctx.fillStyle=col;
+  ctx.beginPath();ctx.moveTo(x2,y2);ctx.lineTo(x2-sz*Math.cos(a-.45),y2-sz*Math.sin(a-.45));ctx.lineTo(x2-sz*Math.cos(a+.45),y2-sz*Math.sin(a+.45));ctx.closePath();ctx.fill();ctx.restore();}
+function mkRedraw(){
+  const oc=document.getElementById('mk-ink');if(!oc)return;const ctx=oc.getContext('2d');ctx.clearRect(0,0,oc.width,oc.height);
+  MK.strokes.forEach(function(st){mkStyle(ctx,st,MK.backing);
+    ctx.beginPath();st.pts.forEach(function(p,i){const x=p.x*oc.width,y=p.y*oc.height;i?ctx.lineTo(x,y):ctx.moveTo(x,y);});ctx.stroke();
+    if(st.kind==='line'&&st.pts.length>=2){const n=st.pts.length;mkArrow(ctx,st.pts[n-2].x*oc.width,st.pts[n-2].y*oc.height,st.pts[n-1].x*oc.width,st.pts[n-1].y*oc.height,Math.max(14,st.width*3)*MK.backing,st.color);}});
+  ctx.globalAlpha=1;
+  const cp=MK.calibPts.length?MK.calibPts:(MK.calibLine?[MK.calibLine.p1,MK.calibLine.p2]:[]);
+  if(cp.length===2){ctx.save();ctx.strokeStyle='#00b3ff';ctx.lineWidth=Math.max(2,MK.backing*1.2);ctx.setLineDash([10,7]);
+    ctx.beginPath();ctx.moveTo(cp[0].x*oc.width,cp[0].y*oc.height);ctx.lineTo(cp[1].x*oc.width,cp[1].y*oc.height);ctx.stroke();ctx.restore();}
+  cp.forEach(function(p){ctx.fillStyle='#00b3ff';ctx.beginPath();ctx.arc(p.x*oc.width,p.y*oc.height,Math.max(6,MK.backing*4),0,Math.PI*2);ctx.fill();ctx.lineWidth=Math.max(2,MK.backing);ctx.strokeStyle='#fff';ctx.stroke();});
+}
+function mkPt(e){const oc=document.getElementById('mk-ink'),r=oc.getBoundingClientRect();const t=e.touches&&e.touches[0]?e.touches[0]:e;
+  return{x:mkClamp((t.clientX-r.left)/r.width,0,1),y:mkClamp((t.clientY-r.top)/r.height,0,1)};}
+
+function mkTDist(e){const a=e.touches[0],b=e.touches[1];return Math.hypot(b.clientX-a.clientX,b.clientY-a.clientY);}
+function mkTMid(e){const a=e.touches[0],b=e.touches[1];const r=document.getElementById('mk-wrap').getBoundingClientRect();return{x:(a.clientX+b.clientX)/2-r.left,y:(a.clientY+b.clientY)/2-r.top};}
+function mkDown(e){
+  if(e.touches&&e.touches.length===2){e.preventDefault();MK.gOn=true;MK.drawing=false;MK.cur=null;mkRedraw();MK.gd=mkTDist(e);const m=mkTMid(e);MK.gnx=(m.x-MK.tx)/MK.cssW;MK.gny=(m.y-MK.ty)/MK.cssH;MK.lf=1;return;}
+  if(MK.calibrating){if(!MK.gOn){e.preventDefault&&e.preventDefault();mkCalibTap(mkPt(e));}return;}
+  if((!e.touches||e.touches.length===1)&&!MK.gOn){e.preventDefault&&e.preventDefault();MK.drawing=true;MK.cur={color:MK.color,width:MK.width,kind:MK.markKind,phase:MK.phase,pts:[mkPt(e)]};}
+}
+function mkMove(e){
+  if(MK.gOn&&e.touches&&e.touches.length>=2){e.preventDefault();const f=mkTDist(e)/MK.gd;const m=mkTMid(e);MK.lmx=m.x;MK.lmy=m.y;MK.lf=f;mkLive(m.x-MK.gnx*MK.cssW*f,m.y-MK.gny*MK.cssH*f,f);return;}
+  if(MK.drawing&&(!e.touches||e.touches.length===1)){e.preventDefault&&e.preventDefault();MK.cur.pts.push(mkPt(e));
+    const oc=document.getElementById('mk-ink'),ctx=oc.getContext('2d'),p=MK.cur.pts,n=p.length;
+    if(n>=2){mkStyle(ctx,MK.cur,MK.backing);ctx.beginPath();ctx.moveTo(p[n-2].x*oc.width,p[n-2].y*oc.height);ctx.lineTo(p[n-1].x*oc.width,p[n-1].y*oc.height);ctx.stroke();ctx.globalAlpha=1;}}
+}
+async function mkEnd(e){
+  if(MK.gOn&&(!e.touches||e.touches.length<2)){MK.zoom=mkClamp(MK.zoom*MK.lf,MK_ZMIN,MK_ZMAX);await mkRender(false);MK.tx=MK.lmx-MK.gnx*MK.cssW;MK.ty=MK.lmy-MK.gny*MK.cssH;mkApply();mkRedraw();MK.gOn=false;return;}
+  if(MK.drawing){MK.drawing=false;if(MK.cur&&MK.cur.pts.length>1){MK.strokes.push(MK.cur);MK.redo=[];}MK.cur=null;mkRedraw();mkMeasure();}
+}
+function mkUndo(){if(!MK.strokes.length)return;MK.redo.push(MK.strokes.pop());mkRedraw();mkMeasure();}
+function mkRedoFn(){if(!MK.redo.length)return;MK.strokes.push(MK.redo.pop());mkRedraw();mkMeasure();}
+function mkClear(){MK.strokes=[];MK.redo=[];mkRedraw();mkMeasure();}
+function mkSetKind(k){MK.markKind=k;mkSyncBar();}
+
+// scale calibration
+function mkBanner(t){const b=document.getElementById('mk-banner');if(b){b.textContent=t||'';b.style.display=t?'block':'none';}}
+function mkStartCalib(){MK.calibrating=true;MK.calibPts=[];MK.calibLine=null;document.getElementById('mk-calibpanel').style.display='none';
+  mkBanner('① Tap one end of a known distance (e.g. the scale bar). Pinch to zoom in first.');mkRedraw();}
+function mkPPt(p){return{x:p.x*MK.baseW,y:p.y*MK.baseH};}
+function mkCalibTap(p){MK.calibPts.push(p);mkRedraw();
+  if(MK.calibPts.length===1){mkBanner('② Now tap the other end');return;}
+  mkBanner('');const panel=document.getElementById('mk-calibpanel');panel.style.display='flex';const f=document.getElementById('mk-calibft');f.value='';setTimeout(function(){f.focus();},50);}
+async function mkApplyCalib(){const ft=parseFloat(document.getElementById('mk-calibft').value);
+  if(!(ft>0)||MK.calibPts.length<2)return;
+  const a=mkPPt(MK.calibPts[0]),b=mkPPt(MK.calibPts[1]);const d=Math.hypot(b.x-a.x,b.y-a.y);
+  if(d>0){MK.ftPerPoint=ft/d;MK.calibLine={p1:MK.calibPts[0],p2:MK.calibPts[1]};await mkSaveScale();}
+  MK.calibrating=false;MK.calibPts=[];document.getElementById('mk-calibpanel').style.display='none';mkBanner('');mkSyncScale();mkRedraw();mkMeasure();}
+function mkCancelCalib(){MK.calibrating=false;MK.calibPts=[];document.getElementById('mk-calibpanel').style.display='none';mkBanner('');mkRedraw();}
+function mkSyncScale(){const b=document.getElementById('mk-scalebtn');if(!b)return;
+  if(MK.ftPerPoint){b.textContent='Scale ✓';b.style.background='#1f8f3a';}else{b.textContent='Set scale';b.style.background='#0d6efd';}}
+
+// measurement
+function mkFmt(n){return Math.round(n).toLocaleString();}
+function mkLen(st){let L=0;for(let i=1;i<st.pts.length;i++){const a=mkPPt(st.pts[i-1]),b=mkPPt(st.pts[i]);L+=Math.hypot(b.x-a.x,b.y-a.y);}return L;}
+function mkArea(st){let A=0;const p=st.pts;for(let i=0;i<p.length;i++){const a=mkPPt(p[i]),b=mkPPt(p[(i+1)%p.length]);A+=a.x*b.y-b.x*a.y;}return Math.abs(A)/2;}
+function mkTotals(){
+  const fpp=MK.ftPerPoint;let lineCount=0,lineLF=0,areaSF=0;
+  MK.strokes.forEach(function(st){if(st.kind==='line'){lineCount++;lineLF+=mkLen(st)*fpp;}else{areaSF+=mkArea(st)*fpp*fpp;}});
+  return{lineCount:lineCount,lineLF:lineLF,avgLineLF:lineCount?lineLF/lineCount:0,sf:areaSF,sy:areaSF/9};
+}
+function mkMeasure(){const el=document.getElementById('mk-measure');if(!el)return;const ph=MK.phase;
+  if(!MK.ftPerPoint){el.textContent=(MK_LABEL[ph]||'')+' · set scale to measure';el.style.color='#bbb';return;}
+  const t=mkTotals();const parts=[];
+  if(ph==='300'){if(t.sf>0)parts.push(mkFmt(t.sf)+' SF area');if(t.lineCount>0)parts.push('Haul ≈ '+mkFmt(t.avgLineLF)+' ft'+(t.lineCount>1?' (avg of '+t.lineCount+')':''));}
+  else if(ph==='310'){if(t.sf>0)parts.push('≈ '+mkFmt(t.sy)+' SY');}
+  else{if(t.lineLF>0)parts.push('≈ '+mkFmt(t.lineLF)+' LF');}
+  el.style.color=parts.length?'#ffd400':'#bbb';
+  el.textContent=(MK_LABEL[ph]||ph)+': '+(parts.length?parts.join('  ·  '):'start marking');}
+function mkMeasureText(){const ph=MK.phase;if(!MK.ftPerPoint)return'';const t=mkTotals();
+  if(ph==='300'){const a=[];if(t.sf>0)a.push(mkFmt(t.sf)+' SF');if(t.lineCount>0)a.push('Haul '+mkFmt(t.avgLineLF)+' ft');return a.length?'Earthwork 300: '+a.join('  |  '):'';}
+  if(ph==='310')return t.sf>0?'Fine Grade 310: '+mkFmt(t.sy)+' SY':'';
+  return t.lineLF>0?(MK_LABEL[ph]||ph)+' '+ph+': '+mkFmt(t.lineLF)+' LF':'';}
+
+function mkActBtn(b,on){if(!b)return;b.style.background=on?'#ffd400':'#3a3a3a';b.style.color=on?'#000':'#fff';}
+function mkSyncBar(){mkActBtn(document.getElementById('mk-kArea'),MK.markKind==='area');mkActBtn(document.getElementById('mk-kLine'),MK.markKind==='line');
+  const kl=document.getElementById('mk-kLine');if(kl)kl.textContent=(MK.phase==='300'?'⟶ Haul':'⟶ Line');}
+
+// ── save: flattened PDF + marks JSON + scale + auto-fill ─────────────────────
+async function mkSave(){
+  if(!MK.strokes.length){mkBanner('Nothing marked yet to save.');setTimeout(function(){mkBanner('');},1600);return;}
+  const btn=document.getElementById('mk-save');btn.disabled=true;btn.textContent='Saving…';
+  try{
+    const tok=await getTok();if(!tok){toast('Session expired — sign in again.','error');return;}
+    const base=mkSheetBase(MK.plans[MK.planIdx].name);const fname=MK.date+'__'+base;
+    // 1) flattened dated PDF
+    const {PDFDocument}=PDFLib;const out=await PDFDocument.create();const EXP=3;
+    const page=await MK.pdfDoc.getPage(1);const vp=page.getViewport({scale:EXP,rotation:mkRot()});
+    const cv=document.createElement('canvas');cv.width=Math.round(vp.width);cv.height=Math.round(vp.height);
+    const cx=cv.getContext('2d');await page.render({canvasContext:cx,viewport:vp}).promise;
+    MK.strokes.forEach(function(st){mkStyle(cx,st,EXP);
+      cx.beginPath();st.pts.forEach(function(p,i){const x=p.x*cv.width,y=p.y*cv.height;i?cx.lineTo(x,y):cx.moveTo(x,y);});cx.stroke();
+      if(st.kind==='line'&&st.pts.length>=2){const n=st.pts.length;mkArrow(cx,st.pts[n-2].x*cv.width,st.pts[n-2].y*cv.height,st.pts[n-1].x*cv.width,st.pts[n-1].y*cv.height,Math.max(14,st.width*3)*EXP,st.color);}});
+    cx.globalAlpha=1;
+    const d=new Date(MK.date+'T12:00:00');const mt=mkMeasureText();
+    const hdr='Job '+MK.job+'   '+(d.getMonth()+1)+'/'+d.getDate()+'/'+d.getFullYear()+(MK.foreman?'   '+MK.foreman:'')+(mt?'   '+mt:'');
+    const bh=Math.round(18*EXP);cx.fillStyle='rgba(255,255,255,.88)';cx.fillRect(0,0,cv.width,bh);
+    cx.fillStyle='#1f1f1f';cx.font='700 '+Math.round(10*EXP)+'px Arial';cx.textBaseline='middle';cx.fillText(hdr,8*EXP,bh/2);
+    const png=cv.toDataURL('image/png');const img=await out.embedPng(png);
+    const pg=out.addPage([cv.width/EXP,cv.height/EXP]);pg.drawImage(img,{x:0,y:0,width:cv.width/EXP,height:cv.height/EXP});
+    const bytes=await out.save();
+    await fetch(mkDriveUrl(MK_PLANS_ROOT+'/'+encodeURIComponent(MK.job)+'/Markups/'+encodeURIComponent(fname+'.pdf')+':/content'),
+      {method:'PUT',headers:{Authorization:'Bearer '+tok,'Content-Type':'application/pdf'},body:bytes});
+    // 2) marks data JSON (for office aggregation)
+    const t=mkTotals();
+    const rec={job:MK.job,sheet:base,date:MK.date,foreman:MK.foreman,phase:MK.phase,ftPerPoint:MK.ftPerPoint,userRot:MK.userRot,
+      strokes:MK.strokes.map(function(s){return{kind:s.kind,phase:s.phase||MK.phase,color:s.color,width:s.width,depth:s.depth||null,pts:s.pts.map(function(p){return[p.x,p.y];})};}),
+      totals:{lineLF:t.lineLF,avgLineLF:t.avgLineLF,sf:t.sf,sy:t.sy}};
+    await fetch(mkDriveUrl(MK_PLANS_ROOT+'/'+encodeURIComponent(MK.job)+'/Marks/'+encodeURIComponent(fname+'.json')+':/content'),
+      {method:'PUT',headers:{Authorization:'Bearer '+tok,'Content-Type':'application/json'},body:JSON.stringify(rec)});
+    // 3) auto-fill the production entry
+    if(MK.ftPerPoint){
+      if(MK.phase==='300'&&t.lineCount>0)setProdField(+MK.entryId,'haulDistance',Math.round(t.avgLineLF));
+      else if(MK.phase==='310'&&t.sf>0)setProdField(+MK.entryId,'areaFinished',Math.round(t.sy));
+      else if(['400','450','500','600'].indexOf(MK.phase)>=0&&t.lineLF>0)setProdField(+MK.entryId,'quantity',Math.round(t.lineLF));
+      saveDraftSilent&&saveDraftSilent();
+    }
+    toast('Saved to Job '+MK.job+' · production updated','success');
+    mkClose();rEntry();
+  }catch(e){console.error('mk save',e);toast('Could not save markup.','error');}
+  finally{const b=document.getElementById('mk-save');if(b){b.disabled=false;b.textContent='Save';}}
+}
+function mkClose(){const o=document.getElementById('mk-overlay');if(o)o.remove();MK=null;}
+function mkStatus(t){const s=document.getElementById('mk-status');if(s){s.innerHTML=t||'';s.style.display=t?'flex':'none';}}
+
+function mkBuildOverlay(){
+  const tb='background:#3a3a3a;border:none;color:#fff;border-radius:7px;padding:7px 9px;cursor:pointer;font-size:14px;min-width:32px';
+  const o=document.createElement('div');o.id='mk-overlay';
+  o.style.cssText='position:fixed;inset:0;background:#1a1a1a;z-index:400;display:flex;flex-direction:column';
+  o.innerHTML=
+   '<div id="mk-banner" style="display:none;position:fixed;top:10px;left:50%;transform:translateX(-50%);background:#00b3ff;color:#00121c;font-weight:700;padding:10px 16px;border-radius:10px;z-index:60;font-size:13px;max-width:92vw;text-align:center"></div>'+
+   '<div id="mk-calibpanel" style="display:none;position:fixed;top:10px;left:50%;transform:translateX(-50%);background:#fff;color:#111;padding:12px 14px;border-radius:12px;z-index:61;align-items:center;gap:8px;flex-wrap:wrap;max-width:94vw;box-shadow:0 8px 28px rgba(0,0,0,.5)">'+
+     '<span style="font-size:13px;font-weight:600">Distance between points:</span><input id="mk-calibft" type="number" inputmode="decimal" placeholder="feet" style="width:90px;padding:8px;border:1px solid #ccc;border-radius:7px;font-size:15px"/><span style="font-weight:600">ft</span>'+
+     '<button onclick="mkApplyCalib()" style="background:#2563eb;color:#fff;border:none;border-radius:7px;padding:8px 12px;cursor:pointer">Apply</button>'+
+     '<button onclick="mkCancelCalib()" style="background:#888;color:#fff;border:none;border-radius:7px;padding:8px 12px;cursor:pointer">Cancel</button></div>'+
+   '<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;padding:7px 10px;background:#222;color:#fff">'+
+     '<button onclick="mkClose()" style="background:none;border:none;color:#fff;font-size:20px;cursor:pointer;line-height:1">✕</button>'+
+     '<strong style="font-size:14px">Job '+MK.job+' · P'+MK.phase+'</strong>'+
+     '<span style="display:inline-block;width:14px;height:14px;border-radius:3px;background:'+MK.color+';margin-left:2px"></span>'+
+     (MK.plans.length>1?'<select onchange="mkPickPlan(this.value)" style="margin-left:6px;font-size:12px;padding:5px;border-radius:6px;border:none;max-width:130px">'+MK.plans.map(function(p,i){return '<option value="'+i+'">'+(p.name||'').replace(/\.pdf$/i,'')+'</option>';}).join('')+'</select>':'')+
+     '<button id="mk-scalebtn" onclick="mkStartCalib()" style="margin-left:auto;background:#0d6efd;border:none;color:#fff;border-radius:7px;padding:7px 10px;cursor:pointer;font-size:13px">Set scale</button>'+
+   '</div>'+
+   '<div style="display:flex;align-items:center;gap:5px;flex-wrap:wrap;padding:6px 10px;background:#2b2b2b">'+
+     '<button id="mk-kArea" onclick="mkSetKind(\'area\')" style="'+tb+'">▭ Area</button>'+
+     '<button id="mk-kLine" onclick="mkSetKind(\'line\')" style="'+tb+'">⟶ Line</button>'+
+     '<span style="width:1px;height:22px;background:#555"></span>'+
+     '<button onclick="mkUndo()" style="'+tb+'">↶</button><button onclick="mkRedoFn()" style="'+tb+'">↷</button><button onclick="mkClear()" style="'+tb+'">✕</button>'+
+     '<span style="width:1px;height:22px;background:#555"></span>'+
+     '<button onclick="mkZoom(1.3)" style="'+tb+'">+</button><button onclick="mkZoom(0.77)" style="'+tb+'">−</button><button onclick="mkFit()" style="'+tb+'">Fit</button><button onclick="mkRotate()" style="'+tb+'">⟳</button>'+
+     '<span style="font-size:11px;color:#7a7a7a">1 finger draws · 2 fingers zoom/pan</span>'+
+     '<button id="mk-save" onclick="mkSave()" style="margin-left:auto;background:#2563eb;font-weight:700;border:none;color:#fff;border-radius:7px;padding:7px 14px;cursor:pointer;font-size:14px">Save</button>'+
+   '</div>'+
+   '<div id="mk-wrap" style="flex:1;overflow:hidden;background:#3a3a3a;position:relative;touch-action:none">'+
+     '<div id="mk-stack" style="position:absolute;left:0;top:0;transform-origin:0 0"><canvas id="mk-pdf" style="display:block;background:#fff"></canvas><canvas id="mk-ink" style="position:absolute;left:0;top:0"></canvas></div>'+
+     '<div id="mk-status" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#bbb;font-size:14px;text-align:center;padding:20px"></div>'+
+     '<div id="mk-measure" style="position:absolute;left:10px;bottom:10px;z-index:30;background:rgba(18,18,18,.82);color:#ffd400;font-weight:700;font-size:14px;padding:8px 12px;border-radius:10px;max-width:80vw"></div>'+
+   '</div>';
+  document.body.appendChild(o);
+  const oc=document.getElementById('mk-ink');const w=document.getElementById('mk-wrap');
+  w.addEventListener('touchstart',mkDown,{passive:false});w.addEventListener('touchmove',mkMove,{passive:false});w.addEventListener('touchend',mkEnd);w.addEventListener('touchcancel',mkEnd);
+  oc.addEventListener('mousedown',mkDown);
+  if(!MK.winBound){MK.winBound=true;
+    window.addEventListener('mousemove',function(e){if(MK&&MK.drawing)mkMove(e);});
+    window.addEventListener('mouseup',function(e){if(MK)mkEnd(e);});}
+  w.addEventListener('wheel',function(e){e.preventDefault();const r=w.getBoundingClientRect();mkSetZoom(MK.zoom*(e.deltaY<0?1.15:0.87),e.clientX-r.left,e.clientY-r.top);},{passive:false});
+  document.getElementById('mk-calibft').addEventListener('keydown',function(e){if(e.key==='Enter')mkApplyCalib();});
+  mkSyncBar();
 }
 
 function getJobTotals(wk,dt,jobNum){
