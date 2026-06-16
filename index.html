@@ -817,6 +817,7 @@ async function mkPickPlan(i){
     MK.pdfDoc=await pdfjsLib.getDocument({data:buf.slice(0)}).promise;
     MK.userRot=0;MK.strokes=[];MK.redo=[];MK.calibLine=null;
     await mkLoadScale();
+    await mkLoadExisting();
     await mkRender(true);mkStatus('');mkMeasure();mkSyncScale();
   }catch(e){console.error('mk pick',e);mkStatus('Could not open plan PDF.');}
 }
@@ -833,6 +834,23 @@ async function mkSaveScale(){
       body:JSON.stringify({ftPerPoint:MK.ftPerPoint,setBy:MK.foreman,date:new Date().toISOString()})});}catch(e){console.warn('save scale',e);}
 }
 
+async function mkLoadExisting(){
+  try{
+    const tok=await getTok();if(!tok)return;
+    const base=mkSheetBase(MK.plans[MK.planIdx].name);const fname=MK.date+'__'+base;
+    const r=await fetch(mkDriveUrl(MK_PLANS_ROOT+'/'+encodeURIComponent(MK.job)+'/Marks/'+encodeURIComponent(fname+'.json')+':/content'),{headers:{Authorization:'Bearer '+tok}});
+    if(!r.ok)return;
+    const rec=await r.json();
+    if(rec&&Array.isArray(rec.strokes)&&rec.strokes.length){
+      MK.strokes=rec.strokes.map(function(s){return{kind:s.kind,phase:s.phase||MK.phase,color:s.color||MK.color,width:s.width||MK.width,depth:s.depth||null,pts:(s.pts||[]).map(function(p){return Array.isArray(p)?{x:p[0],y:p[1]}:{x:p.x,y:p.y};})};});
+      MK.redo=[];
+      if(typeof rec.userRot==='number')MK.userRot=rec.userRot;
+      if(rec.ftPerPoint>0&&!MK.ftPerPoint)MK.ftPerPoint=rec.ftPerPoint;
+      const ni=document.getElementById('mk-note');if(ni&&rec.note)ni.value=rec.note;
+      toast("Loaded today's saved markup — edit and re-save",'success');
+    }
+  }catch(e){console.warn('mk load existing',e);}
+}
 async function mkRender(reset){
   if(!MK.pdfDoc)return;const page=await MK.pdfDoc.getPage(1);MK.pdfRotate=page.rotate||0;
   const w=document.getElementById('mk-wrap');const cW=w.clientWidth,cH=w.clientHeight;if(cW<10){setTimeout(function(){mkRender(reset);},60);return;}
@@ -963,10 +981,11 @@ async function mkSave(){
       cx.beginPath();st.pts.forEach(function(p,i){const x=p.x*cv.width,y=p.y*cv.height;i?cx.lineTo(x,y):cx.moveTo(x,y);});cx.stroke();
       if(st.kind==='line'&&st.pts.length>=2){const n=st.pts.length;mkArrow(cx,st.pts[n-2].x*cv.width,st.pts[n-2].y*cv.height,st.pts[n-1].x*cv.width,st.pts[n-1].y*cv.height,Math.max(14,st.width*3)*EXP,st.color);}});
     cx.globalAlpha=1;
-    const d=new Date(MK.date+'T12:00:00');const mt=mkMeasureText();
+    const d=new Date(MK.date+'T12:00:00');const mt=mkMeasureText();const note=((document.getElementById('mk-note')||{}).value||'').trim();
     const hdr='Job '+MK.job+'   '+(d.getMonth()+1)+'/'+d.getDate()+'/'+d.getFullYear()+(MK.foreman?'   '+MK.foreman:'')+(mt?'   '+mt:'');
-    const bh=Math.round(18*EXP);cx.fillStyle='rgba(255,255,255,.88)';cx.fillRect(0,0,cv.width,bh);
-    cx.fillStyle='#1f1f1f';cx.font='700 '+Math.round(10*EXP)+'px Arial';cx.textBaseline='middle';cx.fillText(hdr,8*EXP,bh/2);
+    const lh=Math.round(18*EXP);const bh=note?lh*2:lh;cx.fillStyle='rgba(255,255,255,.88)';cx.fillRect(0,0,cv.width,bh);
+    cx.fillStyle='#1f1f1f';cx.font='700 '+Math.round(10*EXP)+'px Arial';cx.textBaseline='middle';cx.fillText(hdr,8*EXP,note?lh/2:bh/2);
+    if(note){cx.font='400 '+Math.round(10*EXP)+'px Arial';cx.fillText('Note: '+note,8*EXP,lh+lh/2);}
     const png=cv.toDataURL('image/png');const img=await out.embedPng(png);
     const pg=out.addPage([cv.width/EXP,cv.height/EXP]);pg.drawImage(img,{x:0,y:0,width:cv.width/EXP,height:cv.height/EXP});
     const bytes=await out.save();
@@ -976,7 +995,7 @@ async function mkSave(){
     const t=mkTotals();
     const rec={job:MK.job,sheet:base,date:MK.date,foreman:MK.foreman,phase:MK.phase,ftPerPoint:MK.ftPerPoint,userRot:MK.userRot,
       strokes:MK.strokes.map(function(s){return{kind:s.kind,phase:s.phase||MK.phase,color:s.color,width:s.width,depth:s.depth||null,pts:s.pts.map(function(p){return[p.x,p.y];})};}),
-      totals:{lineLF:t.lineLF,avgLineLF:t.avgLineLF,sf:t.sf,sy:t.sy}};
+      totals:{lineLF:t.lineLF,avgLineLF:t.avgLineLF,sf:t.sf,sy:t.sy},note:note};
     await fetch(mkDriveUrl(MK_PLANS_ROOT+'/'+encodeURIComponent(MK.job)+'/Marks/'+encodeURIComponent(fname+'.json')+':/content'),
       {method:'PUT',headers:{Authorization:'Bearer '+tok,'Content-Type':'application/json'},body:JSON.stringify(rec)});
     // 3) auto-fill the production entry
@@ -1056,6 +1075,7 @@ function mkBuildOverlay(){
      '<span style="font-size:11px;color:#7a7a7a">1 finger draws · 2 fingers zoom/pan</span>'+
      '<button id="mk-save" onclick="mkSave()" style="margin-left:auto;background:#2563eb;font-weight:700;border:none;color:#fff;border-radius:7px;padding:7px 14px;cursor:pointer;font-size:14px">Save</button>'+
    '</div>'+
+   '<div style="padding:7px 10px;background:#2b2b2b;border-top:1px solid #3a3a3a"><input id="mk-note" type="text" placeholder="Add a note for this markup (optional)…" style="width:100%;box-sizing:border-box;background:#1f1f1f;border:1px solid #444;color:#fff;border-radius:7px;padding:8px 10px;font-size:14px"/></div>'+
    '<div id="mk-wrap" style="flex:1;overflow:hidden;background:#3a3a3a;position:relative;touch-action:none">'+
      '<div id="mk-stack" style="position:absolute;left:0;top:0;transform-origin:0 0;touch-action:none"><canvas id="mk-pdf" style="display:block;background:#fff;touch-action:none"></canvas><canvas id="mk-ink" style="position:absolute;left:0;top:0;touch-action:none"></canvas></div>'+
      '<div id="mk-status" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#bbb;font-size:14px;text-align:center;padding:20px"></div>'+
