@@ -801,7 +801,7 @@ const AB_PLABEL={'300':'Earthwork','310':'Fine Grade','400':'Storm','450':'Force
 const AB_UNIT={'300':'CY','310':'SY','400':'LF','450':'LF','500':'LF','600':'LF'};
 const AB_ROOT='JobPlans';
 const AB_DPR=Math.min(window.devicePixelRatio||1,2.5),AB_MAXPIX=14e6;
-let AB={pdfDoc:null,baseW:1,baseH:1,backing:1,cssW:1,cssH:1,zoom:1,tx:0,ty:0,userRot:0,pdfRotate:0,
+let AB={pdfDoc:null,baseW:1,baseH:1,backing:1,cssW:1,cssH:1,zoom:1,fitBase:0,tx:0,ty:0,userRot:0,pdfRotate:0,
   plans:[],planIdx:0,marks:[],job:null,panning:false,sx:0,sy:0,gOn:false,gd:0,gnx:0,gny:0,lmx:0,lmy:0,lf:1,winBound:false};
 function abC(v,a,b){return Math.min(b,Math.max(a,v));}
 function abRot(){return (AB.pdfRotate+AB.userRot)%360;}
@@ -841,7 +841,7 @@ function renderAsBuilt(){
         </div>
       </div>
       <div style="display:flex;gap:12px;align-items:stretch;flex-wrap:wrap">
-        <div id="ab-wrap" style="flex:1;min-width:300px;position:relative;overflow:hidden;background:#e9e9e9;border:1px solid var(--border);border-radius:8px;touch-action:none;cursor:grab;min-height:62vh">
+        <div id="ab-wrap" style="flex:1;min-width:300px;position:relative;overflow:hidden;background:#e9e9e9;border:1px solid var(--border);border-radius:8px;touch-action:none;cursor:grab;height:calc(100vh - 150px);min-height:420px">
           <div id="ab-stack" style="position:absolute;left:0;top:0;transform-origin:0 0">
             <canvas id="ab-pdf" style="display:block;background:#fff"></canvas>
             <canvas id="ab-ink" style="position:absolute;left:0;top:0"></canvas>
@@ -898,9 +898,9 @@ async function abPickPlan(i){
 }
 async function abRender(reset){
   if(!AB.pdfDoc)return;const page=await AB.pdfDoc.getPage(1);AB.pdfRotate=page.rotate||0;
-  const w=abWrap();const cW=w.clientWidth;if(cW<10){setTimeout(()=>abRender(reset),60);return;}
+  const w=abWrap();const cW=w.clientWidth,cH=w.clientHeight;if(cW<10){setTimeout(()=>abRender(reset),60);return;}
   const base=page.getViewport({scale:1,rotation:abRot()});AB.baseW=base.width;AB.baseH=base.height;
-  const fit=(cW-12)/AB.baseW;if(reset)AB.zoom=1;
+  if(reset){AB.zoom=1;AB.fitBase=Math.min((cW-12)/AB.baseW,(cH-12)/AB.baseH);}const fit=AB.fitBase||Math.min((cW-12)/AB.baseW,(cH-12)/AB.baseH);
   AB.cssW=AB.baseW*fit*AB.zoom;AB.cssH=AB.baseH*fit*AB.zoom;
   let rs=fit*AB.zoom*AB_DPR;const tot=(AB.baseW*rs)*(AB.baseH*rs);if(tot>AB_MAXPIX)rs*=Math.sqrt(AB_MAXPIX/tot);AB.backing=rs;
   const vp=page.getViewport({scale:rs,rotation:abRot()});
@@ -908,7 +908,7 @@ async function abRender(reset){
   [pc,oc].forEach(c=>{c.width=Math.round(vp.width);c.height=Math.round(vp.height);c.style.width=AB.cssW+'px';c.style.height=AB.cssH+'px';});
   const ctx=pc.getContext('2d');ctx.clearRect(0,0,pc.width,pc.height);
   await page.render({canvasContext:ctx,viewport:vp}).promise;
-  if(reset){const cH=w.clientHeight;AB.tx=AB.cssW<cW?(cW-AB.cssW)/2:0;AB.ty=AB.cssH<cH?(cH-AB.cssH)/2:0;}
+  if(reset){AB.tx=AB.cssW<cW?(cW-AB.cssW)/2:0;AB.ty=AB.cssH<cH?(cH-AB.cssH)/2:0;}
   abApply();abOverlay();
 }
 function abApply(){const w=abWrap(),cW=w.clientWidth,cH=w.clientHeight;
@@ -954,8 +954,8 @@ function abTotals(){
 function abBindView(){const w=abWrap();if(!w)return;
   w.addEventListener('wheel',e=>{e.preventDefault();const r=w.getBoundingClientRect();abSetZoom(AB.zoom*(e.deltaY<0?1.15:0.87),e.clientX-r.left,e.clientY-r.top);},{passive:false});
   w.addEventListener('mousedown',e=>{AB.panning=true;AB.sx=e.clientX-AB.tx;AB.sy=e.clientY-AB.ty;});
-  w.addEventListener('touchstart',e=>{if(e.touches.length===2){e.preventDefault();AB.gOn=true;const a=e.touches[0],b=e.touches[1];AB.gd=Math.hypot(b.clientX-a.clientX,b.clientY-a.clientY);const r=w.getBoundingClientRect();const mx=(a.clientX+b.clientX)/2-r.left,my=(a.clientY+b.clientY)/2-r.top;AB.gnx=(mx-AB.tx)/AB.cssW;AB.gny=(my-AB.ty)/AB.cssH;AB.lf=1;}},{passive:false});
-  w.addEventListener('touchmove',e=>{if(AB.gOn&&e.touches.length>=2){e.preventDefault();const a=e.touches[0],b=e.touches[1];const f=Math.hypot(b.clientX-a.clientX,b.clientY-a.clientY)/AB.gd;const r=w.getBoundingClientRect();const mx=(a.clientX+b.clientX)/2-r.left,my=(a.clientY+b.clientY)/2-r.top;AB.lmx=mx;AB.lmy=my;AB.lf=f;document.getElementById('ab-stack').style.transform=`translate(${mx-AB.gnx*AB.cssW*f}px,${my-AB.gny*AB.cssH*f}px) scale(${f})`;}},{passive:false});
+  w.addEventListener('touchstart',e=>{if(e.touches.length===2){e.preventDefault();AB.gOn=true;const a=e.touches[0],b=e.touches[1];AB.gd=Math.max(1,Math.hypot(b.clientX-a.clientX,b.clientY-a.clientY));const r=w.getBoundingClientRect();const mx=(a.clientX+b.clientX)/2-r.left,my=(a.clientY+b.clientY)/2-r.top;AB.gnx=(mx-AB.tx)/AB.cssW;AB.gny=(my-AB.ty)/AB.cssH;AB.lf=1;}},{passive:false});
+  w.addEventListener('touchmove',e=>{if(AB.gOn&&e.touches.length>=2){e.preventDefault();const a=e.touches[0],b=e.touches[1];let f=Math.hypot(b.clientX-a.clientX,b.clientY-a.clientY)/AB.gd;f=abC(AB.zoom*f,0.5,12)/AB.zoom;const r=w.getBoundingClientRect();const mx=(a.clientX+b.clientX)/2-r.left,my=(a.clientY+b.clientY)/2-r.top;AB.lmx=mx;AB.lmy=my;AB.lf=f;document.getElementById('ab-stack').style.transform=`translate(${mx-AB.gnx*AB.cssW*f}px,${my-AB.gny*AB.cssH*f}px) scale(${f})`;}},{passive:false});
   w.addEventListener('touchend',async e=>{if(AB.gOn&&e.touches.length<2){AB.zoom=abC(AB.zoom*AB.lf,0.5,12);await abRender(false);AB.tx=AB.lmx-AB.gnx*AB.cssW;AB.ty=AB.lmy-AB.gny*AB.cssH;abApply();abOverlay();AB.gOn=false;}});
   if(!AB.winBound){AB.winBound=true;
     window.addEventListener('mousemove',e=>{if(!AB.panning)return;AB.tx=e.clientX-AB.sx;AB.ty=e.clientY-AB.sy;abApply();});
