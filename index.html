@@ -1625,7 +1625,7 @@ function rApproval(){
         h+=`<div style="display:flex;gap:6px;flex-wrap:wrap"><button class="btn btn-bl btn-sm" style="flex:1;min-width:80px" onclick="vwWkK('${key}')"><i class="ti ti-eye"></i> View</button>`;
         if(canAct){
           h+=`<button class="btn btn-s btn-sm" style="flex:1;min-width:80px" onclick="appWkK('${key}')"><i class="ti ti-check"></i> Approve</button><button class="btn btn-d btn-sm" style="flex:1;min-width:80px" onclick="retWkK('${key}')"><i class="ti ti-x"></i> Return</button>`;
-          if(auth.isAdmin)h+=`<button class="btn btn-sm btn-d" style="width:100%;margin-top:6px" onclick="adminDeleteSubmissionK('${key}')"><i class="ti ti-trash"></i> Delete</button>`;
+          if(auth.isAdmin)h+=`<button class="btn btn-sm" style="flex:1;min-width:120px;margin-top:6px" onclick="adminMoveSubmissionK('${key}')"><i class="ti ti-calendar"></i> Move week</button><button class="btn btn-sm btn-d" style="flex:1;min-width:120px;margin-top:6px" onclick="adminDeleteSubmissionK('${key}')"><i class="ti ti-trash"></i> Delete</button>`;
         }
         h+=`</div></div>`;
       });
@@ -1716,6 +1716,45 @@ function adminDeleteSubmissionK(key){
   delete S.weeks[key];
   removeFromSP(p[0],p[1]); // delete this foreman's record for that week only
   updBadge();render();toast('Timesheet deleted.','success');
+}
+// Admin-only: move a submitted foreman timesheet to the correct week.
+// Shifts every per-day entry, equipment, and production-report date by a whole number
+// of weeks (the gap between the wrong and right week-ending Saturdays), re-files the
+// sheet under the new week key (status preserved), and removes the old copy from SP.
+async function adminMoveSubmissionK(key){
+  if(!auth.isAdmin){toast('Admins only.','error');return;}
+  if(!key||!key.includes(':')){toast('Can only move a submitted timesheet.','error');return;}
+  const wk=S.weeks[key];if(!wk){toast('Timesheet not found.','error');return;}
+  const parts=key.split(':');const srcIso=parts[0],foreman=parts[1]||'',mgr=parts[2]||'';
+  const tgt=prompt('Move this timesheet to which week?\n\nEnter the correct week-ending date (Saturday) as YYYY-MM-DD.\n\nIt is currently filed under week ending '+srcIso+'.',srcIso);
+  if(tgt===null)return;
+  const t=(tgt||'').trim();
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(t)){toast('Enter the date as YYYY-MM-DD.','error');return;}
+  const d0=new Date(srcIso+'T12:00:00'),d1=new Date(t+'T12:00:00');
+  if(isNaN(d1.getTime())){toast('Invalid date.','error');return;}
+  const delta=Math.round((d1-d0)/86400000);
+  if(delta===0){toast('That is the same week it is already in.','error');return;}
+  if(delta%7!==0){toast('The new date must be a week-ending Saturday — a whole number of weeks from '+srcIso+'.','error');return;}
+  const newKey=t+':'+foreman+':'+mgr;
+  // Collision guard: never overwrite an existing submission for this foreman + target week.
+  const clash=Object.keys(S.weeks).some(k=>{const p=k.split(':');return p[0]===t&&(p[1]||'').toLowerCase()===foreman.toLowerCase()&&k!==key;});
+  if(clash){toast('A timesheet for this foreman already exists in the target week — resolve that one first.','error');return;}
+  if(!confirm('Move '+(wk.submittedBy||foreman)+'\u2019s timesheet from week ending '+srcIso+' to '+t+'?\n\nAll day, equipment, and production dates shift by '+(delta/7)+' week(s). It stays submitted and pending your approval.'))return;
+  const moved=JSON.parse(JSON.stringify(wk));
+  const shift=(dt)=>{if(!/^\d{4}-\d{2}-\d{2}$/.test(dt))return dt;const x=new Date(dt+'T12:00:00');x.setDate(x.getDate()+delta);return x.toISOString().split('T')[0];};
+  const reKey=(obj)=>{const out={};Object.entries(obj||{}).forEach(([ek,v])=>{const ci=ek.lastIndexOf(':');if(ci<0){out[ek]=v;return;}const eid=ek.slice(0,ci),dt=ek.slice(ci+1);out[eid+':'+shift(dt)]=v;});return out;};
+  moved.entries=reKey(moved.entries);
+  moved.equipmentEntries=reKey(moved.equipmentEntries);
+  if(moved.production&&Array.isArray(moved.production.entries)){moved.production.entries.forEach(p=>{if(p&&p.date)p.date=shift(p.date);});}
+  moved.comments=(moved.comments||'')+'\nMoved from week ending '+srcIso+' to '+t+' by '+((auth.user&&auth.user.name)||'admin')+' on '+new Date().toLocaleDateString();
+  delete S.weeks[key];
+  S.weeks[newKey]=moved;
+  toast('Moving timesheet…','info');
+  try{
+    await saveAllSubmittedSP();          // writes the moved sheet under the new week key
+    await removeFromSP(srcIso,foreman);  // removes the old week's copy for this foreman
+    updBadge();render();toast('Moved to week ending '+t+'.','success');
+  }catch(e){console.error('adminMoveSubmissionK:',e);toast('Move failed — refresh and verify in SharePoint.','error');}
 }
 // Legacy iso-key handlers kept for any stale references — now no-ops to avoid silent overwrites.
 function appWk(iso){const n=auth.user?auth.user.name:prompt('Your name:');if(!n)return;if(!S.weeks[iso])return;S.weeks[iso].status='approved';S.weeks[iso].approvedBy=n;S.weeks[iso].approvedAt=new Date().toISOString();
