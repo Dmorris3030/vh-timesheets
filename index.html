@@ -1286,9 +1286,14 @@ function allEmps(){const hid=S.hiddenEmployees||[];return [...EMPS,...(S.customE
 // always appears — a crew member on a returned/submitted sheet must never silently vanish.
 function empById(id){return [...EMPS,...(S.customEmployees||[])].find(e=>String(e.id)===String(id))||{id:id,name:String(id),title:''};}
 function tmOpts(cur){var s='<option value=""'+(!cur?' selected':'')+'>--</option>';for(var h=4;h<=20;h++){for(var m=0;m<60;m+=15){var v=(h<10?'0':'')+h+':'+(m<10?'0':'')+m;var d12=h===0?12:h>12?h-12:h;var l=d12+':'+(m<10?'0':'')+m+(h<12?'a':'p');s+='<option value="'+v+'"'+(cur===v?' selected':'')+'>'+l+'</option>';}}return s;}
+// Timezone-safe week math. Anchoring at LOCAL NOON before toISOString() prevents the
+// evening UTC rollover that pushed week-ending dates from Saturday onto Sunday.
+function curSatIso(){const n=new Date();const d=new Date(n.getFullYear(),n.getMonth(),n.getDate(),12,0,0);d.setDate(d.getDate()+(6-d.getDay()));return d.toISOString().split('T')[0];}
+function addWeeksIso(iso,n){const d=new Date(iso+'T12:00:00');d.setDate(d.getDate()+n*7);return d.toISOString().split('T')[0];}
+function nearestSatIso(iso){const d=new Date(iso+'T12:00:00');let off=6-d.getDay();if(off>3)off-=7;d.setDate(d.getDate()+off);return d.toISOString().split('T')[0];}
 function initWeeks(){const sel=document.getElementById('ws');if(!sel)return;
   // Get current week Saturday
-  const now=new Date();const curSat=new Date(now);curSat.setDate(now.getDate()+(6-now.getDay()));const curIso=curSat.toISOString().split('T')[0];
+  const curIso=curSatIso();
   // Always set current week first
   if(!S.currentWeek)S.currentWeek=curIso;
   if(!S.weeks[curIso])S.weeks[curIso]=bw();
@@ -1296,11 +1301,11 @@ function initWeeks(){const sel=document.getElementById('ws');if(!sel)return;
   // Add current week first if not already there
   if(!ex.has(curIso)){const o=document.createElement('option');o.value=curIso;o.textContent=fw(curIso);sel.insertBefore(o,sel.firstChild);ex.add(curIso);}
   // Add surrounding weeks
-  for(let i=-1;i<=4;i++){if(i===0)continue;const dt=new Date();dt.setDate(dt.getDate()+(6-dt.getDay())+i*7);const iso=dt.toISOString().split('T')[0];
+  for(let i=-1;i<=4;i++){if(i===0)continue;const iso=addWeeksIso(curIso,i);
     if(!ex.has(iso)){const o=document.createElement('option');o.value=iso;o.textContent=fw(iso);sel.appendChild(o);ex.add(iso);}if(!S.weeks[iso])S.weeks[iso]=bw();}
   Object.keys(S.weeks).forEach(iso=>{if(iso.includes(':'))return;if(!ex.has(iso)){const o=document.createElement('option');o.value=iso;o.textContent=fw(iso);sel.appendChild(o);ex.add(iso);}});
   Array.from(sel.options).forEach(o=>{const w=S.weeks[o.value];o.textContent=(w&&w.status==='returned'?'⚠ ':'')+fw(o.value)+(w&&w.status==='returned'?' — Returned':'');});
-  if(!S.currentWeek){const dt=new Date();dt.setDate(dt.getDate()+(6-dt.getDay()));S.currentWeek=dt.toISOString().split('T')[0];}sel.value=S.currentWeek;
+  if(!S.currentWeek){S.currentWeek=curIso;}sel.value=S.currentWeek;
 }
 function changeWeek(w){S.currentWeek=w;if(!S.weeks[w])S.weeks[w]=bw();adys={};render();updBadge();}
 function showPage(p){if(p==='export'&&!auth.isAdmin){toast('Admins only.','error');return;}cp=p;document.querySelectorAll('.nb[id^=nav-]').forEach(b=>b.classList.remove('active'));const nb=document.getElementById('nav-'+p);if(nb)nb.classList.add('active');if(p==='approval'||p==='review'){loadSP().then(()=>render());}else if(p==='entry'){render();loadSP().then(()=>{updBadge();render();});}else{render();}}
@@ -1733,7 +1738,7 @@ function shiftWeekDates(wk,delta){
   return moved;
 }
 // Build <option>s for the week-picker: 12 weeks either side of `iso`, defaulting to one week earlier.
-function weekOptionsAround(iso){let o='';for(let off=-12;off<=12;off++){if(off===0)continue;const d=new Date(iso+'T12:00:00');d.setDate(d.getDate()+off*7);const w=d.toISOString().split('T')[0];o+=`<option value="${w}"${off===-1?' selected':''}>${fw(w)}</option>`;}return o;}
+function weekOptionsAround(iso){const base=nearestSatIso(iso);let o='';for(let off=-12;off<=12;off++){const w=addWeeksIso(base,off);o+=`<option value="${w}"${off===0?' selected':''}>${fw(w)}</option>`;}return o;}
 // Opens an in-app modal (no native prompt/confirm — those get suppressed when chained,
 // silently cancelling the action). Pick the correct week from a dropdown of nearby
 // Saturdays so the date can't be mistyped.
@@ -1756,7 +1761,7 @@ async function adminMoveDo(key){
   const parts=key.split(':');const srcIso=parts[0],foreman=parts[1]||'',mgr=parts[2]||'';
   if(!/^\d{4}-\d{2}-\d{2}$/.test(t)||t===srcIso){toast('Pick a different week.','error');const b=document.getElementById('mv-go');if(b)b.disabled=false;return;}
   const delta=Math.round((new Date(t+'T12:00:00')-new Date(srcIso+'T12:00:00'))/86400000);
-  if(delta===0||delta%7!==0){toast('Invalid target week.','error');const b=document.getElementById('mv-go');if(b)b.disabled=false;return;}
+  if(delta===0){toast('Pick a different week.','error');const b=document.getElementById('mv-go');if(b)b.disabled=false;return;}
   const newKey=t+':'+foreman+':'+mgr;
   const clash=Object.keys(S.weeks).some(k=>{const p=k.split(':');return p[0]===t&&(p[1]||'').toLowerCase()===foreman.toLowerCase()&&k!==key;});
   if(clash){toast('A timesheet for this foreman already exists in that week — resolve it first.','error');const b=document.getElementById('mv-go');if(b)b.disabled=false;return;}
@@ -1793,7 +1798,7 @@ async function fmMoveDo(){
   if(wk.status!=='draft'&&wk.status!=='returned'){toast('Only a draft or returned timesheet can be moved.','error');reEnable();return;}
   if(!/^\d{4}-\d{2}-\d{2}$/.test(t)||t===srcIso){toast('Pick a different week.','error');reEnable();return;}
   const delta=Math.round((new Date(t+'T12:00:00')-new Date(srcIso+'T12:00:00'))/86400000);
-  if(delta===0||delta%7!==0){toast('Invalid week.','error');reEnable();return;}
+  if(delta===0){toast('Pick a different week.','error');reEnable();return;}
   const tw=S.weeks[t];
   const hasContent=(w)=>!!(w&&((w.employees&&w.employees.length)||(w.entries&&Object.keys(w.entries).length)||(w.equipmentEntries&&Object.keys(w.equipmentEntries).length)||(w.production&&w.production.entries&&w.production.entries.length)));
   if(hasContent(tw)){toast('You already have entries in that week — clear them first.','error');reEnable();return;}
