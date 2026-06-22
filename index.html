@@ -1732,7 +1732,8 @@ function adminMoveSubmissionK(key){
   let opts='';
   for(let off=-12;off<=12;off++){if(off===0)continue;const d=new Date(srcIso+'T12:00:00');d.setDate(d.getDate()+off*7);const iso=d.toISOString().split('T')[0];opts+=`<option value="${iso}"${off===-1?' selected':''}>${fw(iso)}</option>`;}
   let h=`<div class="mh"></div><h2 style="font-size:18px;font-weight:700;margin-bottom:4px">Move timesheet</h2>`;
-  h+=`<p style="font-size:13px;color:var(--text2);margin-bottom:14px"><strong>${esc(wk.submittedBy||parts[1]||'This timesheet')}</strong> is currently filed under <strong>${fw(srcIso)}</strong>. Choose the correct week — every day, equipment, and production date shifts to match. It stays submitted and pending your approval.</p>`;
+  const who=String(wk.submittedBy||parts[1]||'This timesheet').replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+  h+=`<p style="font-size:13px;color:var(--text2);margin-bottom:14px"><strong>${who}</strong> is currently filed under <strong>${fw(srcIso)}</strong>. Choose the correct week — every day, equipment, and production date shifts to match. It stays submitted and pending your approval.</p>`;
   h+=`<div class="fr"><label>Correct week</label><select id="mv-week" style="width:100%;padding:11px 14px;font-size:16px;background:var(--bg2);border:0.5px solid var(--border);border-radius:var(--r3);color:var(--text);font-family:inherit;-webkit-appearance:none">${opts}</select></div>`;
   h+=`<div class="mf"><button class="btn btn-p" id="mv-go" onclick="this.disabled=true;adminMoveDo('${key}')"><i class="ti ti-calendar"></i> Move timesheet</button> <button class="btn" onclick="closeM()">Cancel</button></div>`;
   showM(h,'mvm');
