@@ -1852,7 +1852,13 @@ function expCSV(k){const iso=k.split(':')[0];const wk=S.weeks[k];if(!wk)return;c
           rows.push(`${bc},${emp.sc||emp.id},,V,${lh},,,,${ds},${vMsg},,,,,,,,,,,${S.settings.companyCode},,,,,,,,,,`);
           return; // skip R + equipment ER rows for this line
         }
-        const calc=calcJobHours(ln);const laborHrs=calc.labor>0?calc.labor:lh;
+        // Labor = shift time MINUS operating (equipment) hours. An operator who ran a
+        // machine the whole shift has 0 labor and gets only the ER row below — no duplicate
+        // R labor row. (Subtracts equipment whether or not start/stop times were entered.)
+        const calc=calcJobHours(ln);
+        const eqLine=(ln.equipment||[]).reduce((s,x)=>s+(parseFloat(x.hours)||0),0);
+        const lineTotal=calc.total>0?calc.total:lh;
+        const laborHrs=Math.max(0,Math.round((lineTotal-eqLine)*4)/4);
         if(laborHrs>0)rows.push(`${bc},${emp.sc||emp.id},${emp.dept},R,${laborHrs},${job},${ph},${ct},${ds},${cmt},,,,,,,,,,,${S.settings.companyCode},,,,,,,,,,`);
         // Equipment tied to this job line — message follows the parent row
         (ln.equipment||[]).forEach(x=>{if(x.hours>0)rows.push(`${bc},${emp.sc||emp.id},${emp.dept},ER,${x.hours},${job},${ph},${ct},${ds},${cmt},,,,,,,,${x.number},${x.hours},,${S.settings.companyCode},,,,,,,,,,`);});
