@@ -207,6 +207,31 @@ input[type=checkbox]:checked::after{content:'';position:absolute;left:5px;top:2p
 input[type=radio]{-webkit-appearance:none;appearance:none;width:22px;height:22px;border:2px solid var(--border);border-radius:50%;background:var(--bg2);cursor:pointer;position:relative;flex-shrink:0;transition:all 0.15s}
 input[type=radio]:checked{background:var(--accent);border-color:var(--accent)}
 input[type=radio]:checked::after{content:'';position:absolute;left:5px;top:5px;width:8px;height:8px;background:#fff;border-radius:50%}
+
+/* ===== 2026-07-01.3 polish: day-data dots, depth, dark-mode pills, a11y ===== */
+.dt{position:relative}
+.dt.hd::after{content:'';position:absolute;left:50%;transform:translateX(-50%);bottom:3px;width:5px;height:5px;border-radius:50%;background:var(--accent);opacity:.85}
+.card,.eb,.sc{box-shadow:0 1px 3px rgba(0,0,0,.05)}
+.btn{transition:opacity .1s,transform .1s}
+.btn:active{transform:scale(.97);opacity:.85}
+.toast{box-shadow:0 8px 32px rgba(0,0,0,.18)}
+.di:focus,.fr input:focus,.fr select:focus,.fr textarea:focus,.si:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(24,95,165,.15)}
+:where(button,select,input,textarea):focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+@media(prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important}.dps{transition:none!important}}
+@media(prefers-color-scheme:dark){
+  .card,.eb,.sc{box-shadow:0 1px 3px rgba(0,0,0,.4)}
+  .toast.success{background:#1d2f12;color:#a8d97f;border-color:#3B6D11}
+  .toast.error{background:#361313;color:#f1a1a1;border-color:#A32D2D}
+  .sb-su{background:rgba(24,95,165,.22);color:#8ec2ee}
+  .sb-ap{background:rgba(59,109,17,.28);color:#a8d97f}
+  .sb-re{background:rgba(163,45,45,.28);color:#f1a1a1}
+  .sb-rt{background:rgba(146,64,14,.3);color:#e2b25a}
+  .rb{background:rgba(24,95,165,.22);color:#8ec2ee}
+  .rb.adm{background:rgba(59,109,17,.28);color:#a8d97f}
+  .eqb.he{background:rgba(24,95,165,.22);color:#8ec2ee;border-color:var(--accent)}
+  .eqb .eqi{color:#8ec2ee}
+  .ib{background:rgba(24,95,165,.16);border-color:rgba(24,95,165,.4);color:#8ec2ee}
+}
 </style>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js"></script>
@@ -407,10 +432,61 @@ async function initApp(){
   }catch(e){console.warn(e);}
   initWeeks();updUC();updNav();render();updBadge();
 }
-async function getTok(){
+const VH_BUILD='2026-07-01.4';
+console.log('[VH] Timesheets build',VH_BUILD);
+let __vhAuthToastAt=0;
+// interactive=true only from a user-initiated action: saves drafts, then allows the MSAL
+// redirect. Background callers (periodic sync, silent submits) get null + a gentle toast —
+// never a surprise full-page redirect from a timer.
+async function getTok(interactive){
   if(!mi||!auth.account)return null;
   try{const r=await mi.acquireTokenSilent({scopes:SCOPES,account:auth.account});return r.accessToken;}
-  catch(e){if(e instanceof msal.InteractionRequiredAuthError)await mi.acquireTokenRedirect({scopes:SCOPES,account:auth.account});return null;}
+  catch(e){
+    if(e instanceof msal.InteractionRequiredAuthError){
+      if(interactive){try{saveDraftSilent();}catch(_){/*noop*/}await mi.acquireTokenRedirect({scopes:SCOPES,account:auth.account});}
+      else if(Date.now()-__vhAuthToastAt>60000){__vhAuthToastAt=Date.now();setSS('err');toast('Session expired — open the app menu and sign in again to sync.','error');}
+    }
+    return null;
+  }
+}
+// Cached FieldOperations site + list IDs (saves 2 round trips per sync cycle)
+const __vhSPCache={site:null,lists:{}};
+async function vhGetList(tok,listName){
+  try{
+    if(!__vhSPCache.site){
+      const siteR=await fetch('https://graph.microsoft.com/v1.0/sites/valentiheld.sharepoint.com:/sites/FieldOperations',{headers:{Authorization:'Bearer '+tok}});
+      if(!siteR.ok)return null;
+      __vhSPCache.site=await siteR.json();
+    }
+    if(!__vhSPCache.lists[listName]){
+      const listR=await fetch(`https://graph.microsoft.com/v1.0/sites/${__vhSPCache.site.id}/lists?$filter=displayName eq '${listName}'`,{headers:{Authorization:'Bearer '+tok}});
+      if(!listR.ok)return null;
+      const d=await listR.json();
+      __vhSPCache.lists[listName]=(d.value&&d.value[0]&&d.value[0].id)||null;
+    }
+    if(!__vhSPCache.lists[listName])return null;
+    return {siteId:__vhSPCache.site.id,listId:__vhSPCache.lists[listName]};
+  }catch(e){console.warn('vhGetList:',e);return null;}
+}
+// DELETE with one retry; 404 counts as success (row already gone)
+async function vhDel(tok,siteId,listId,id){
+  for(let a=0;a<2;a++){
+    try{const r=await fetch(`https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${listId}/items/${id}`,{method:'DELETE',headers:{Authorization:'Bearer '+tok}});if(r.ok||r.status===404)return true;}catch(e){/*retry*/}
+    await new Promise(x=>setTimeout(x,400));
+  }
+  return false;
+}
+// POST a list item with 429/5xx retry honoring Retry-After; returns created item or null
+async function vhPost(tok,url,fields){
+  for(let a=0;a<2;a++){
+    try{
+      const r=await fetch(url,{method:'POST',headers:{Authorization:'Bearer '+tok,'Content-Type':'application/json'},body:JSON.stringify({fields:fields})});
+      if(r.ok)return await r.json();
+      if(r.status===429||r.status>=500){const ra=parseInt(r.headers.get('Retry-After')||'2',10)||2;await new Promise(x=>setTimeout(x,Math.min(ra,10)*1000));continue;}
+      console.warn('vhPost failed',r.status);return null;
+    }catch(e){await new Promise(x=>setTimeout(x,800));}
+  }
+  return null;
 }
 async function signIn(){if(!mi){toast('Still loading...','error');return;}await mi.loginRedirect({scopes:SCOPES,prompt:'select_account'});}
 async function signOut(){const ac=auth.account;auth={user:null,isAdmin:false,account:null};updUC();updNav();setSS('off');render();if(mi&&ac)await mi.logoutRedirect({account:ac});}
@@ -429,40 +505,50 @@ function updUC(){const c=document.getElementById('uc');if(!c)return;
   if(auth.user){c.innerHTML=`<span class="uc" onclick="showUM()"><span class="av">${auth.user.initials}</span></span>`;}
   else{c.innerHTML=`<button class="btn btn-p btn-sm" onclick="signIn()" style="white-space:nowrap"><svg width="13" height="13" viewBox="0 0 21 21" style="flex-shrink:0"><rect x="1" y="1" width="9" height="9" fill="#f25022"/><rect x="11" y="1" width="9" height="9" fill="#7fba00"/><rect x="1" y="11" width="9" height="9" fill="#00a4ef"/><rect x="11" y="11" width="9" height="9" fill="#ffb900"/></svg> Sign in</button>`;}
 }
-function showUM(){showM(`<div class="mh"></div><div style="display:flex;align-items:center;gap:14px;margin-bottom:18px"><span class="av" style="width:52px;height:52px;font-size:20px;flex-shrink:0">${auth.user.initials}</span><div><strong style="font-size:17px;letter-spacing:-.3px">${auth.user.name}</strong><br><span style="font-size:13px;color:var(--text2)">${auth.user.email}</span><br><span class="rb${auth.isAdmin?' adm':''}" style="margin-top:6px;display:inline-flex">${auth.isAdmin?'Administrator':'User'}</span></div></div><button class="btn btn-d btn-bl" onclick="signOut();closeM()"><i class="ti ti-logout"></i> Sign out</button>`,'um');}
+function showUM(){showM(`<div class="mh"></div><div style="display:flex;align-items:center;gap:14px;margin-bottom:18px"><span class="av" style="width:52px;height:52px;font-size:20px;flex-shrink:0">${auth.user.initials}</span><div><strong style="font-size:17px;letter-spacing:-.3px">${auth.user.name}</strong><br><span style="font-size:13px;color:var(--text2)">${auth.user.email}</span><br><span class="rb${auth.isAdmin?' adm':''}" style="margin-top:6px;display:inline-flex">${auth.isAdmin?'Administrator':'User'}</span></div></div><button class="btn btn-bl" onclick="location.href='production.html'" style="margin-bottom:8px"><i class="ti ti-chart-bar"></i> Production dashboard</button><button class="btn btn-bl" onclick="location.href='tracker.html'" style="margin-bottom:8px"><i class="ti ti-map-2"></i> Job trackers</button><button class="btn btn-d btn-bl" onclick="signOut();closeM()"><i class="ti ti-logout"></i> Sign out</button><div style="text-align:center;font-size:11px;color:var(--text2);margin-top:10px;opacity:.7">Build ${VH_BUILD}</div>`,'um');}
 function setSS(s){const d=document.getElementById('sd');if(d)d.className='sd '+s;}
 
 
 async function saveAllSubmittedSP(){
-  const tok=await getTok();if(!tok)return;
-  try{
-    // Pull current SP state, merge in our changes, write back
-    const r=await fetch(`https://graph.microsoft.com/v1.0/sites/${SITE_ID}/drive/root:/${SFN}:/content`,{headers:{Authorization:'Bearer '+tok}});
-    let existing={submissions:{},managers:S.managers,adminEmails:S.adminEmails,settings:S.settings};
-    if(r.ok)existing=await r.json();
-    if(!existing.submissions)existing.submissions={};
-    const myEmail=(auth.user?.email||'unknown').toLowerCase();
-    // Iterate every entry in S.weeks. iso-only keys are own submissions; composite keys (containing ':') are foreign (I'm the manager).
-    Object.entries(S.weeks).forEach(([k,wk])=>{
-      if(!wk.status)return;
-      if(k.includes(':')){
-        // Foreign sub — k IS already the SP composite key. Write status as-is, including 'draft' so a "Return to foreman" flows back through SP.
-        existing.submissions[k]=wk;
-      } else {
-        // Own sub — skip drafts/returned (those live in localStorage until resubmit), then find/build the exact composite key.
-        if(wk.status==='draft'||wk.status==='returned')return;
-        const matchKey=Object.keys(existing.submissions).find(ek=>{
-          const p=ek.split(':');
-          return p[0]===k && (p[1]||'').toLowerCase()===myEmail;
-        });
-        const key=matchKey||(k+':'+(wk.submittedBy||auth.user?.email||'unknown')+':'+(wk.assignedManager||''));
-        existing.submissions[key]=wk;
-      }
-    });
-    existing.managers=S.managers;existing.adminEmails=S.adminEmails;existing.settings=S.settings;existing.customEmployees=S.customEmployees||[];existing.hiddenEmployees=S.hiddenEmployees||[];existing.photoRecipients=S.photoRecipients||[];existing.phaseLabels=S.phaseLabels||{};
-    const put=await fetch(`https://graph.microsoft.com/v1.0/sites/${SITE_ID}/drive/root:/${SFN}:/content`,{method:'PUT',headers:{Authorization:'Bearer '+tok,'Content-Type':'application/json'},body:JSON.stringify(existing)});
-    if(!put.ok)throw new Error(await put.text());
-  }catch(e){console.error('saveAllSubmittedSP:',e);}
+  const tok=await getTok();if(!tok)return false;
+  const base=`https://graph.microsoft.com/v1.0/sites/${SITE_ID}/drive/root:/${SFN}`;
+  for(let attempt=0;attempt<3;attempt++){
+    try{
+      // Pull current SP state + eTag, merge in our changes, write back with If-Match so a
+      // concurrent submit from another device forces a re-read instead of being overwritten.
+      let etag=null;
+      try{const metaR=await fetch(base,{headers:{Authorization:'Bearer '+tok}});if(metaR.ok){const meta=await metaR.json();etag=meta.eTag||null;}}catch(e){/*first write*/}
+      const r=await fetch(base+':/content',{headers:{Authorization:'Bearer '+tok}});
+      let existing={submissions:{},managers:S.managers,adminEmails:S.adminEmails,settings:S.settings};
+      if(r.ok)existing=await r.json();
+      if(!existing.submissions)existing.submissions={};
+      const myEmail=(auth.user?.email||'unknown').toLowerCase();
+      // Iterate every entry in S.weeks. iso-only keys are own submissions; composite keys (containing ':') are foreign (I'm the manager).
+      Object.entries(S.weeks).forEach(([k,wk])=>{
+        if(!wk.status)return;
+        if(k.includes(':')){
+          existing.submissions[k]=wk;
+        } else {
+          if(wk.status==='draft'||wk.status==='returned')return;
+          const matchKey=Object.keys(existing.submissions).find(ek=>{
+            const p=ek.split(':');
+            return p[0]===k && (p[1]||'').toLowerCase()===myEmail;
+          });
+          const key=matchKey||(k+':'+(wk.submittedBy||auth.user?.email||'unknown')+':'+(wk.assignedManager||''));
+          existing.submissions[key]=wk;
+        }
+      });
+      existing.managers=S.managers;existing.adminEmails=S.adminEmails;existing.settings=S.settings;existing.customEmployees=S.customEmployees||[];existing.hiddenEmployees=S.hiddenEmployees||[];existing.photoRecipients=S.photoRecipients||[];existing.phaseLabels=S.phaseLabels||{};
+      const hdrs={Authorization:'Bearer '+tok,'Content-Type':'application/json'};
+      if(etag)hdrs['If-Match']=etag;
+      const put=await fetch(base+':/content',{method:'PUT',headers:hdrs,body:JSON.stringify(existing)});
+      if(put.status===412){console.warn('saveAllSubmittedSP: concurrent write, re-reading (attempt '+(attempt+1)+')');continue;}
+      if(!put.ok)throw new Error(await put.text());
+      return true;
+    }catch(e){console.error('saveAllSubmittedSP:',e);return false;}
+  }
+  console.error('saveAllSubmittedSP: gave up after ETag conflicts');
+  return false;
 }
 // Save draft to localStorage only (device-local, not shared)
 function _writeDrafts(){
@@ -485,40 +571,52 @@ function saveDraftSilent(){try{_writeDrafts();}catch(e){}}
 let _dsTimer=null;
 function saveDraftSoon(){clearTimeout(_dsTimer);_dsTimer=setTimeout(saveDraftSilent,500);}
 
-// Save settings + submitted weeks to SharePoint (shared)
+// Save settings + submitted weeks to SharePoint (shared).
+// Returns true on success. Uses driveItem eTag + If-Match so two foremen submitting at the
+// same moment can no longer overwrite each other's week (the loser re-reads and re-merges).
 async function saveSP(){
-  const tok=await getTok();if(!tok){toast('Sign in to sync.','error');return;}setSS('busy');
-  try{
-    let existing={submissions:{},managers:S.managers,adminEmails:S.adminEmails,settings:S.settings,customEmployees:S.customEmployees||[],hiddenEmployees:S.hiddenEmployees||[],photoRecipients:S.photoRecipients||[],phaseLabels:S.phaseLabels||{}};
+  const tok=await getTok(true);if(!tok){toast('Sign in to sync.','error');return false;}setSS('busy');
+  const base=`https://graph.microsoft.com/v1.0/sites/${SITE_ID}/drive/root:/${SFN}`;
+  for(let attempt=0;attempt<3;attempt++){
     try{
-      const rGet=await fetch(`https://graph.microsoft.com/v1.0/sites/${SITE_ID}/drive/root:/${SFN}:/content`,{headers:{Authorization:'Bearer '+tok}});
-      if(rGet.ok){const d=await rGet.json();if(d&&d.submissions)existing.submissions=d.submissions;}
-    }catch(e){console.warn('SP read:',e);}
-    // Add this user's submitted weeks — own subs only. Foreign subs saved by saveAllSubmittedSP.
-    const myEmailLC=(auth.user?.email||'unknown').toLowerCase();
-    Object.entries(S.weeks).forEach(([iso,wk])=>{
-      if(iso.includes(':'))return; // foreign sub, skip
-      if(wk.status&&wk.status!=='draft'&&wk.status!=='returned'){
-        // Drop any existing entry for this foreman+week (handles re-submit to a different manager)
-        Object.keys(existing.submissions).forEach(ek=>{
-          const p=ek.split(':');
-          if(p[0]===iso && (p[1]||'').toLowerCase()===myEmailLC){
-            delete existing.submissions[ek];
-          }
-        });
-        const key=iso+':'+(auth.user?.email||'unknown')+':'+(wk.assignedManager||'');
-        existing.submissions[key]=wk;
+      let etag=null;
+      let existing={submissions:{},managers:S.managers,adminEmails:S.adminEmails,settings:S.settings,customEmployees:S.customEmployees||[],hiddenEmployees:S.hiddenEmployees||[],photoRecipients:S.photoRecipients||[],phaseLabels:S.phaseLabels||{}};
+      try{
+        const metaR=await fetch(base,{headers:{Authorization:'Bearer '+tok}});
+        if(metaR.ok){const meta=await metaR.json();etag=meta.eTag||null;}
+        const rGet=await fetch(base+':/content',{headers:{Authorization:'Bearer '+tok}});
+        if(rGet.ok){const d=await rGet.json();if(d&&d.submissions)existing.submissions=d.submissions;}
+      }catch(e){console.warn('SP read:',e);}
+      // Add this user's submitted weeks — own subs only. Foreign subs saved by saveAllSubmittedSP.
+      const myEmailLC=(auth.user?.email||'unknown').toLowerCase();
+      Object.entries(S.weeks).forEach(([iso,wk])=>{
+        if(iso.includes(':'))return; // foreign sub, skip
+        if(wk.status&&wk.status!=='draft'&&wk.status!=='returned'){
+          Object.keys(existing.submissions).forEach(ek=>{
+            const p=ek.split(':');
+            if(p[0]===iso && (p[1]||'').toLowerCase()===myEmailLC){
+              delete existing.submissions[ek];
+            }
+          });
+          const key=iso+':'+(auth.user?.email||'unknown')+':'+(wk.assignedManager||'');
+          existing.submissions[key]=wk;
+        }
+      });
+      if(S.adminEmails.map(e=>e.toLowerCase()).includes((auth.user?.email||'').toLowerCase())){
+        existing.managers=S.managers;existing.adminEmails=S.adminEmails;existing.settings=S.settings;
+        existing.customEmployees=S.customEmployees||[];existing.hiddenEmployees=S.hiddenEmployees||[];existing.photoRecipients=S.photoRecipients||[];existing.phaseLabels=S.phaseLabels||{};
       }
-    });
-    if(S.adminEmails.map(e=>e.toLowerCase()).includes((auth.user?.email||'').toLowerCase())){
-      existing.managers=S.managers;existing.adminEmails=S.adminEmails;existing.settings=S.settings;
-      existing.customEmployees=S.customEmployees||[];existing.hiddenEmployees=S.hiddenEmployees||[];existing.photoRecipients=S.photoRecipients||[];existing.phaseLabels=S.phaseLabels||{};
-    }
-    existing.savedAt=new Date().toISOString();
-    const r=await fetch(`https://graph.microsoft.com/v1.0/sites/${SITE_ID}/drive/root:/${SFN}:/content`,{method:'PUT',headers:{Authorization:'Bearer '+tok,'Content-Type':'application/json'},body:JSON.stringify(existing)});
-    if(!r.ok){const txt=await r.text();throw new Error(r.status+': '+txt.slice(0,100));}
-    setSS('ok');toast('Submitted.','success');
-  }catch(e){setSS('err');toast('Sync failed: '+e.message,'error');console.error('saveSP:',e);}
+      existing.savedAt=new Date().toISOString();
+      const hdrs={Authorization:'Bearer '+tok,'Content-Type':'application/json'};
+      if(etag)hdrs['If-Match']=etag;
+      const r=await fetch(base+':/content',{method:'PUT',headers:hdrs,body:JSON.stringify(existing)});
+      if(r.status===412){console.warn('saveSP: concurrent write detected, re-reading (attempt '+(attempt+1)+')');continue;}
+      if(!r.ok){const txt=await r.text();throw new Error(r.status+': '+txt.slice(0,100));}
+      setSS('ok');return true;
+    }catch(e){setSS('err');toast('Sync failed: '+e.message,'error');console.error('saveSP:',e);return false;}
+  }
+  setSS('err');toast('Sync conflict — another device kept writing. Try again in a moment.','error');
+  return false;
 }
 
 
@@ -1116,47 +1214,42 @@ function getJobEquipHours(wk,dt,jobNum){
 
 // Submit production entries to Field Data SharePoint list
 async function submitProductionToSP(wk, silent){
-  if(window.__VH_PROD_INFLIGHT)return;
+  if(window.__VH_PROD_INFLIGHT)return{ok:false,busy:true};
   window.__VH_PROD_INFLIGHT=true;
-  try{await _submitProductionToSPImpl(wk,silent);window.__VH_LAST_WRITE_AT=Date.now();}
+  try{const res=await _submitProductionToSPImpl(wk,silent);if(res&&res.ok)window.__VH_LAST_WRITE_AT=Date.now();return res;}
   finally{window.__VH_PROD_INFLIGHT=false;}
 }
 async function _submitProductionToSPImpl(wk, silent){
-  const tok=await getTok();if(!tok)return;
-  if(!wk.production)return;
+  const tok=await getTok();if(!tok)return{ok:false,reason:'auth'};
+  if(!wk.production)return{ok:true,skipped:true};
   const allEntries=prodEntries(wk);
   const entries=allEntries.filter(function(p){
     const keys=Object.keys(p).filter(function(k){return k!=='id'&&k!=='job'&&k!=='date'&&k!=='photos'&&k!=='phase';});
     return p.job||keys.some(function(k){return p[k]&&String(p[k]).trim()!=='';});
   });
-  if(!entries.length)return;
+  if(!entries.length)return{ok:true,skipped:true};
   try{
-    const siteR=await fetch('https://graph.microsoft.com/v1.0/sites/valentiheld.sharepoint.com:/sites/FieldOperations',{headers:{Authorization:'Bearer '+tok}});
-    if(!siteR.ok)return;
-    const site=await siteR.json();
-    const listR=await fetch(`https://graph.microsoft.com/v1.0/sites/${site.id}/lists?$filter=displayName eq 'Field Data'`,{headers:{Authorization:'Bearer '+tok}});
-    if(!listR.ok)return;
-    const listData=await listR.json();
-    const listId=listData.value[0]?.id;if(!listId)return;
-    // Idempotency: delete prior rows for this (Foreman, week date range) before inserting.
-    // Lets us safely call this on a timer or on every submit without duplicating rows.
+    const L=await vhGetList(tok,'Field Data');
+    if(!L)return{ok:false,reason:'list'};
+    // 1. Capture existing row IDs for this (Foreman, week range) BEFORE writing anything.
+    //    If this query fails we abort — inserting blind would duplicate production rows.
     const foremanName=auth.user?.name||'';
     const weekEnd=S.currentWeek;
+    let oldIds=[];
     if(foremanName&&weekEnd&&/^\d{4}-\d{2}-\d{2}$/.test(weekEnd)){
       const endD=new Date(weekEnd+'T12:00:00');
       const startD=new Date(endD);startD.setDate(endD.getDate()-6);
       const startIso=startD.toISOString().split('T')[0];
       try{
         const filt=encodeURIComponent(`fields/Foreman eq '${foremanName.replace(/'/g,"''")}' and fields/Date ge '${startIso}T00:00:00Z' and fields/Date le '${weekEnd}T23:59:59Z'`);
-        const existR=await fetch(`https://graph.microsoft.com/v1.0/sites/${site.id}/lists/${listId}/items?$filter=${filt}&$top=999`,{headers:{Authorization:'Bearer '+tok,'Prefer':'HonorNonIndexedQueriesWarningMayFailRandomly'}});
-        if(existR.ok){
-          const existData=await existR.json();
-          for(const item of (existData.value||[])){
-            await fetch(`https://graph.microsoft.com/v1.0/sites/${site.id}/lists/${listId}/items/${item.id}`,{method:'DELETE',headers:{Authorization:'Bearer '+tok}});
-          }
-        }
-      }catch(e){console.warn('Field Data cleanup skipped:',e);}
+        const existR=await fetch(`https://graph.microsoft.com/v1.0/sites/${L.siteId}/lists/${L.listId}/items?$filter=${filt}&$top=999`,{headers:{Authorization:'Bearer '+tok,'Prefer':'HonorNonIndexedQueriesWarningMayFailRandomly'}});
+        if(!existR.ok)throw new Error('query '+existR.status);
+        const existData=await existR.json();
+        oldIds=(existData.value||[]).map(i=>i.id);
+      }catch(e){console.warn('Field Data pre-query failed — aborting to avoid duplicates:',e);return{ok:false,reason:'query'};}
     }
+    // 2. Insert the fresh rows FIRST — the previous good set stays in place until every insert lands.
+    const newIds=[];
     for(const p of entries){
       const totals=getJobTotals(wk,p.date,p.job);
       const qty=parseFloat(p.quantity||p.yardsMovedTotal||p.areaFinished)||0;
@@ -1168,7 +1261,7 @@ async function _submitProductionToSPImpl(wk, silent){
       const bidCostVal=parseFloat(p.bidCost||0)||(parseFloat(p.bidCostPerYard||0)*qty)||0;
       const actualCostVal=parseFloat(p.actualCost||0)||(parseFloat(p.actualCostPerYard||0)*qty)||0;
       const notesParts=[p.notes,p.weather?'Weather: '+p.weather:'',p.pipeSize?'Pipe: '+p.pipeSize:'',p.strId?'STR: '+p.strId:''].filter(Boolean);
-      await fetch(`https://graph.microsoft.com/v1.0/sites/${site.id}/lists/${listId}/items`,{method:'POST',headers:{Authorization:'Bearer '+tok,'Content-Type':'application/json'},body:JSON.stringify({fields:{
+      const created=await vhPost(tok,`https://graph.microsoft.com/v1.0/sites/${L.siteId}/lists/${L.listId}/items`,{
           Title:`${p.job||'?'} P${entryPhase||'?'} ${p.date||''}`,
           Jobnumber:p.job||'',
           Phase:entryPhase,
@@ -1194,10 +1287,21 @@ async function _submitProductionToSPImpl(wk, silent){
           'Bid_x0020_Cost_x0020_Per_x0020_Y':parseFloat(p.bidCostPerYard||0)||0,
           'Actual_x0020_Cost_x0020_Per_x002':parseFloat(p.actualCostPerYard||0)||0,
           Notes:notesParts.join(' | ')
-        }})});
+        });
+      if(created&&created.id){newIds.push(created.id);}
+      else{
+        console.error('Field Data insert failed at row',newIds.length+1,'of',entries.length,'— rolling back partial batch.');
+        for(const id of newIds)await vhDel(tok,L.siteId,L.listId,id);
+        if(!silent)toast('Production sync failed mid-write — previous data kept. Will retry.','error');
+        return{ok:false,reason:'insert'};
+      }
     }
+    // 3. Only now retire the superseded rows. A failed delete self-heals: the next sync pass
+    //    picks the leftover up in the pre-query and replaces it.
+    for(const id of oldIds)await vhDel(tok,L.siteId,L.listId,id);
     if(!silent)toast('Production data sent to Field Data.','success');
-  }catch(e){console.error('Production submit error:',e);}
+    return{ok:true,count:newIds.length};
+  }catch(e){console.error('Production submit error:',e);return{ok:false,reason:'error'};}
 }
 
 // Persist per-day per-job timesheet hours to SharePoint list 'TimesheetJobLines'
@@ -1205,61 +1309,50 @@ async function _submitProductionToSPImpl(wk, silent){
 // One row per (employee, date, jobLine). Idempotent on re-submit: deletes the
 // (week, submitter) rows first, then inserts fresh.
 async function submitJobLinesToSP(wk, silent){
-  if(window.__VH_JLW_INFLIGHT)return;
+  if(window.__VH_JLW_INFLIGHT)return{ok:false,busy:true};
   window.__VH_JLW_INFLIGHT=true;
-  try{await _submitJobLinesToSPImpl(wk,silent);window.__VH_LAST_WRITE_AT=Date.now();}
+  try{const res=await _submitJobLinesToSPImpl(wk,silent);if(res&&res.ok)window.__VH_LAST_WRITE_AT=Date.now();return res;}
   finally{window.__VH_JLW_INFLIGHT=false;}
 }
 async function _submitJobLinesToSPImpl(wk, silent){
-  const tok=await getTok();if(!tok)return;
-  if(!wk||!wk.entries)return;
+  const tok=await getTok();if(!tok)return{ok:false,reason:'auth'};
+  if(!wk||!wk.entries)return{ok:true,skipped:true};
   try{
-    const siteR=await fetch('https://graph.microsoft.com/v1.0/sites/valentiheld.sharepoint.com:/sites/FieldOperations',{headers:{Authorization:'Bearer '+tok}});
-    if(!siteR.ok)return;
-    const site=await siteR.json();
-    const listR=await fetch(`https://graph.microsoft.com/v1.0/sites/${site.id}/lists?$filter=displayName eq 'TimesheetJobLines'`,{headers:{Authorization:'Bearer '+tok}});
-    if(!listR.ok)return;
-    const listData=await listR.json();
-    const listId=listData.value[0]?.id;
-    if(!listId){console.warn('TimesheetJobLines list not found on FieldOperations site.');return;}
-
+    const L=await vhGetList(tok,'TimesheetJobLines');
+    if(!L){console.warn('TimesheetJobLines list not found on FieldOperations site.');return{ok:false,reason:'list'};}
     const weekIso=S.currentWeek;
     const submittedBy=auth.user?.email||wk.submittedBy||'unknown';
     const submittedAt=new Date().toISOString();
-
-    // Idempotency: clear prior rows for this (week, submitter) before inserting
+    // 1. Capture existing row IDs for this (week, submitter). Abort if the query fails —
+    //    inserting without knowing the old rows would double-count hours in payroll/variance.
+    let oldIds=[];
     try{
-      const filt=encodeURIComponent(`fields/WeekIso eq '${weekIso}' and fields/SubmittedBy eq '${submittedBy}'`);
-      const existR=await fetch(`https://graph.microsoft.com/v1.0/sites/${site.id}/lists/${listId}/items?$filter=${filt}&$top=999`,{headers:{Authorization:'Bearer '+tok,'Prefer':'HonorNonIndexedQueriesWarningMayFailRandomly'}});
-      if(existR.ok){
-        const existData=await existR.json();
-        for(const item of (existData.value||[])){
-          await fetch(`https://graph.microsoft.com/v1.0/sites/${site.id}/lists/${listId}/items/${item.id}`,{method:'DELETE',headers:{Authorization:'Bearer '+tok}});
-        }
-      }
-    }catch(e){console.warn('TimesheetJobLines cleanup skipped:',e);}
-
-    // Insert fresh rows: one per (employee, date, jobLine)
-    let inserted=0;
+      const filt=encodeURIComponent(`fields/WeekIso eq '${weekIso}' and fields/SubmittedBy eq '${String(submittedBy).replace(/'/g,"''")}'`);
+      const existR=await fetch(`https://graph.microsoft.com/v1.0/sites/${L.siteId}/lists/${L.listId}/items?$filter=${filt}&$top=999`,{headers:{Authorization:'Bearer '+tok,'Prefer':'HonorNonIndexedQueriesWarningMayFailRandomly'}});
+      if(!existR.ok)throw new Error('query '+existR.status);
+      const existData=await existR.json();
+      oldIds=(existData.value||[]).map(i=>i.id);
+    }catch(e){console.warn('JobLines pre-query failed — aborting to avoid duplicates:',e);return{ok:false,reason:'query'};}
+    // 2. Build every payload before touching the list. Employee lookup goes through empById
+    //    so CUSTOM employees resolve to their real name/title instead of a raw ID.
+    const rows=[];
     for(const [k,entry] of Object.entries(wk.entries)){
       const colonPos=k.indexOf(':');
       if(colonPos<0)continue;
       const empId=k.substring(0,colonPos);
       const workDate=k.substring(colonPos+1);
-      const emp=(typeof EMPS!=='undefined'?EMPS:[]).find(e=>e.id===empId);
-      const empName=(emp&&emp.name)||empId;
-      const empTitle=(emp&&emp.title)||'';
+      const emp=(typeof empById==='function')?empById(empId):((typeof EMPS!=='undefined'?EMPS:[]).find(e=>String(e.id)===String(empId))||{id:empId,name:String(empId),title:''});
       const lines=entry.jobLines||[];
       for(const ln of lines){
         const hrs=parseFloat(ln.hours)||0;
         if(hrs===0&&!ln.job)continue;
         const equipStr=JSON.stringify((ln.equipment||[]).filter(Boolean).map(function(eq){const num=eq&&(eq.number||eq.id||eq.equipNum);const reg=(typeof EQ!=='undefined'&&Array.isArray(EQ))?EQ.find(function(x){return String(x.number)===String(num);}):null;return Object.assign({},eq,{description:reg?reg.description:(eq.description||'')});}));
-        const r=await fetch(`https://graph.microsoft.com/v1.0/sites/${site.id}/lists/${listId}/items`,{method:'POST',headers:{Authorization:'Bearer '+tok,'Content-Type':'application/json'},body:JSON.stringify({fields:{
+        rows.push({
           Title:`${weekIso}-${empId}-${workDate}-${ln.job||'x'}-${ln.phase||'x'}`,
           WeekIso:weekIso,
           EmployeeId:empId,
-          EmployeeName:empName,
-          EmployeeTitle:empTitle,
+          EmployeeName:emp.name||String(empId),
+          EmployeeTitle:emp.title||'',
           WorkDate:workDate,
           Jobnumber:ln.job||'',
           Phase:ln.phase||'',
@@ -1267,12 +1360,28 @@ async function _submitJobLinesToSPImpl(wk, silent){
           Equipment:equipStr,
           SubmittedBy:submittedBy,
           SubmittedAt:submittedAt
-        }})});
-        if(r.ok)inserted++;
+        });
       }
     }
-    if(inserted>0&&!silent)toast(`Hours sent: ${inserted} row${inserted===1?'':'s'} to TimesheetJobLines.`,'success');
-  }catch(e){console.error('submitJobLinesToSP:',e);}
+    if(!rows.length&&!oldIds.length)return{ok:true,skipped:true,count:0};
+    // 3. Insert fresh rows FIRST; the previous good set stays until every insert lands.
+    const newIds=[];
+    for(const f of rows){
+      const created=await vhPost(tok,`https://graph.microsoft.com/v1.0/sites/${L.siteId}/lists/${L.listId}/items`,f);
+      if(created&&created.id){newIds.push(created.id);}
+      else{
+        console.error('JobLines insert failed at row',newIds.length+1,'of',rows.length,'— rolling back partial batch.');
+        for(const id of newIds)await vhDel(tok,L.siteId,L.listId,id);
+        if(!silent)toast('Hours sync failed mid-write — previous data kept. Will retry.','error');
+        return{ok:false,reason:'insert'};
+      }
+    }
+    // 4. Retire superseded rows. Failed deletes self-heal on the next sync pass.
+    for(const id of oldIds)await vhDel(tok,L.siteId,L.listId,id);
+    window.__VH_LAST_SYNC={t:Date.now(),rows:newIds.length};
+    if(newIds.length>0&&!silent)toast(`Hours sent: ${newIds.length} row${newIds.length===1?'':'s'} to TimesheetJobLines.`,'success');
+    return{ok:true,count:newIds.length};
+  }catch(e){console.error('submitJobLinesToSP:',e);return{ok:false,reason:'error'};}
 }
 
 function bw(){return{employees:[],entries:{},equipmentEntries:{},status:'draft',submittedBy:'',submittedAt:'',approvedBy:'',approvedAt:'',comments:'',production:{}};}
@@ -1436,6 +1545,34 @@ function rEntry(){const wk=S.weeks[S.currentWeek];const dates=wd(S.currentWeek);
   if(!ro&&wk.employees.length)h+=`<div class="acts"><button class="btn btn-sm" onclick="fmMoveWeek()"><i class="ti ti-calendar"></i> Move week</button><button class="btn btn-sm btn-d" onclick="clearDraft()"><i class="ti ti-trash"></i> Clear</button><button class="btn btn-bl" onclick="saveDraft()"><i class="ti ti-device-floppy"></i> Save</button><button class="btn btn-p btn-bl" onclick="showPage('review')"><i class="ti ti-arrow-right"></i> Review & submit</button></div>`;
   h+=`</div>`;document.getElementById('mc').innerHTML=h;
 }
+// --- Copy previous day: 1-tap repeat of yesterday's jobs/times/equipment for an employee ---
+function dayHasData(wk,eid,dt){
+  const e=wk.entries&&wk.entries[`${eid}:${dt}`];
+  if(!e)return false;
+  const lines=(e.jobLines&&e.jobLines.length)?e.jobLines:((e.job||e.hours)?[{job:e.job,hours:e.hours}]:[]);
+  return lines.some(ln=>ln&&(ln.job||parseFloat(ln.hours)||ln.startTime));
+}
+function copyPrevDay(eid,dt){
+  const wk=S.weeks[S.currentWeek];if(!wk)return;
+  if(wk.status!=='draft'&&wk.status!=='returned')return;
+  const dates=wd(S.currentWeek);
+  const idx=dates.indexOf(dt);
+  if(idx<0)return;
+  // Walk back to the NEAREST earlier day with real data (skips rain-outs / empty days)
+  let srcDt=null;
+  for(let i=idx-1;i>=0;i--){if(dayHasData(wk,eid,dates[i])){srcDt=dates[i];break;}}
+  if(!srcDt){toast('Nothing earlier this week to copy for this employee.','error');return;}
+  if(dayHasData(wk,eid,dt)&&!confirm('Replace '+fs(dt)+' with a copy of '+fs(srcDt)+'? Current entries for this day will be overwritten.'))return;
+  // Deep copy so later edits to one day never bleed into the other
+  wk.entries[`${eid}:${dt}`]=JSON.parse(JSON.stringify(wk.entries[`${eid}:${srcDt}`]));
+  if(wk.equipmentEntries&&wk.equipmentEntries[`${eid}:${srcDt}`]){
+    wk.equipmentEntries[`${eid}:${dt}`]=JSON.parse(JSON.stringify(wk.equipmentEntries[`${eid}:${srcDt}`]));
+  }
+  saveDraftSilent();
+  refreshDayPanel(eid,dt);
+  rTot(eid);
+  toast('Copied '+fs(srcDt)+' \u2192 '+fs(dt)+'. Adjust times if needed.','success');
+}
 function calcJobHours(ln){
   // Total = stop - start - lunch, then labor = total - equipment hours
   const start=ln.startTime||'';const stop=ln.stopTime||'';
@@ -1520,7 +1657,10 @@ function buildDayPanel(eid,dt,wk,ro,eqs,he){
     s+='</div>';
   });
   if(!ro){
-    s+='<button class="btn btn-bl" style="font-size:13px;min-height:40px;margin-top:4px" data-eid="'+e+'" data-dt="'+d+'" onclick="addJobLine(this.dataset.eid,this.dataset.dt)"><i class="ti ti-plus"></i> Add job line</button>';
+    s+='<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:4px">';
+    s+='<button class="btn btn-bl" style="font-size:13px;min-height:40px" data-eid="'+e+'" data-dt="'+d+'" onclick="addJobLine(this.dataset.eid,this.dataset.dt)"><i class="ti ti-plus"></i> Add job line</button>';
+    s+='<button class="btn btn-bl" style="font-size:13px;min-height:40px" data-eid="'+e+'" data-dt="'+d+'" onclick="copyPrevDay(this.dataset.eid,this.dataset.dt)"><i class="ti ti-copy"></i> Copy previous day</button>';
+    s+='</div>';
   }
   s+='</div>';
   s+='</div>';
@@ -1595,19 +1735,37 @@ function rReview(){const wk=S.weeks[S.currentWeek];const dates=wd(S.currentWeek)
   else{h+=`<div class="ib"><i class="ti ti-info-circle"></i><div>Status: <strong>${wk.status}</strong>${wk.submittedBy?' · '+wk.submittedBy:''}${wk.approvedBy?' · Approved by '+wk.approvedBy:''}<br><button class="btn btn-sm" style="margin-top:10px" onclick="rToDraft()"><i class="ti ti-arrow-back"></i> Return to draft</button> <button class=\"btn btn-sm btn-d\" onclick=\"deleteSubmission()\"><i class=\"ti ti-trash\"></i> Delete</button></div></div>`;}
   h+=`</div>`;document.getElementById('mc').innerHTML=h;
 }
-function subTS(){const wk=S.weeks[S.currentWeek];const by=document.getElementById('sb').value.trim();if(!by){toast('Enter your name.','error');return;}
+async function subTS(){
+  const wk=S.weeks[S.currentWeek];
+  const by=document.getElementById('sb').value.trim();if(!by){toast('Enter your name.','error');return;}
   const sel=document.querySelector('input[name=mgr]:checked');if(!sel){toast('Select a manager.','error');return;}
   const mgrs=[S.managers[parseInt(sel.value)]];if(!mgrs[0]){toast('Invalid manager selection.','error');return;}
+  const btn=document.querySelector('button[onclick*="subTS"]');
+  if(btn){btn.disabled=true;btn.dataset.prevText=btn.textContent;btn.textContent='Submitting...';}
+  const prev={status:wk.status,submittedBy:wk.submittedBy,submittedAt:wk.submittedAt,returnedAt:wk.returnedAt,assignedManager:wk.assignedManager};
   wk.status='submitted';wk.submittedBy=by;wk.submittedAt=new Date().toISOString();wk.comments=document.getElementById('sn').value;wk.returnedAt='';
   wk.assignedManager=mgrs[0].email; // Store which manager this is assigned to
-  // Push to SharePoint and remove from local drafts
-  submitProductionToSP(wk);
-  submitJobLinesToSP(wk);
-  saveSP().then(()=>{
-    // Remove from localStorage drafts
-    try{const drafts=JSON.parse(localStorage.getItem('vhts_drafts')||'{}');delete drafts[S.currentWeek];localStorage.setItem('vhts_drafts',JSON.stringify(drafts));}catch(e){}
-    updBadge();render();toast('Submitted!','success');
-  });
+  // 1. The manager-facing submission is the source of truth — it must land or nothing counts.
+  const okSP=await saveSP();
+  if(!okSP){
+    Object.assign(wk,prev); // roll the week back to its pre-submit state
+    if(btn){btn.disabled=false;btn.textContent=btn.dataset.prevText||'Submit';}
+    toast('Submit failed — nothing was sent. Check your signal and try again.','error');
+    render();return;
+  }
+  // 2. Submission landed: clear the local draft copy
+  try{const drafts=JSON.parse(localStorage.getItem('vhts_drafts')||'{}');delete drafts[S.currentWeek];localStorage.setItem('vhts_drafts',JSON.stringify(drafts));}catch(e){}
+  // 3. Push the reporting lists and be honest about the outcome (periodic sync retries failures)
+  const [prodR,jlR]=await Promise.all([submitProductionToSP(wk,true),submitJobLinesToSP(wk,true)]);
+  updBadge();render();
+  const prodOk=prodR&&prodR.ok!==false;
+  const jlOk=jlR&&jlR.ok!==false;
+  if(jlOk&&prodOk){
+    const n=(jlR&&jlR.count)||0;
+    toast(n>0?`Submitted! ${n} hour row${n===1?'':'s'} synced.`:'Submitted!','success');
+  }else{
+    toast('Submitted to manager. Reporting sync had an issue — it will retry automatically.','');
+  }
 }
 function rToDraft(){const wk=S.weeks[S.currentWeek];wk.status='draft';wk.submittedBy='';wk.submittedAt='';saveSP();updBadge();render();toast('Returned to draft.','success');}
 function rApproval(){
@@ -2136,9 +2294,12 @@ initApp();
       if(cur==='{"p":{},"e":{}}')return; // empty week, nothing to push
       isSyncing=true;
       console.log("[VH] periodic SP sync — current week changed, pushing to SP lists");
-      await submitProductionToSP(wk,true);
-      await submitJobLinesToSP(wk,true);
-      lastSnap=cur;
+      const pr=await submitProductionToSP(wk,true);
+      const jr=await submitJobLinesToSP(wk,true);
+      // Only advance the snapshot when both writes succeeded (or had nothing to do) —
+      // a failed pass stays "dirty" and retries on the next tick.
+      if((pr&&pr.ok!==false)&&(jr&&jr.ok!==false)){lastSnap=cur;}
+      else{console.warn("[VH] periodic sync incomplete — will retry:",pr,jr);}
     }catch(e){console.warn("[VH] periodic SP sync failed:",e);}
     finally{isSyncing=false;}
   },60000);

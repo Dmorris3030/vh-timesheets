@@ -3,11 +3,11 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-<meta name="theme-color" content="#c8102e">
+<meta name="theme-color" content="#185FA5">
 <title>VH Earthwork Dashboard</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Inter:wght@400;500;600;700;800&display=swap">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@2.47.0/tabler-icons.min.css">
 <script src="https://cdn.jsdelivr.net/npm/@azure/msal-browser@2.38.3/lib/msal-browser.min.js"></script>
 <style>
@@ -122,7 +122,56 @@
   .auth-c .brand{justify-content:center;margin-bottom:18px}
   .auth-c h1{font-size:22px;font-weight:700;margin-bottom:8px;letter-spacing:-.5px}
   .auth-c p{color:var(--text2);font-size:14px;margin-bottom:22px;line-height:1.4}
-.vt{display:inline-flex;background:#f5f5f7;border-radius:8px;padding:3px;margin-bottom:14px;gap:2px}.vt button{font:inherit;font-size:13px;font-weight:600;padding:6px 14px;border:none;background:transparent;color:#666;cursor:pointer;border-radius:6px;transition:background .12s,color .12s;display:inline-flex;align-items:center;gap:6px}.vt button.on{background:#fff;color:#c8102e;box-shadow:0 1px 2px rgba(0,0,0,.06)}.vt button:not(.on):hover{color:#111}.day-card{background:#fff;border:1px solid #eaeaea;border-radius:8px;padding:12px 14px;margin-bottom:8px}.day-hdr{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:8px;font-weight:700;font-size:13px}.day-totals{font-weight:400;font-size:12px;color:#666}.day-cols{display:grid;grid-template-columns:1fr 1fr;gap:16px}.day-col-title{font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.3px;color:#666;margin-bottom:6px;padding-bottom:4px;border-bottom:1px solid #eaeaea}.day-row{display:flex;justify-content:space-between;align-items:baseline;padding:4px 0;font-size:13px;border-bottom:1px solid #f5f5f5}.day-row:last-child{border-bottom:none}.day-row.legacy{color:#999;font-style:italic}.day-name{flex:1;min-width:0}.day-name .day-sub{font-size:11px;color:#888;margin-left:4px}.day-hrs{font-weight:600;margin-left:8px;white-space:nowrap}.day-empty{font-size:12px;color:#888;padding:6px 0;font-style:italic}@media (max-width:640px){.day-cols{grid-template-columns:1fr;gap:8px}}.modal-ov{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:1000;display:flex;align-items:center;justify-content:center;padding:20px}.modal-pn{background:#fff;border-radius:12px;max-width:900px;width:100%;max-height:85vh;display:flex;flex-direction:column;box-shadow:0 8px 32px rgba(0,0,0,.2);overflow:hidden}.modal-hdr{display:flex;justify-content:space-between;align-items:center;padding:16px 20px;border-bottom:1px solid #eaeaea}.modal-hdr h2{margin:0;font-size:18px}.modal-body{padding:16px 20px;overflow:auto;flex:1}.modal-sec{margin-bottom:20px}.modal-sec h3{font-size:13px;font-weight:600;text-transform:uppercase;letter-spacing:.3px;color:#666;margin:0 0 10px}.bud-form{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:12px}.bud-form input,.bud-form select{font:inherit;font-size:13px;padding:8px 10px;border:1px solid #ddd;border-radius:6px;width:100%;box-sizing:border-box}.bud-form-actions{display:flex;justify-content:flex-end;gap:8px}.bud-form-actions .btn{padding:8px 16px}@media (max-width:640px){.bud-form{grid-template-columns:1fr 1fr}}summary.day-hdr{cursor:pointer;list-style:none;outline:none;user-select:none}summary.day-hdr::-webkit-details-marker{display:none}summary.day-hdr::before{content:'\25B8';color:#c8102e;margin-right:7px;font-size:11px}details[open]>summary.day-hdr::before{content:'\25BE'}details.day-card[open]>summary.day-hdr{margin-bottom:10px;padding-bottom:8px;border-bottom:1px solid #eaeaea}.day-date{flex:1;min-width:0}.day-prod{margin-bottom:12px}.day-prod .day-row.prod-row{cursor:pointer}.day-prod .day-row.prod-row:hover{background:#fafafa}.day-prod .day-row.prod-row{align-items:flex-start}.day-name .prod-title{display:block}.prod-meta{font-size:11px;color:#666;margin-top:2px;line-height:1.4}.prod-note{font-size:11px;color:#888;font-style:italic;margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%}.day-hrs .u{font-size:10px;color:#999;font-weight:500;text-transform:uppercase;margin-left:1px}</style>
+.vt{display:inline-flex;background:#f5f5f7;border-radius:8px;padding:3px;margin-bottom:14px;gap:2px}.vt button{font:inherit;font-size:13px;font-weight:600;padding:6px 14px;border:none;background:transparent;color:#666;cursor:pointer;border-radius:6px;transition:background .12s,color .12s;display:inline-flex;align-items:center;gap:6px}.vt button.on{background:#fff;color:#c8102e;box-shadow:0 1px 2px rgba(0,0,0,.06)}.vt button:not(.on):hover{color:#111}.day-card{background:#fff;border:1px solid #eaeaea;border-radius:8px;padding:12px 14px;margin-bottom:8px}.day-hdr{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:8px;font-weight:700;font-size:13px}.day-totals{font-weight:400;font-size:12px;color:#666}.day-cols{display:grid;grid-template-columns:1fr 1fr;gap:16px}.day-col-title{font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.3px;color:#666;margin-bottom:6px;padding-bottom:4px;border-bottom:1px solid #eaeaea}.day-row{display:flex;justify-content:space-between;align-items:baseline;padding:4px 0;font-size:13px;border-bottom:1px solid #f5f5f5}.day-row:last-child{border-bottom:none}.day-row.legacy{color:#999;font-style:italic}.day-name{flex:1;min-width:0}.day-name .day-sub{font-size:11px;color:#888;margin-left:4px}.day-hrs{font-weight:600;margin-left:8px;white-space:nowrap}.day-empty{font-size:12px;color:#888;padding:6px 0;font-style:italic}@media (max-width:640px){.day-cols{grid-template-columns:1fr;gap:8px}}.modal-ov{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:1000;display:flex;align-items:center;justify-content:center;padding:20px}.modal-pn{background:#fff;border-radius:12px;max-width:900px;width:100%;max-height:85vh;display:flex;flex-direction:column;box-shadow:0 8px 32px rgba(0,0,0,.2);overflow:hidden}.modal-hdr{display:flex;justify-content:space-between;align-items:center;padding:16px 20px;border-bottom:1px solid #eaeaea}.modal-hdr h2{margin:0;font-size:18px}.modal-body{padding:16px 20px;overflow:auto;flex:1}.modal-sec{margin-bottom:20px}.modal-sec h3{font-size:13px;font-weight:600;text-transform:uppercase;letter-spacing:.3px;color:#666;margin:0 0 10px}.bud-form{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:12px}.bud-form input,.bud-form select{font:inherit;font-size:13px;padding:8px 10px;border:1px solid #ddd;border-radius:6px;width:100%;box-sizing:border-box}.bud-form-actions{display:flex;justify-content:flex-end;gap:8px}.bud-form-actions .btn{padding:8px 16px}@media (max-width:640px){.bud-form{grid-template-columns:1fr 1fr}}summary.day-hdr{cursor:pointer;list-style:none;outline:none;user-select:none}summary.day-hdr::-webkit-details-marker{display:none}summary.day-hdr::before{content:'\25B8';color:#c8102e;margin-right:7px;font-size:11px}details[open]>summary.day-hdr::before{content:'\25BE'}details.day-card[open]>summary.day-hdr{margin-bottom:10px;padding-bottom:8px;border-bottom:1px solid #eaeaea}.day-date{flex:1;min-width:0}.day-prod{margin-bottom:12px}.day-prod .day-row.prod-row{cursor:pointer}.day-prod .day-row.prod-row:hover{background:#fafafa}.day-prod .day-row.prod-row{align-items:flex-start}.day-name .prod-title{display:block}.prod-meta{font-size:11px;color:#666;margin-top:2px;line-height:1.4}.prod-note{font-size:11px;color:#888;font-style:italic;margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%}.day-hrs .u{font-size:10px;color:#999;font-weight:500;text-transform:uppercase;margin-left:1px}
+/* ===== 2026-07-01.3 visual system: VH blue brand, dark mode, blueprint grid ===== */
+:root{--brand:#185FA5;--brand-d:#0C447C;--card:#fff;--grid:rgba(24,95,165,.045)}
+@media(prefers-color-scheme:dark){
+  :root{--bg:#101418;--bg2:#1a2027;--border:#2a323b;--text:#e8eaee;--text2:#9aa5b1;--text3:#69737f;
+        --card:#171d24;--grid:rgba(130,180,230,.05);--shadow:0 1px 3px rgba(0,0,0,.5)}
+}
+body{background:var(--bg);background-image:linear-gradient(var(--grid) 1px,transparent 1px),linear-gradient(90deg,var(--grid) 1px,transparent 1px);background-size:32px 32px;background-attachment:fixed}
+/* brand = blue; red now means ONLY over budget */
+.logo{background:var(--brand)}
+.btn-p{background:var(--brand);border-color:var(--brand)}
+.btn-p:hover{background:var(--brand-d)}
+.dpre button.on{background:var(--brand);border-color:var(--brand);color:#fff}
+.pbarfill{background:var(--brand)}
+.spinner{border-top-color:var(--brand)}
+.rb.admin{background:rgba(24,95,165,.14);color:var(--brand)}
+.vt button.on{color:var(--brand)}
+summary.day-hdr::before{color:var(--brand)}
+/* surfaces onto theme vars (enables dark mode) */
+.hdr,.k,.sec,.md,.cg select,.cg input,.btn,.dpre button,.day-card,.modal-pn,.bud-form input,.bud-form select{background:var(--card);color:var(--text)}
+.hdr{border-bottom-color:var(--border)}
+.btn:hover,.dpre button:hover:not(.on){background:var(--bg2)}
+.e:hover,.day-prod .day-row.prod-row:hover{background:var(--bg2)}
+.vt{background:var(--bg2)}
+.vt button{color:var(--text2)}
+.vt button.on{background:var(--card)}
+.vt button:not(.on):hover{color:var(--text)}
+.day-card,.modal-pn{border-color:var(--border)}
+.bud-form input,.bud-form select{border-color:var(--border)}
+.modal-hdr,.day-col-title,details.day-card[open]>summary.day-hdr{border-bottom-color:var(--border)}
+.day-row{border-bottom-color:var(--bg2)}
+.day-totals,.day-col-title,.day-empty,.day-name .day-sub,.prod-meta,.prod-note,.modal-sec h3{color:var(--text2)}
+@media(prefers-color-scheme:dark){
+  .toast{background:#e8eaee;color:#14181d}
+  .toast.err{background:#c0392b;color:#fff}
+  .rb{background:var(--bg2);color:var(--text2)}
+  .rb.manager{background:rgba(217,119,6,.18);color:#e2a04a}
+}
+/* KPI cards: gauge treatment — condensed display numerals + brand accent bar */
+.k{border-top:3px solid var(--brand);box-shadow:var(--shadow)}
+.k .val{font-family:'Barlow Condensed','Inter',sans-serif;font-size:26px;font-weight:600;letter-spacing:0}
+.k.feat .val{font-size:32px}
+.k .val.good{color:var(--green)}
+.k .val.bad{color:var(--red)}
+.e-yard{font-family:'Barlow Condensed','Inter',sans-serif;font-size:17px;font-weight:600}
+.sec{box-shadow:var(--shadow)}
+/* accessibility floor */
+:where(button,select,input,a,summary):focus-visible{outline:2px solid var(--brand);outline-offset:2px}
+@media(prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important}}
+</style>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js"></script>
 </head>
@@ -174,9 +223,34 @@ async function initMsal(){
 }
 async function signIn(){await mi.loginRedirect({scopes:SCOPES,prompt:'select_account'});}
 async function signOut(){await mi.logoutRedirect();}
-async function getToken(){
+const VH_PROD_BUILD='2026-07-01.4';
+console.log('[VH] Production dashboard build',VH_PROD_BUILD);
+let __vhAuthToastAt=0;
+async function getToken(interactive){
   try{const r=await mi.acquireTokenSilent({scopes:SCOPES,account:auth.account});return r.accessToken;}
-  catch(e){if(e instanceof msal.InteractionRequiredAuthError)await mi.acquireTokenRedirect({scopes:SCOPES,account:auth.account});return null;}
+  catch(e){
+    if(e instanceof msal.InteractionRequiredAuthError){
+      if(interactive){await mi.acquireTokenRedirect({scopes:SCOPES,account:auth.account});}
+      else if(Date.now()-__vhAuthToastAt>60000){__vhAuthToastAt=Date.now();toast('Session expired — sign in again to refresh data.','err');}
+    }
+    return null;
+  }
+}
+// Follow @odata.nextLink until the WHOLE list is in — a single $top page silently
+// truncates once the list grows past the page size and every KPI goes stale.
+async function vhGetAll(tok,url,label){
+  const out=[];
+  let next=url,pages=0;
+  while(next&&pages<50){ // hard cap: 50 pages ≈ 50k rows
+    const r=await fetch(next,{headers:{Authorization:'Bearer '+tok}});
+    if(!r.ok)throw new Error((label||'fetch')+' Graph '+r.status);
+    const j=await r.json();
+    if(j.value)out.push(...j.value);
+    next=j['@odata.nextLink']||null;
+    pages++;
+  }
+  if(next)console.warn('[VH]',label,'hit 50-page cap —',out.length,'rows loaded, more exist');
+  return out;
 }
 
 // === DATA ===
@@ -212,13 +286,11 @@ async function loadData(){
     }
 
     const fields='Id,Title,Date,Foreman,Jobnumber,Phase,Yardage_x002f_production,Unit,BidCost,ActualCost,TotalCost,Bid_x0020_Cost_x0020_Per_x0020_Y,Actual_x0020_Cost_x0020_Per_x002,Labor_x0020_Hours,Crew_x0020_Size,Production_x0020_Hours,Equipment,STR_x0020_ID,Work_x0020_Type,Notes';
-    const url=`https://graph.microsoft.com/v1.0/sites/${FD_SITE}/lists/${FD_LIST}/items?$expand=fields($select=${fields})&$top=500`;
-    const r=await fetch(url,{headers:{Authorization:'Bearer '+tok}});
-    if(!r.ok)throw new Error('Graph '+r.status);
-    const j=await r.json();
+    const url=`https://graph.microsoft.com/v1.0/sites/${FD_SITE}/lists/${FD_LIST}/items?$expand=fields($select=${fields})&$top=999`;
+    const items=await vhGetAll(tok,url,'Field Data');
     // Keep every row with a date and a numeric phase; the view split (earth 0–399 / util 400+)
     // is applied later by phaseInView, so no earthwork phase gets dropped at load.
-    S.rows=(j.value||[]).map(it=>it.fields).filter(f=>f&&f.Date&&!isNaN(parseInt(f.Phase,10)));
+    S.rows=items.map(it=>it.fields).filter(f=>f&&f.Date&&!isNaN(parseInt(f.Phase,10)));
     S.foremen=[...new Set(S.rows.map(r=>r.Foreman).filter(Boolean))].sort();
     S.jobs=[...new Set(S.rows.map(r=>r.Jobnumber).filter(Boolean))].sort();
     S.phases=[...new Set(S.rows.map(r=>r.Phase).filter(Boolean))].sort();
@@ -231,23 +303,19 @@ async function loadData(){
 async function loadBudgets(){
   try{
     const tok=await getToken();if(!tok)return;
-    const url='https://graph.microsoft.com/v1.0/sites/'+FD_SITE+'/lists/'+BUDGETS_LIST+'/items?$expand=fields($select=JobNumber,JobName,Phase,PhaseType,BidCost,BidQty,QtyUnit,BidHours,BidEquip,BidLabor,BidMaterial,BidFringe,BidBurden)&$top=200';
-    const r=await fetch(url,{headers:{Authorization:'Bearer '+tok}});
-    if(!r.ok)return;
-    const j=await r.json();
+    const url='https://graph.microsoft.com/v1.0/sites/'+FD_SITE+'/lists/'+BUDGETS_LIST+'/items?$expand=fields($select=JobNumber,JobName,Phase,PhaseType,BidCost,BidQty,QtyUnit,BidHours,BidEquip,BidLabor,BidMaterial,BidFringe,BidBurden)&$top=999';
+    const items=await vhGetAll(tok,url,'Budgets');
     S.budgets={};
-    (j.value||[]).forEach(it=>{const b=Object.assign({__id:it.id},it.fields||{});S.budgets[b.JobNumber+'-'+b.Phase]=b;});
+    items.forEach(it=>{const b=Object.assign({__id:it.id},it.fields||{});S.budgets[b.JobNumber+'-'+b.Phase]=b;});
   }catch(e){console.warn('loadBudgets:',e);}
 }
 async function loadJobLines(){
   try{
     const tok=await getToken();if(!tok)return;
     const fields='WorkDate,EmployeeName,EmployeeTitle,Hours,Equipment,Jobnumber,Phase,SubmittedBy';
-    const url='https://graph.microsoft.com/v1.0/sites/'+FD_SITE+'/lists/'+TSJL_LIST+'/items?$expand=fields($select='+fields+')&$top=1000';
-    const r=await fetch(url,{headers:{Authorization:'Bearer '+tok}});
-    if(!r.ok)return;
-    const j=await r.json();
-    S.jobLines=(j.value||[]).map(it=>it.fields).filter(f=>f&&f.WorkDate);
+    const url='https://graph.microsoft.com/v1.0/sites/'+FD_SITE+'/lists/'+TSJL_LIST+'/items?$expand=fields($select='+fields+')&$top=999';
+    const items=await vhGetAll(tok,url,'TimesheetJobLines');
+    S.jobLines=items.map(it=>it.fields).filter(f=>f&&f.WorkDate);
   }catch(e){console.warn('loadJobLines:',e);}
 }
 function parseEquipment(s){
@@ -525,7 +593,7 @@ function render(){
           <input type="date" value="${S.dateTo}" onchange="setDate('to',this.value)">
         </div>
         <div class="cg" style="margin-left:auto">
-          <button class="btn btn-sm" onclick="refresh()"><i class="ti ti-refresh"></i> Refresh</button>
+          <button class="btn btn-sm" onclick="location.href='index.html'"><i class="ti ti-clock"></i> Timesheets</button><button class="btn btn-sm" onclick="location.href='tracker.html'"><i class="ti ti-map-2"></i> Job trackers</button><button class="btn btn-sm" onclick="refresh()"><i class="ti ti-refresh"></i> Refresh</button>
         </div>
       </div>
 
@@ -742,10 +810,19 @@ async function saveBudget(){
   const bd=parseFloat(gv('bud-bd'));if(!isNaN(bd))payload.BidBurden=bd;
   try{
     const tok=await getToken();if(!tok){toast('Auth failed','err');return;}
-    const url='https://graph.microsoft.com/v1.0/sites/'+FD_SITE+'/lists/'+BUDGETS_LIST+'/items';
-    const r=await fetch(url,{method:'POST',headers:{Authorization:'Bearer '+tok,'Content-Type':'application/json'},body:JSON.stringify({fields:payload})});
+    // Upsert: if this JobNumber-Phase already has a budget row, PATCH it instead of
+    // stacking a duplicate list item (dupes silently shadowed each other before).
+    const existing=S.budgets[jn+'-'+ph];
+    let r;
+    if(existing&&existing.__id){
+      const url='https://graph.microsoft.com/v1.0/sites/'+FD_SITE+'/lists/'+BUDGETS_LIST+'/items/'+existing.__id+'/fields';
+      r=await fetch(url,{method:'PATCH',headers:{Authorization:'Bearer '+tok,'Content-Type':'application/json'},body:JSON.stringify(payload)});
+    }else{
+      const url='https://graph.microsoft.com/v1.0/sites/'+FD_SITE+'/lists/'+BUDGETS_LIST+'/items';
+      r=await fetch(url,{method:'POST',headers:{Authorization:'Bearer '+tok,'Content-Type':'application/json'},body:JSON.stringify({fields:payload})});
+    }
     if(!r.ok){const t=await r.text();toast('Save failed: '+t.slice(0,120),'err');return;}
-    toast('Budget added','ok');
+    toast(existing?'Budget updated':'Budget added','ok');
     ['bud-jn','bud-jname','bud-ph','bud-bc','bud-bq','bud-bh','bud-eq','bud-lb','bud-mt','bud-fr','bud-bd'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});
     await loadBudgets();render();
   }catch(e){toast('Error: '+e.message,'err');}
@@ -787,7 +864,7 @@ function setForeman(v){S.selectedForeman=v;render();}
 function setJob(v){S.selectedJob=v;render();}
 function setPhase(v){S.selectedPhase=v;render();}
 function setDate(which,v){if(which==='from')S.dateFrom=v;else S.dateTo=v;render();}
-async function refresh(){toast('Refreshing...');await loadData();render();toast('Updated.');}
+async function refresh(){toast('Refreshing...');await Promise.all([loadData(),loadBudgets(),loadJobLines()]);render();toast('Updated — '+S.rows.length+' production rows, '+S.jobLines.length+' hour rows.');}
 function toast(msg,type){
   const t=document.createElement('div');
   t.className='toast'+(type==='err'?' err':'');

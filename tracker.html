@@ -1,0 +1,582 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#185FA5">
+<title>VH Job Trackers</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Inter:wght@400;500;600;700;800&display=swap">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@2.47.0/tabler-icons.min.css">
+<script src="https://cdn.jsdelivr.net/npm/@azure/msal-browser@2.38.3/lib/msal-browser.min.js"></script>
+<style>
+:root{
+  --bg:#fafafa;--bg2:#f0f0f0;--border:#e5e5e5;--text:#111;--text2:#555;--text3:#888;
+  --brand:#185FA5;--brand-d:#0C447C;--red:#c8102e;--green:#16a34a;--amber:#d97706;
+  --card:#fff;--grid:rgba(24,95,165,.045);--shadow:0 1px 2px rgba(0,0,0,.04);
+}
+@media(prefers-color-scheme:dark){
+  :root{--bg:#101418;--bg2:#1a2027;--border:#2a323b;--text:#e8eaee;--text2:#9aa5b1;--text3:#69737f;
+        --card:#171d24;--grid:rgba(130,180,230,.05);--shadow:0 1px 3px rgba(0,0,0,.5)}
+}
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+html,body{font-family:'Inter',-apple-system,BlinkMacSystemFont,sans-serif;color:var(--text);background:var(--bg);-webkit-font-smoothing:antialiased}
+body{min-height:100vh;padding-bottom:env(safe-area-inset-bottom);
+  background-image:linear-gradient(var(--grid) 1px,transparent 1px),linear-gradient(90deg,var(--grid) 1px,transparent 1px);
+  background-size:32px 32px;background-attachment:fixed}
+.num{font-family:'Barlow Condensed','Inter',sans-serif;font-weight:600;letter-spacing:0;font-variant-numeric:tabular-nums}
+/* Header */
+.hdr{background:var(--card);border-bottom:1px solid var(--border);padding:12px 16px;position:sticky;top:0;z-index:20}
+.hdr-in{max-width:1050px;margin:0 auto;display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}
+.brand{display:flex;align-items:center;gap:10px;font-weight:700;font-size:16px;letter-spacing:-.3px;cursor:pointer}
+.logo{width:30px;height:30px;background:var(--brand);color:#fff;border-radius:6px;display:grid;place-items:center;font-size:13px;font-weight:800;flex-shrink:0}
+.hbtns{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.container{max-width:1050px;margin:0 auto;padding:14px 16px 40px}
+/* Buttons */
+.btn{font:inherit;font-size:13px;padding:8px 12px;border-radius:6px;border:1px solid var(--border);background:var(--card);cursor:pointer;color:var(--text);display:inline-flex;align-items:center;gap:6px;white-space:nowrap}
+.btn:hover{background:var(--bg2)}
+.btn-p{background:var(--brand);color:#fff;border-color:var(--brand)}
+.btn-p:hover{background:var(--brand-d)}
+.btn-sm{font-size:12px;padding:5px 10px}
+.btn:disabled{opacity:.5;cursor:default}
+/* KPI cards */
+.kg{display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin-bottom:14px}
+@media(min-width:560px){.kg{grid-template-columns:repeat(5,1fr)}}
+.k{background:var(--card);border:1px solid var(--border);border-top:3px solid var(--brand);border-radius:8px;padding:11px 12px;box-shadow:var(--shadow);min-width:0}
+.k .lbl{font-size:10px;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:.4px;margin-bottom:5px}
+.k .val{font-family:'Barlow Condensed','Inter',sans-serif;font-size:26px;font-weight:600;line-height:1.05}
+.k .sub{font-size:10px;color:var(--text3);margin-top:3px}
+.val.good{color:var(--green)}.val.bad{color:var(--red)}
+/* Sections */
+.sec{background:var(--card);border:1px solid var(--border);border-radius:8px;padding:14px;margin-bottom:14px;box-shadow:var(--shadow)}
+.sec h2{font-size:14px;font-weight:700;margin-bottom:10px;letter-spacing:-.3px;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.h2-sub{font-size:11px;color:var(--text3);font-weight:500}
+/* Portfolio job cards */
+.jcard{display:block;width:100%;text-align:left;background:var(--card);border:1px solid var(--border);border-radius:8px;padding:13px 14px;margin-bottom:10px;cursor:pointer;box-shadow:var(--shadow);font:inherit;color:var(--text)}
+.jcard:hover{border-color:var(--brand)}
+.jtop{display:flex;justify-content:space-between;align-items:baseline;gap:10px;margin-bottom:7px}
+.jname{font-weight:700;font-size:15px;letter-spacing:-.2px}
+.jpct{font-family:'Barlow Condensed','Inter',sans-serif;font-size:22px;font-weight:600;color:var(--brand)}
+.jmeta{display:flex;gap:14px;font-size:11.5px;color:var(--text2);flex-wrap:wrap;margin-bottom:8px}
+.jmeta b{color:var(--text);font-weight:600}
+.pbar{height:5px;background:var(--bg2);border-radius:3px;overflow:hidden}
+.pbarfill{height:100%;background:var(--brand);transition:width .3s;border-radius:3px}
+.pbarfill.done{background:var(--green)}
+/* Phase filter chips */
+.chips{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px}
+.chip{font:inherit;font-size:12px;font-weight:600;padding:6px 12px;border-radius:16px;border:1px solid var(--border);background:var(--card);color:var(--text2);cursor:pointer}
+.chip.on{background:var(--brand);border-color:var(--brand);color:#fff}
+/* Phase summary strip */
+.pstrip{display:flex;gap:14px;flex-wrap:wrap;font-size:11.5px;color:var(--text2);padding:8px 10px;background:var(--bg2);border-radius:6px;margin-bottom:10px}
+.pstrip b{font-family:'Barlow Condensed','Inter',sans-serif;font-size:15px;font-weight:600;color:var(--text)}
+.pstrip .ov{color:var(--red)}.pstrip .un{color:var(--green)}
+/* Area header */
+.area-h{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--text2);margin:14px 0 6px;display:flex;justify-content:space-between;gap:8px}
+.area-h .ah-num{font-family:'Barlow Condensed','Inter',sans-serif;font-size:13px}
+/* Run rows */
+.run{display:flex;align-items:center;gap:10px;padding:8px 2px;border-bottom:1px solid var(--bg2)}
+.run:last-child{border-bottom:none}
+.run-id{font-weight:700;font-size:13px;min-width:74px;letter-spacing:-.2px}
+.run-desc{flex:1;min-width:0;font-size:11.5px;color:var(--text2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.run-bid{font-family:'Barlow Condensed','Inter',sans-serif;font-size:14px;font-weight:600;min-width:52px;text-align:right;color:var(--text2)}
+.run-bid b{color:var(--text)}
+/* Pct segmented control */
+.pcts{display:flex;border:1px solid var(--border);border-radius:6px;overflow:hidden;flex-shrink:0}
+.pcts button{font:inherit;font-size:11px;font-weight:600;padding:7px 0;width:34px;border:none;background:var(--card);color:var(--text3);cursor:pointer;border-right:1px solid var(--border)}
+.pcts button:last-child{border-right:none}
+.pcts button.on{background:var(--brand);color:#fff}
+.pcts button.on.full{background:var(--green)}
+@media(max-width:520px){.run-desc{display:none}.pcts button{width:38px;padding:9px 0}}
+/* Lot chips (laterals) */
+.lots{display:flex;gap:7px;flex-wrap:wrap}
+.lot{font:inherit;font-size:12px;font-weight:700;min-width:46px;padding:9px 8px;border-radius:6px;border:1px solid var(--border);background:var(--card);color:var(--text2);cursor:pointer;text-align:center}
+.lot.done{background:var(--green);border-color:var(--green);color:#fff}
+/* Import */
+.imp textarea{width:100%;height:150px;font:12px/1.5 'SF Mono',Menlo,Consolas,monospace;padding:10px;border:1px solid var(--border);border-radius:6px;background:var(--card);color:var(--text);resize:vertical}
+.frow{display:flex;gap:10px;flex-wrap:wrap;margin:10px 0}
+.fg{display:flex;flex-direction:column;gap:4px}
+.fg label{font-size:10px;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:.4px}
+.fg input,.fg select{font:inherit;font-size:13px;padding:7px 9px;border:1px solid var(--border);border-radius:6px;background:var(--card);color:var(--text);min-width:110px}
+.map-tbl{width:100%;font-size:12px;border-collapse:collapse;margin-top:8px}
+.map-tbl th{font-size:10px;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:.4px;text-align:left;padding:6px;border-bottom:1px solid var(--border)}
+.map-tbl td{padding:5px 6px;border-bottom:1px solid var(--bg2);font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:180px}
+.prog{height:6px;background:var(--bg2);border-radius:3px;overflow:hidden;margin-top:10px}
+.progfill{height:100%;background:var(--brand);transition:width .2s}
+/* Empty / loading / auth */
+.empty,.loading{padding:36px 16px;text-align:center;color:var(--text2);font-size:14px}
+.spinner{display:inline-block;width:28px;height:28px;border:3px solid var(--bg2);border-top-color:var(--brand);border-radius:50%;animation:spin .8s linear infinite;margin-bottom:10px}
+@keyframes spin{to{transform:rotate(360deg)}}
+.auth{display:grid;place-items:center;min-height:80vh;padding:20px}
+.auth .card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:28px;max-width:360px;text-align:center;box-shadow:var(--shadow)}
+/* Toast */
+.toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:#e8eaee;color:#14181d;padding:10px 16px;border-radius:6px;font-size:13px;z-index:200;box-shadow:0 4px 20px rgba(0,0,0,.25);animation:fadeIn .15s;max-width:90vw;text-align:center}
+@media(prefers-color-scheme:light){.toast{background:#111;color:#fff}}
+.toast.err{background:var(--red);color:#fff}
+@keyframes fadeIn{from{opacity:0}}
+.note{font-size:11.5px;color:var(--text3);line-height:1.5}
+:where(button,select,input,a,textarea):focus-visible{outline:2px solid var(--brand);outline-offset:2px}
+@media(prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important}}
+</style>
+</head>
+<body>
+<div id="app"><div class="loading"><div class="spinner"></div><div>Loading...</div></div></div>
+<div id="toasts"></div>
+<script>
+// === CONFIG (shared with production.html) ===
+const CLIENT_ID='127c307a-e672-4d13-b5e9-c3b96fb34759';
+const TENANT_ID='1585f578-f5d3-41e6-a437-9c59bd33fbcf';
+const SCOPES=['Files.ReadWrite','Files.ReadWrite.All','Sites.ReadWrite.All','User.Read','offline_access'];
+const FD_SITE='valentiheld.sharepoint.com,faa2c371-4166-4fc1-aed9-bf6ff65c7034,d89c0495-1617-4429-b05b-7addf584b82e';
+const TS_SITE='valentiheld.sharepoint.com,155c9359-7fd3-4f2c-8c6a-b04a722b6f64,801969a1-b2a1-4f9a-8c3a-05ae5405e710';
+const TSJL_LIST='228b5d0b-c95c-4bd0-a9b2-b963d767b7d2';
+const FALLBACK_ADMINS=['dmorris@valentiheld.com','abewley@valentiheld.com','jroe@valentiheld.com','jtrenkamp@valentiheld.com','cbroeker@valentiheld.com','eroe@valentiheld.com','cwaters@valentiheld.com','mzielinski@valentiheld.com','mjanson@valentiheld.com','kpero@valentiheld.com','jschuetz@valentiheld.com'];
+const SCOPE_LIST_NAME='JobScope';
+const STATUS_LIST_NAME='TrackerStatus';
+const PHASE_LABELS={'300':'Earth — Mass','310':'Earth — Finish','400':'Storm','450':'Storm — Other','500':'Sanitary','600':'Water'};
+const VH_TRK_BUILD='2026-07-01.4';
+console.log('[VH] Job Trackers build',VH_TRK_BUILD);
+
+let mi;
+let auth={user:null,account:null,isAdmin:false};
+let S={view:'portfolio',job:'',phase:'ALL',lists:null,scope:[],status:{},jobLines:[],loaded:false,imp:null,busy:false};
+
+// === MSAL ===
+async function initMsal(){
+  if(typeof msal==='undefined'||!msal.PublicClientApplication){throw new Error('MSAL failed to load from CDN.');}
+  mi=new msal.PublicClientApplication({
+    auth:{clientId:CLIENT_ID,authority:`https://login.microsoftonline.com/${TENANT_ID}`,redirectUri:window.location.origin+window.location.pathname},
+    cache:{cacheLocation:'localStorage'}
+  });
+  await mi.initialize();
+  await mi.handleRedirectPromise();
+  const accs=mi.getAllAccounts();
+  if(accs.length>0){
+    auth.account=accs[0];
+    auth.user={name:accs[0].name,email:(accs[0].username||'').toLowerCase()};
+    await loadRoles();
+    await ensureLists();
+    if(S.lists){await loadAll();}
+    render();
+  } else renderAuth();
+}
+async function signIn(){await mi.loginRedirect({scopes:SCOPES,prompt:'select_account'});}
+async function signOut(){await mi.logoutRedirect();}
+let __authToastAt=0;
+async function getToken(interactive){
+  try{const r=await mi.acquireTokenSilent({scopes:SCOPES,account:auth.account});return r.accessToken;}
+  catch(e){
+    if(e instanceof msal.InteractionRequiredAuthError){
+      if(interactive){await mi.acquireTokenRedirect({scopes:SCOPES,account:auth.account});}
+      else if(Date.now()-__authToastAt>60000){__authToastAt=Date.now();toast('Session expired — sign in again to refresh.','err');}
+    }
+    return null;
+  }
+}
+async function loadRoles(){
+  try{
+    const tok=await getToken();if(!tok)throw new Error('no token');
+    const r=await fetch(`https://graph.microsoft.com/v1.0/sites/${TS_SITE}/drive/root:/vhts-state.json:/content`,{headers:{Authorization:'Bearer '+tok}});
+    if(r.ok){const j=await r.json();auth.isAdmin=(j.adminEmails||[]).map(e=>(e||'').toLowerCase()).includes(auth.user.email);return;}
+    throw new Error('no state file');
+  }catch(e){auth.isAdmin=FALLBACK_ADMINS.includes(auth.user.email);}
+}
+// Paginated GET — same rationale as production.html: a single page silently truncates.
+async function vhGetAll(tok,url,label){
+  const out=[];let next=url,pages=0;
+  while(next&&pages<50){
+    const r=await fetch(next,{headers:{Authorization:'Bearer '+tok}});
+    if(!r.ok)throw new Error((label||'fetch')+' Graph '+r.status);
+    const j=await r.json();
+    if(j.value)out.push(...j.value);
+    next=j['@odata.nextLink']||null;pages++;
+  }
+  if(next)console.warn('[VH]',label,'hit 50-page cap');
+  return out;
+}
+
+// === LIST DISCOVERY / CREATION ===
+// Lists are found by displayName so nobody ever pastes a GUID; ids cached per-browser.
+async function ensureLists(){
+  const cached=localStorage.getItem('vhtrk_lists');
+  if(cached){try{S.lists=JSON.parse(cached);return;}catch(e){}}
+  const tok=await getToken();if(!tok)return;
+  try{
+    const lists=await vhGetAll(tok,`https://graph.microsoft.com/v1.0/sites/${FD_SITE}/lists?$select=id,displayName&$top=200`,'lists');
+    const find=n=>lists.find(l=>(l.displayName||'').toLowerCase()===n.toLowerCase());
+    const sc=find(SCOPE_LIST_NAME),st=find(STATUS_LIST_NAME);
+    if(sc&&st){S.lists={scope:sc.id,status:st.id};localStorage.setItem('vhtrk_lists',JSON.stringify(S.lists));}
+    else S.lists=null; // triggers setup screen
+  }catch(e){console.warn('ensureLists:',e);S.lists=null;}
+}
+async function createLists(){
+  if(S.busy)return;S.busy=true;render();
+  try{
+    const tok=await getToken(true);if(!tok)throw new Error('no token');
+    const mk=async(body)=>{
+      const r=await fetch(`https://graph.microsoft.com/v1.0/sites/${FD_SITE}/lists`,{
+        method:'POST',headers:{Authorization:'Bearer '+tok,'Content-Type':'application/json'},body:JSON.stringify(body)});
+      if(!r.ok){const t=await r.text();throw new Error('create list '+r.status+': '+t.slice(0,200));}
+      return (await r.json()).id;
+    };
+    const txt=n=>({name:n,text:{}}), num=n=>({name:n,number:{}});
+    const scopeId=await mk({displayName:SCOPE_LIST_NAME,list:{template:'genericList'},
+      columns:[txt('JobNum'),txt('Phase'),txt('Discipline'),txt('ItemType'),txt('Descr'),num('BidHrs'),num('BidQty'),txt('Unit'),txt('Area')]});
+    const statusId=await mk({displayName:STATUS_LIST_NAME,list:{template:'genericList'},
+      columns:[txt('JobNum'),txt('ItemID'),num('PctDone'),txt('Note')]});
+    S.lists={scope:scopeId,status:statusId};
+    localStorage.setItem('vhtrk_lists',JSON.stringify(S.lists));
+    toast('Lists created on Field Operations site');
+    await loadAll();
+  }catch(e){toast('Create failed: '+e.message,'err');}
+  S.busy=false;render();
+}
+
+// === DATA ===
+async function loadAll(){
+  try{
+    const tok=await getToken();if(!tok)return;
+    const [scopeItems,statusItems,jlItems]=await Promise.all([
+      vhGetAll(tok,`https://graph.microsoft.com/v1.0/sites/${FD_SITE}/lists/${S.lists.scope}/items?$expand=fields&$top=999`,'JobScope'),
+      vhGetAll(tok,`https://graph.microsoft.com/v1.0/sites/${FD_SITE}/lists/${S.lists.status}/items?$expand=fields&$top=999`,'TrackerStatus'),
+      // No $select on fields: when the ItemID column lands on TimesheetJobLines it flows in automatically.
+      vhGetAll(tok,`https://graph.microsoft.com/v1.0/sites/${FD_SITE}/lists/${TSJL_LIST}/items?$expand=fields&$top=999`,'TimesheetJobLines')
+    ]);
+    S.scope=scopeItems.map(it=>({spId:it.id,ItemID:it.fields.Title||'',JobNum:String(it.fields.JobNum||'').trim(),
+      Phase:String(it.fields.Phase||'').trim(),Discipline:it.fields.Discipline||'',ItemType:(it.fields.ItemType||'run').toLowerCase(),
+      Descr:it.fields.Descr||'',BidHrs:+it.fields.BidHrs||0,BidQty:+it.fields.BidQty||0,Unit:it.fields.Unit||'',Area:it.fields.Area||''}))
+      .filter(r=>r.ItemID&&r.JobNum);
+    S.status={};
+    statusItems.forEach(it=>{
+      const k=String(it.fields.JobNum||'').trim()+'|'+String(it.fields.ItemID||'').trim();
+      S.status[k]={spId:it.id,pct:Math.max(0,Math.min(100,+it.fields.PctDone||0)),note:it.fields.Note||''};
+    });
+    S.jobLines=jlItems.map(it=>it.fields).filter(f=>f&&f.WorkDate);
+    S.loaded=true;
+  }catch(e){console.warn('loadAll:',e);toast('Load failed: '+e.message,'err');}
+}
+async function refresh(){toast('Refreshing…');await loadAll();render();toast('Up to date');}
+
+// === STATUS UPSERT (PATCH-if-exists-else-POST, optimistic UI) ===
+const __pending={};
+async function setPct(job,itemId,pct){
+  const k=job+'|'+itemId;
+  const prev=S.status[k]?{...S.status[k]}:null;
+  S.status[k]=Object.assign({spId:prev?prev.spId:null,note:prev?prev.note:''},{pct});
+  render(); // optimistic
+  if(__pending[k])clearTimeout(__pending[k]);
+  __pending[k]=setTimeout(async()=>{
+    delete __pending[k];
+    try{
+      const tok=await getToken(true);if(!tok)throw new Error('no token');
+      const cur=S.status[k];
+      if(cur.spId){
+        const r=await fetch(`https://graph.microsoft.com/v1.0/sites/${FD_SITE}/lists/${S.lists.status}/items/${cur.spId}/fields`,{
+          method:'PATCH',headers:{Authorization:'Bearer '+tok,'Content-Type':'application/json','If-Match':'*'},
+          body:JSON.stringify({PctDone:cur.pct})});
+        if(!r.ok)throw new Error('PATCH '+r.status);
+      }else{
+        const r=await fetch(`https://graph.microsoft.com/v1.0/sites/${FD_SITE}/lists/${S.lists.status}/items`,{
+          method:'POST',headers:{Authorization:'Bearer '+tok,'Content-Type':'application/json'},
+          body:JSON.stringify({fields:{Title:k,JobNum:job,ItemID:itemId,PctDone:cur.pct}})});
+        if(!r.ok)throw new Error('POST '+r.status);
+        const j=await r.json();S.status[k].spId=j.id;
+      }
+    }catch(e){
+      if(prev)S.status[k]=prev;else delete S.status[k];
+      render();toast('Save failed for '+itemId+' — change reverted','err');
+    }
+  },450); // debounce rapid taps on the same run
+}
+function pctOf(job,itemId){const s=S.status[job+'|'+itemId];return s?s.pct:0;}
+
+// === MATH ===
+function actualByJobPhase(job){
+  const m={};
+  S.jobLines.forEach(l=>{
+    if(String(l.Jobnumber||'').trim()!==job)return;
+    const ph=String(l.Phase||'').trim()||'?';
+    m[ph]=(m[ph]||0)+(+l.Hours||0);
+  });
+  return m;
+}
+function actualByItem(job){ // becomes live once ItemID lands on TimesheetJobLines
+  const m={};let any=false;
+  S.jobLines.forEach(l=>{
+    if(String(l.Jobnumber||'').trim()!==job)return;
+    const id=String(l.ItemID||'').trim();
+    if(!id)return;any=true;
+    m[id]=(m[id]||0)+(+l.Hours||0);
+  });
+  return any?m:null;
+}
+function jobSummary(job){
+  const rows=S.scope.filter(r=>r.JobNum===job);
+  let bid=0,earned=0;
+  rows.forEach(r=>{bid+=r.BidHrs;earned+=r.BidHrs*pctOf(job,r.ItemID)/100;});
+  const act=actualByJobPhase(job);
+  const actual=Object.values(act).reduce((a,b)=>a+b,0);
+  return {bid,earned,actual,pct:bid?earned/bid*100:0,items:rows.length};
+}
+function fmt(n){return (Math.round(n*10)/10).toLocaleString();}
+function fmt0(n){return Math.round(n).toLocaleString();}
+
+// === RENDER ===
+function esc(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
+function toast(msg,cls){
+  const t=document.createElement('div');t.className='toast'+(cls?' '+cls:'');t.textContent=msg;
+  document.getElementById('toasts').appendChild(t);setTimeout(()=>t.remove(),2600);
+}
+function hdr(){
+  return `<div class="hdr"><div class="hdr-in">
+    <div class="brand" onclick="S.view='portfolio';S.job='';render()"><div class="logo">VH</div>Job Trackers</div>
+    <div class="hbtns">
+      ${auth.isAdmin?`<button class="btn btn-sm" onclick="S.view='import';render()"><i class="ti ti-file-import"></i> Import scope</button>`:''}
+      <button class="btn btn-sm" onclick="location.href='production.html'"><i class="ti ti-chart-bar"></i> Dashboard</button>
+      <button class="btn btn-sm" onclick="location.href='index.html'"><i class="ti ti-clock"></i> Timesheets</button>
+      <button class="btn btn-sm" onclick="refresh()"><i class="ti ti-refresh"></i></button>
+      <button class="btn btn-sm" onclick="signOut()"><i class="ti ti-logout"></i></button>
+    </div></div></div>`;
+}
+function renderAuth(){
+  document.getElementById('app').innerHTML=`<div class="auth"><div class="card">
+    <div class="logo" style="width:44px;height:44px;font-size:18px;margin:0 auto 14px">VH</div>
+    <h2 style="font-size:18px;margin-bottom:6px">VH Job Trackers</h2>
+    <p style="font-size:13px;color:var(--text2);margin-bottom:18px">Live bid vs. earned vs. burned, per run and per lot.</p>
+    <button class="btn btn-p" style="width:100%;justify-content:center" onclick="signIn()"><i class="ti ti-brand-windows"></i> Sign in with Microsoft</button>
+  </div></div>`;
+}
+function renderSetup(){
+  return `<div class="sec"><h2><i class="ti ti-database-plus"></i> One-time setup</h2>
+    <p class="note" style="margin-bottom:12px">Two lists are needed on the <b>Field Operations</b> site:
+    <b>${SCOPE_LIST_NAME}</b> (every run / lot / phase with bid hours) and <b>${STATUS_LIST_NAME}</b> (percent-complete per item).
+    ${auth.isAdmin?'Tap once and they\'ll be created with the right columns.':'Ask an admin to open this page and run setup.'}</p>
+    ${auth.isAdmin?`<button class="btn btn-p" ${S.busy?'disabled':''} onclick="createLists()">${S.busy?'Creating…':'Create both lists now'}</button>`:''}
+  </div>`;
+}
+function renderPortfolio(){
+  const jobs=[...new Set(S.scope.map(r=>r.JobNum))].sort();
+  if(!jobs.length)return `<div class="sec"><div class="empty"><i class="ti ti-clipboard-list" style="font-size:34px;display:block;margin-bottom:8px"></i>
+    No scope loaded yet.${auth.isAdmin?' Use <b>Import scope</b> to paste run tables from the Excel trackers.':''}</div></div>`;
+  let tot={bid:0,earned:0,actual:0};
+  const cards=jobs.map(j=>{
+    const s=jobSummary(j);tot.bid+=s.bid;tot.earned+=s.earned;tot.actual+=s.actual;
+    const over=s.actual>s.earned+0.5;
+    return `<button class="jcard" onclick="S.view='job';S.job='${esc(j)}';S.phase='ALL';render()">
+      <div class="jtop"><span class="jname">${esc(j)}</span><span class="jpct">${fmt0(s.pct)}%</span></div>
+      <div class="jmeta"><span>Bid <b class="num">${fmt0(s.bid)}</b> hrs</span><span>Earned <b class="num">${fmt0(s.earned)}</b></span>
+      <span>Burned <b class="num" style="color:${over?'var(--red)':'inherit'}">${fmt0(s.actual)}</b></span><span>${s.items} items</span></div>
+      <div class="pbar"><div class="pbarfill${s.pct>=99.5?' done':''}" style="width:${Math.min(100,s.pct)}%"></div></div>
+    </button>`;
+  }).join('');
+  const ppct=tot.bid?tot.earned/tot.bid*100:0;
+  return `<div class="kg">
+      <div class="k"><div class="lbl">Jobs</div><div class="val">${jobs.length}</div></div>
+      <div class="k"><div class="lbl">Bid hrs</div><div class="val">${fmt0(tot.bid)}</div></div>
+      <div class="k"><div class="lbl">Earned</div><div class="val">${fmt0(tot.earned)}</div></div>
+      <div class="k"><div class="lbl">Burned</div><div class="val${tot.actual>tot.earned+0.5?' bad':''}">${fmt0(tot.actual)}</div></div>
+      <div class="k"><div class="lbl">Portfolio</div><div class="val">${fmt0(ppct)}%</div><div class="sub">earned / bid</div></div>
+    </div>${cards}`;
+}
+function renderJob(){
+  const job=S.job;
+  const rows=S.scope.filter(r=>r.JobNum===job);
+  if(!rows.length)return `<div class="sec"><div class="empty">No scope rows for ${esc(job)}.</div></div>`;
+  const phases=[...new Set(rows.map(r=>r.Phase))].sort();
+  const s=jobSummary(job);
+  const actPh=actualByJobPhase(job);
+  const actItem=actualByItem(job);
+  const shown=S.phase==='ALL'?phases:[S.phase];
+  const chips=`<div class="chips"><button class="chip${S.phase==='ALL'?' on':''}" onclick="S.phase='ALL';render()">All</button>`+
+    phases.map(p=>`<button class="chip${S.phase===p?' on':''}" onclick="S.phase='${esc(p)}';render()">${esc(PHASE_LABELS[p]||('Phase '+p))}</button>`).join('')+`</div>`;
+  const secs=shown.map(p=>renderPhase(job,rows.filter(r=>r.Phase===p),p,actPh[p]||0,actItem)).join('');
+  const over=s.actual>s.earned+0.5;
+  return `<div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
+      <button class="btn btn-sm" onclick="S.view='portfolio';S.job='';render()"><i class="ti ti-arrow-left"></i></button>
+      <h2 style="font-size:17px;font-weight:800;letter-spacing:-.3px">${esc(job)}</h2></div>
+    <div class="kg">
+      <div class="k"><div class="lbl">Bid hrs</div><div class="val">${fmt0(s.bid)}</div></div>
+      <div class="k"><div class="lbl">Earned</div><div class="val">${fmt0(s.earned)}</div></div>
+      <div class="k"><div class="lbl">Burned</div><div class="val${over?' bad':''}">${fmt0(s.actual)}</div><div class="sub">timesheets</div></div>
+      <div class="k"><div class="lbl">Remaining</div><div class="val">${fmt0(s.bid-s.earned)}</div></div>
+      <div class="k"><div class="lbl">Complete</div><div class="val${s.pct>=99.5?' good':''}">${fmt0(s.pct)}%</div></div>
+    </div>${chips}${secs}
+    ${actItem?'':'<p class="note" style="margin-top:4px"><i class="ti ti-info-circle"></i> Burned hours shown per phase (timesheets aren\'t tagged to runs yet — that lands with the ItemID column).</p>'}`;
+}
+function renderPhase(job,rows,phase,actual,actItem){
+  let bid=0,earned=0;
+  rows.forEach(r=>{bid+=r.BidHrs;earned+=r.BidHrs*pctOf(job,r.ItemID)/100;});
+  const varr=actual-earned;
+  const lots=rows.filter(r=>r.ItemType==='lot'||r.ItemType==='lateral');
+  const runs=rows.filter(r=>!(r.ItemType==='lot'||r.ItemType==='lateral'));
+  // group runs by Area
+  const areas={};runs.forEach(r=>{(areas[r.Area||'']=areas[r.Area||'']||[]).push(r);});
+  const areaKeys=Object.keys(areas).sort();
+  const runHtml=areaKeys.map(a=>{
+    const list=areas[a];
+    let ab=0,ae=0;list.forEach(r=>{ab+=r.BidHrs;ae+=r.BidHrs*pctOf(job,r.ItemID)/100;});
+    const head=a?`<div class="area-h"><span>${esc(a)}</span><span class="ah-num">${fmt0(ae)} / ${fmt0(ab)} hrs</span></div>`:'';
+    return head+list.map(r=>runRow(job,r,actItem)).join('');
+  }).join('');
+  const lotHtml=lots.length?`<div class="area-h"><span>Laterals — tap lot when tied in</span>
+      <span class="ah-num">${lots.filter(r=>pctOf(job,r.ItemID)>=100).length} / ${lots.length} done</span></div>
+    <div class="lots">${lots.map(r=>{
+      const done=pctOf(job,r.ItemID)>=100;
+      return `<button class="lot${done?' done':''}" onclick="setPct('${esc(job)}','${esc(r.ItemID)}',${done?0:100})" title="${esc(r.Descr)}">${esc(r.ItemID.replace(/^LOT-?/i,''))}</button>`;
+    }).join('')}</div>`:'';
+  return `<div class="sec"><h2>${esc(PHASE_LABELS[phase]||('Phase '+phase))} <span class="h2-sub">phase ${esc(phase)} · ${rows.length} items</span></h2>
+    <div class="pstrip">
+      <span>Bid <b>${fmt0(bid)}</b></span><span>Earned <b>${fmt0(earned)}</b></span>
+      <span>Burned <b class="${varr>0.5?'ov':''}">${fmt0(actual)}</b></span>
+      <span>Remaining <b>${fmt0(bid-earned)}</b></span>
+      <span>Variance <b class="${varr>0.5?'ov':(varr<-0.5?'un':'')}">${varr>0?'+':''}${fmt0(varr)}</b></span>
+    </div>${runHtml}${lotHtml}</div>`;
+}
+function runRow(job,r,actItem){
+  const pct=pctOf(job,r.ItemID);
+  const burned=actItem?(actItem[r.ItemID]||0):null;
+  const seg=[0,25,50,75,100].map(v=>
+    `<button class="${pct===v?'on'+(v===100?' full':''):''}" onclick="setPct('${esc(job)}','${esc(r.ItemID)}',${v})">${v===100?'✓':v||'—'}</button>`).join('');
+  return `<div class="run">
+    <span class="run-id">${esc(r.ItemID)}</span>
+    <span class="run-desc">${esc(r.Descr)}${r.BidQty?` · ${fmt(r.BidQty)} ${esc(r.Unit)}`:''}</span>
+    <span class="run-bid"><b>${fmt(r.BidHrs)}</b>${burned!=null?` / ${fmt(burned)}`:''} h</span>
+    <div class="pcts">${seg}</div></div>`;
+}
+// === IMPORT ===
+const IMP_FIELDS=[['ItemID','ID / Run'],['Descr','Description'],['BidHrs','Bid hrs'],['BidQty','Qty'],['Unit','Unit'],['Area','Area'],['Phase','Phase'],['ItemType','Type']];
+function guessCol(h){
+  const s=h.toLowerCase().replace(/[^a-z]/g,'');
+  if(/^(itemid|runid|run|id|structure|str)$/.test(s))return 'ItemID';
+  if(/desc/.test(s))return 'Descr';
+  if(/bidhr|hours|hrs/.test(s))return 'BidHrs';
+  if(/qty|quantity|lf|length/.test(s))return 'BidQty';
+  if(/unit/.test(s))return 'Unit';
+  if(/area|section/.test(s))return 'Area';
+  if(/phase/.test(s))return 'Phase';
+  if(/type/.test(s))return 'ItemType';
+  return '';
+}
+function impParse(){
+  const txt=document.getElementById('imp-txt').value;
+  const lines=txt.split(/\r?\n/).filter(l=>l.trim());
+  if(lines.length<2){toast('Paste at least a header row and one data row','err');return;}
+  const delim=lines[0].includes('\t')?'\t':',';
+  const headers=lines[0].split(delim).map(h=>h.trim());
+  const rows=lines.slice(1).map(l=>l.split(delim).map(c=>c.trim()));
+  S.imp={headers,rows,map:headers.map(guessCol),job:S.imp&&S.imp.job||S.job||'',defPhase:S.imp&&S.imp.defPhase||'',defType:'run',replace:true,prog:-1};
+  render();
+}
+function impSetMap(i,v){S.imp.map[i]=v;render();}
+function impRows(){
+  const {headers,rows,map,job,defPhase,defType}=S.imp;
+  const idx={};map.forEach((m,i)=>{if(m&&!(m in idx))idx[m]=i;});
+  if(!('ItemID' in idx))return {err:'Map a column to ID / Run.'};
+  if(!job.trim())return {err:'Enter the job number.'};
+  const out=[];
+  rows.forEach(r=>{
+    const g=f=>(f in idx)?(r[idx[f]]||''):'';
+    const id=g('ItemID');if(!id)return;
+    out.push({Title:id,JobNum:job.trim(),Phase:(g('Phase')||defPhase||'').trim(),
+      ItemType:(g('ItemType')||defType||'run').toLowerCase(),Descr:g('Descr'),
+      BidHrs:parseFloat(String(g('BidHrs')).replace(/,/g,''))||0,
+      BidQty:parseFloat(String(g('BidQty')).replace(/,/g,''))||0,
+      Unit:g('Unit'),Area:g('Area')});
+  });
+  return {rows:out};
+}
+async function impUpload(){
+  if(S.busy)return;
+  const p=impRows();
+  if(p.err){toast(p.err,'err');return;}
+  if(!p.rows.length){toast('No rows to upload','err');return;}
+  S.busy=true;S.imp.prog=0;render();
+  try{
+    const tok=await getToken(true);if(!tok)throw new Error('no token');
+    const job=S.imp.job.trim();
+    // replace mode: delete this job's scope rows ONLY for phases present in the import (other phases untouched)
+    if(S.imp.replace){
+      const victims=S.scope.filter(r=>r.JobNum===job&&p.rows.some(n=>n.Phase===r.Phase));
+      for(const batch of chunk(victims,20)){
+        await gBatch(tok,batch.map((v,i)=>({id:String(i+1),method:'DELETE',
+          url:`/sites/${FD_SITE}/lists/${S.lists.scope}/items/${v.spId}`,headers:{'If-Match':'*'}})));
+      }
+    }
+    // batched insert, 20 per $batch call
+    let done=0;
+    for(const batch of chunk(p.rows,20)){
+      const resp=await gBatch(tok,batch.map((row,i)=>({id:String(i+1),method:'POST',
+        url:`/sites/${FD_SITE}/lists/${S.lists.scope}/items`,
+        headers:{'Content-Type':'application/json'},body:{fields:row}})));
+      const bad=resp.filter(r=>r.status>=400);
+      if(bad.length)throw new Error(bad.length+' rows failed (HTTP '+bad[0].status+')');
+      done+=batch.length;S.imp.prog=done/p.rows.length*100;render();
+    }
+    toast(done+' scope rows loaded for '+job);
+    S.imp=null;S.view='job';S.job=job;S.phase='ALL';
+    await loadAll();
+  }catch(e){toast('Import failed: '+e.message,'err');}
+  S.busy=false;render();
+}
+function chunk(a,n){const o=[];for(let i=0;i<a.length;i+=n)o.push(a.slice(i,i+n));return o;}
+async function gBatch(tok,requests){
+  const r=await fetch('https://graph.microsoft.com/v1.0/$batch',{method:'POST',
+    headers:{Authorization:'Bearer '+tok,'Content-Type':'application/json'},
+    body:JSON.stringify({requests})});
+  if(!r.ok)throw new Error('$batch '+r.status);
+  return (await r.json()).responses||[];
+}
+function renderImport(){
+  const hasParse=S.imp&&S.imp.headers;
+  let mapUI='',preview='',actions='';
+  if(hasParse){
+    const p=impRows();
+    mapUI=`<div class="frow">
+      <div class="fg"><label>Job number</label><input value="${esc(S.imp.job)}" oninput="S.imp.job=this.value" placeholder="2610-Millbrook"></div>
+      <div class="fg"><label>Default phase</label><input value="${esc(S.imp.defPhase)}" oninput="S.imp.defPhase=this.value" placeholder="400" style="min-width:70px"></div>
+      <div class="fg"><label>Default type</label><select onchange="S.imp.defType=this.value">
+        ${['run','structure','lot','lateral','task'].map(t=>`<option ${S.imp.defType===t?'selected':''}>${t}</option>`).join('')}</select></div>
+      <div class="fg"><label>Replace existing</label><select onchange="S.imp.replace=this.value==='yes'">
+        <option value="yes" ${S.imp.replace?'selected':''}>Yes — clear job+phase first</option>
+        <option value="no" ${!S.imp.replace?'selected':''}>No — append</option></select></div>
+    </div>
+    <table class="map-tbl"><tr>${S.imp.headers.map((h,i)=>`<th>${esc(h)}<br>
+      <select style="font-size:11px;margin-top:3px;max-width:100px" onchange="impSetMap(${i},this.value)">
+        <option value="">— skip —</option>
+        ${IMP_FIELDS.map(([v,l])=>`<option value="${v}" ${S.imp.map[i]===v?'selected':''}>${l}</option>`).join('')}
+      </select></th>`).join('')}</tr>
+      ${S.imp.rows.slice(0,8).map(r=>`<tr>${r.map(c=>`<td>${esc(c)}</td>`).join('')}</tr>`).join('')}
+    </table>`;
+    preview=p.err?`<p class="note" style="color:var(--red);margin-top:10px">${esc(p.err)}</p>`
+      :`<p class="note" style="margin-top:10px"><b>${p.rows.length}</b> rows ready · ${fmt0(p.rows.reduce((a,r)=>a+r.BidHrs,0))} bid hrs total</p>`;
+    actions=`<div style="margin-top:12px;display:flex;gap:8px">
+      <button class="btn btn-p" ${S.busy||p.err?'disabled':''} onclick="impUpload()">${S.busy?'Uploading…':'Upload to JobScope'}</button>
+      <button class="btn" onclick="S.imp=null;render()">Reset</button></div>
+      ${S.busy&&S.imp.prog>=0?`<div class="prog"><div class="progfill" style="width:${S.imp.prog}%"></div></div>`:''}`;
+  }
+  return `<div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
+      <button class="btn btn-sm" onclick="S.view=S.job?'job':'portfolio';render()"><i class="ti ti-arrow-left"></i></button>
+      <h2 style="font-size:17px;font-weight:800">Import scope</h2></div>
+    <div class="sec imp">
+      <p class="note" style="margin-bottom:10px">Copy a run table straight out of an Excel tracker (headers included) and paste below.
+      Columns are auto-mapped — adjust the dropdowns if a guess is wrong. Lots/laterals import with type <b>lot</b> to get the tap-off grid.</p>
+      <textarea id="imp-txt" placeholder="ID&#9;Description&#9;Bid Hrs&#9;Qty&#9;Unit&#9;Area&#10;D03-D04&#9;15&quot; RCP 210 LF&#9;12.5&#9;210&#9;LF&#9;Area 1"></textarea>
+      <div style="margin-top:8px"><button class="btn" onclick="impParse()"><i class="ti ti-table"></i> Parse</button></div>
+      ${mapUI}${preview}${actions}
+    </div>`;
+}
+function render(){
+  if(!auth.user){renderAuth();return;}
+  let body;
+  if(!S.lists)body=renderSetup();
+  else if(!S.loaded)body=`<div class="loading"><div class="spinner"></div><div>Loading scope…</div></div>`;
+  else if(S.view==='import')body=renderImport();
+  else if(S.view==='job'&&S.job)body=renderJob();
+  else body=renderPortfolio();
+  document.getElementById('app').innerHTML=hdr()+`<div class="container">${body}</div>
+    <div style="text-align:center;font-size:11px;color:var(--text3);opacity:.7;padding-bottom:14px">Build ${VH_TRK_BUILD}</div>`;
+}
+initMsal().catch(e=>{document.getElementById('app').innerHTML=`<div class="empty">${esc(e.message)}</div>`;});
+</script>
+</body>
+</html>
