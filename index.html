@@ -432,7 +432,7 @@ async function initApp(){
   }catch(e){console.warn(e);}
   initWeeks();updUC();updNav();render();updBadge();
 }
-const VH_BUILD='2026-07-01.4';
+const VH_BUILD='2026-07-01.6';
 console.log('[VH] Timesheets build',VH_BUILD);
 let __vhAuthToastAt=0;
 // interactive=true only from a user-initiated action: saves drafts, then allows the MSAL
@@ -771,6 +771,10 @@ function buildProdField(f,entry,ro){
     s+='<option value="">Select...</option>';
     WEATHER_OPTIONS.forEach(function(w){s+='<option value="'+w+'" '+(entry[f.id]===w?'selected':'')+'>'+w+'</option>';});
     s+='</select>';
+  }else if(f.id==='strId'){
+    var dlid='dlpr'+String(id).replace(/\D/g,'');
+    s+='<input type="text" class="di" autocomplete="off" value="'+val+'" '+(ro?'disabled':'')+' placeholder="e.g. D03-D04, S10-S11" list="'+dlid+'" style="font-size:15px;padding:8px 10px" data-id="'+id+'" data-f="strId" onfocus="vhFillProdDL(this)" oninput="setProdField(+this.dataset.id,this.dataset.f,this.value)"/>';
+    s+='<datalist id="'+dlid+'"></datalist>';
   }else{
     s+='<input type="'+(f.type==='text'?'text':'number')+'" class="di" '+(f.type!=='text'?'inputmode="decimal"':'')+' value="'+val+'" '+(ro?'disabled':'')+' placeholder="'+f.label+'" style="font-size:15px;padding:8px 10px" data-id="'+id+'" data-f="'+f.id+'" oninput="setProdField(+this.dataset.id,this.dataset.f,this.value)"/>';
   }
@@ -1308,6 +1312,54 @@ async function _submitProductionToSPImpl(wk, silent){
 // so Power BI can join against bid data for bid-vs-actual variance reporting.
 // One row per (employee, date, jobLine). Idempotent on re-submit: deletes the
 // (week, submitter) rows first, then inserts fresh.
+// === JOB SCOPE (run/lot IDs for production tracking) ===
+// Cached locally so the picker works offline; refreshed in the background when stale.
+// Column names resolved dynamically (manually created lists can have renamed internals).
+let __vhScope=null,__vhScopeLoading=false;
+function vhScopeCache(){
+  if(__vhScope)return __vhScope;
+  try{const c=JSON.parse(localStorage.getItem('vhts_scope')||'null');if(c&&c.rows){__vhScope=c;return c;}}catch(e){}
+  return null;
+}
+async function vhLoadScope(force){
+  if(__vhScopeLoading)return;
+  const cache=vhScopeCache();
+  if(!force&&cache&&Date.now()-cache.ts<4*3600*1000)return;
+  __vhScopeLoading=true;
+  try{
+    const tok=await getTok();if(!tok)return;
+    const L=await vhGetList(tok,'JobScope');if(!L)return;
+    const colsR=await fetch(`https://graph.microsoft.com/v1.0/sites/${L.siteId}/lists/${L.listId}/columns?$select=name,displayName`,{headers:{Authorization:'Bearer '+tok}});
+    const cols=colsR.ok?((await colsR.json()).value||[]):[];
+    const col=w=>{const ex=cols.find(c=>c.name.toLowerCase()===w.toLowerCase());const dp=cols.find(c=>(c.displayName||'').toLowerCase()===w.toLowerCase());return (ex||dp||{name:w}).name;};
+    const cJob=col('JobNum'),cPh=col('Phase'),cDe=col('Descr'),cTy=col('ItemType');
+    const rows=[];let next=`https://graph.microsoft.com/v1.0/sites/${L.siteId}/lists/${L.listId}/items?$expand=fields&$top=999`,pages=0;
+    while(next&&pages<10){
+      const r=await fetch(next,{headers:{Authorization:'Bearer '+tok}});if(!r.ok)break;
+      const j=await r.json();
+      (j.value||[]).forEach(it=>{const f=it.fields||{};if(f.Title)rows.push({j:String(f[cJob]||'').trim(),p:String(f[cPh]||'').trim(),id:f.Title,d:String(f[cDe]||'').slice(0,40),t:(f[cTy]||'run').toLowerCase()});});
+      next=j['@odata.nextLink']||null;pages++;
+    }
+    if(rows.length){__vhScope={ts:Date.now(),rows};try{localStorage.setItem('vhts_scope',JSON.stringify(__vhScope));}catch(e){}}
+  }catch(e){console.warn('vhLoadScope:',e);}
+  finally{__vhScopeLoading=false;}
+}
+function vhFillProdDL(inp){
+  // STR ID typeahead on the PRODUCTION form — runs belong to the crew's day, not a person.
+  const dl=document.getElementById(inp.getAttribute('list'));if(!dl)return;
+  const cache=vhScopeCache();
+  if(!cache){vhLoadScope(true);dl.innerHTML='';return;}
+  if(Date.now()-cache.ts>4*3600*1000)vhLoadScope(); // background refresh
+  const wk=S.weeks[S.currentWeek];
+  const entry=(typeof prodEntries==='function'?prodEntries(wk):[]).find(function(e){return e.id==inp.dataset.id;})||{};
+  const job=String(entry.job||'').trim(),ph=String(entry.phase||'').trim();
+  let m=cache.rows.filter(r=>(!job||r.j===job||r.j.indexOf(job)===0)&&(!ph||r.p===ph));
+  if(!m.length&&job)m=cache.rows.filter(r=>r.j===job);
+  if(!m.length)m=cache.rows;
+  const escA=t=>String(t).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;');
+  dl.innerHTML=m.slice(0,300).map(r=>'<option value="'+escA(r.id)+'">'+escA((r.t==='lot'||r.t==='lateral'?'Lot ':'')+r.d)+'</option>').join('');
+}
+setTimeout(function(){try{vhLoadScope();}catch(e){}},6000);
 async function submitJobLinesToSP(wk, silent){
   if(window.__VH_JLW_INFLIGHT)return{ok:false,busy:true};
   window.__VH_JLW_INFLIGHT=true;

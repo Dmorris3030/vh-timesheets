@@ -10,6 +10,7 @@
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Inter:wght@400;500;600;700;800&display=swap">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@2.47.0/tabler-icons.min.css">
 <script src="https://cdn.jsdelivr.net/npm/@azure/msal-browser@2.38.3/lib/msal-browser.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <style>
 :root{
   --bg:#fafafa;--bg2:#f0f0f0;--border:#e5e5e5;--text:#111;--text2:#555;--text3:#888;
@@ -131,16 +132,17 @@ const SCOPES=['Files.ReadWrite','Files.ReadWrite.All','Sites.ReadWrite.All','Use
 const FD_SITE='valentiheld.sharepoint.com,faa2c371-4166-4fc1-aed9-bf6ff65c7034,d89c0495-1617-4429-b05b-7addf584b82e';
 const TS_SITE='valentiheld.sharepoint.com,155c9359-7fd3-4f2c-8c6a-b04a722b6f64,801969a1-b2a1-4f9a-8c3a-05ae5405e710';
 const TSJL_LIST='228b5d0b-c95c-4bd0-a9b2-b963d767b7d2';
+const FD_LIST='0e317e27-adb1-4bef-b57a-cb0524e60981'; // Field Data production log
 const FALLBACK_ADMINS=['dmorris@valentiheld.com','abewley@valentiheld.com','jroe@valentiheld.com','jtrenkamp@valentiheld.com','cbroeker@valentiheld.com','eroe@valentiheld.com','cwaters@valentiheld.com','mzielinski@valentiheld.com','mjanson@valentiheld.com','kpero@valentiheld.com','jschuetz@valentiheld.com'];
 const SCOPE_LIST_NAME='JobScope';
 const STATUS_LIST_NAME='TrackerStatus';
 const PHASE_LABELS={'300':'Earth — Mass','310':'Earth — Finish','400':'Storm','450':'Storm — Other','500':'Sanitary','600':'Water'};
-const VH_TRK_BUILD='2026-07-01.9';
+const VH_TRK_BUILD='2026-07-01.11';
 console.log('[VH] Job Trackers build',VH_TRK_BUILD);
 
 let mi;
 let auth={user:null,account:null,isAdmin:false};
-let S={view:'portfolio',job:'',phase:'ALL',lists:null,scope:[],status:{},jobLines:[],loaded:false,imp:null,busy:false,setupErr:'',cmap:null};
+let S={view:'portfolio',job:'',phase:'ALL',lists:null,scope:[],status:{},prod:[],loaded:false,imp:null,busy:false,setupErr:'',cmap:null};
 
 // === MSAL ===
 async function initMsal(){
@@ -274,11 +276,12 @@ async function loadAll(){
   try{
     const tok=await getToken();if(!tok)return;
     if(!S.cmap)await resolveCols(tok);
-    const [scopeItems,statusItems,jlItems]=await Promise.all([
+    const [scopeItems,statusItems,fdItems]=await Promise.all([
       vhGetAll(tok,`https://graph.microsoft.com/v1.0/sites/${FD_SITE}/lists/${S.lists.scope}/items?$expand=fields&$top=999`,'JobScope'),
       vhGetAll(tok,`https://graph.microsoft.com/v1.0/sites/${FD_SITE}/lists/${S.lists.status}/items?$expand=fields&$top=999`,'TrackerStatus'),
-      // No $select on fields: when the ItemID column lands on TimesheetJobLines it flows in automatically.
-      vhGetAll(tok,`https://graph.microsoft.com/v1.0/sites/${FD_SITE}/lists/${TSJL_LIST}/items?$expand=fields&$top=999`,'TimesheetJobLines')
+      // Burned hours come from the PRODUCTION log (Field Data), not timesheets:
+      // bid hours are production-rate hours, so only Production Hours per crew-day compare apples-to-apples.
+      vhGetAll(tok,`https://graph.microsoft.com/v1.0/sites/${FD_SITE}/lists/${FD_LIST}/items?$expand=fields&$top=999`,'Field Data')
     ]);
     const cs=S.cmap.scope,ct=S.cmap.status;
     S.scope=scopeItems.map(it=>({spId:it.id,ItemID:it.fields.Title||'',JobNum:String(it.fields[cs.JobNum]||'').trim(),
@@ -290,7 +293,7 @@ async function loadAll(){
       const k=String(it.fields[ct.JobNum]||'').trim()+'|'+String(it.fields[ct.ItemID]||'').trim();
       S.status[k]={spId:it.id,pct:Math.max(0,Math.min(100,Math.round((+it.fields[ct.PctDone]||0)*10)/10)),note:it.fields[ct.Note]||''};
     });
-    S.jobLines=jlItems.map(it=>it.fields).filter(f=>f&&f.WorkDate);
+    S.prod=fdItems.map(it=>it.fields).filter(f=>f&&(f.Jobnumber||f['STR_x0020_ID']));
     S.loaded=true;
   }catch(e){console.warn('loadAll:',e);toast('Load failed: '+e.message,'err');}
 }
@@ -331,22 +334,23 @@ async function setPct(job,itemId,pct){
 function pctOf(job,itemId){const s=S.status[job+'|'+itemId];return s?s.pct:0;}
 
 // === MATH ===
+const nid=s=>String(s||'').toUpperCase().replace(/\s+/g,''); // foremen type STR IDs free-hand
 function actualByJobPhase(job){
   const m={};
-  S.jobLines.forEach(l=>{
+  S.prod.forEach(l=>{
     if(String(l.Jobnumber||'').trim()!==job)return;
     const ph=String(l.Phase||'').trim()||'?';
-    m[ph]=(m[ph]||0)+(+l.Hours||0);
+    m[ph]=(m[ph]||0)+(+l['Production_x0020_Hours']||0);
   });
   return m;
 }
-function actualByItem(job){ // becomes live once ItemID lands on TimesheetJobLines
+function actualByItem(job){ // production hours grouped by STR ID from the crews' daily reports
   const m={};let any=false;
-  S.jobLines.forEach(l=>{
+  S.prod.forEach(l=>{
     if(String(l.Jobnumber||'').trim()!==job)return;
-    const id=String(l.ItemID||'').trim();
+    const id=nid(l['STR_x0020_ID']);
     if(!id)return;any=true;
-    m[id]=(m[id]||0)+(+l.Hours||0);
+    m[id]=(m[id]||0)+(+l['Production_x0020_Hours']||0);
   });
   return any?m:null;
 }
@@ -372,6 +376,7 @@ function hdr(){
     <div class="brand" onclick="S.view='portfolio';S.job='';render()"><div class="logo">VH</div>Job Trackers</div>
     <div class="hbtns">
       ${auth.isAdmin?`<button class="btn btn-sm" onclick="S.view='import';render()"><i class="ti ti-file-import"></i> Import scope</button>`:''}
+      ${S.loaded&&S.scope.length?`<button class="btn btn-sm" onclick="exportXlsx(S.view==='job'?S.job:'')"><i class="ti ti-file-spreadsheet"></i> Export</button>`:''}
       <button class="btn btn-sm" onclick="location.href='production.html'"><i class="ti ti-chart-bar"></i> Dashboard</button>
       <button class="btn btn-sm" onclick="location.href='index.html'"><i class="ti ti-clock"></i> Timesheets</button>
       <button class="btn btn-sm" onclick="refresh()"><i class="ti ti-refresh"></i></button>
@@ -445,11 +450,11 @@ function renderJob(){
     <div class="kg">
       <div class="k"><div class="lbl">Bid hrs</div><div class="val">${fmt0(s.bid)}</div></div>
       <div class="k"><div class="lbl">Earned</div><div class="val">${fmt0(s.earned)}</div></div>
-      <div class="k"><div class="lbl">Burned</div><div class="val${over?' bad':''}">${fmt0(s.actual)}</div><div class="sub">timesheets</div></div>
+      <div class="k"><div class="lbl">Burned</div><div class="val${over?' bad':''}">${fmt0(s.actual)}</div><div class="sub">production hrs</div></div>
       <div class="k"><div class="lbl">Remaining</div><div class="val">${fmt0(s.bid-s.earned)}</div></div>
       <div class="k"><div class="lbl">Complete</div><div class="val${s.pct>=99.5?' good':''}">${fmt0(s.pct)}%</div></div>
     </div>${chips}${secs}
-    ${actItem?'':'<p class="note" style="margin-top:4px"><i class="ti ti-info-circle"></i> Burned hours shown per phase (timesheets aren\'t tagged to runs yet — that lands with the ItemID column).</p>'}`;
+    ${actItem?'':'<p class="note" style="margin-top:4px"><i class="ti ti-info-circle"></i> Burned hours shown per phase only — per-run burn appears once daily production reports carry an STR ID for this job.</p>'}`;
 }
 function renderPhase(job,rows,phase,actual,actItem){
   let bid=0,earned=0;
@@ -482,7 +487,7 @@ function renderPhase(job,rows,phase,actual,actItem){
 }
 function runRow(job,r,actItem){
   const pct=pctOf(job,r.ItemID);
-  const burned=actItem?(actItem[r.ItemID]||0):null;
+  const burned=actItem?(actItem[nid(r.ItemID)]||0):null;
   const rp=Math.round(pct);
   const seg=[0,25,50,75,100].map(v=>
     `<button class="${rp===v?'on'+(v===100?' full':''):''}" onclick="setPct('${esc(job)}','${esc(r.ItemID)}',${v})">${v===100?'✓':v||'—'}</button>`).join('');
@@ -505,6 +510,49 @@ function editInstalled(job,itemId){
   const n=parseFloat(String(v).replace(/,/g,''));
   if(isNaN(n)||n<0){toast('Enter a number','err');return;}
   setPct(job,itemId,Math.max(0,Math.min(100,n/r.BidQty*100)));
+}
+// === EXCEL EXPORT (static values only — no formulas, no recalc risk) ===
+function r1(n){return Math.round(n*10)/10;}
+function exportXlsx(job){
+  if(typeof XLSX==='undefined'){toast('Excel library not loaded — check connection','err');return;}
+  const rows=S.scope.filter(r=>!job||r.JobNum===job);
+  if(!rows.length){toast('Nothing to export','err');return;}
+  const wb=XLSX.utils.book_new();
+  // Summary: one row per job+phase — the remaining-hours numbers the schedule runs on
+  const sum={};
+  rows.forEach(r=>{
+    const k=r.JobNum+'|'+r.Phase;
+    const o=sum[k]=sum[k]||{job:r.JobNum,ph:r.Phase,bid:0,earn:0,items:0,done:0};
+    const pct=pctOf(r.JobNum,r.ItemID);
+    o.bid+=r.BidHrs;o.earn+=r.BidHrs*pct/100;o.items++;if(pct>=100)o.done++;
+  });
+  const sumRows=Object.values(sum).sort((a,b)=>a.job.localeCompare(b.job)||a.ph.localeCompare(b.ph)).map(o=>{
+    const act=(actualByJobPhase(o.job)[o.ph])||0;
+    return {'Job':o.job,'Phase':o.ph,'Discipline':PHASE_LABELS[o.ph]||'','Bid Hrs':r1(o.bid),'Earned Hrs':r1(o.earn),
+      'Burned Hrs':r1(act),'Remaining Hrs':r1(o.bid-o.earn),'Variance Hrs':r1(act-o.earn),
+      '% Complete':o.bid?r1(o.earn/o.bid*100):0,'Items':o.items,'Items Done':o.done};
+  });
+  const ws1=XLSX.utils.json_to_sheet(sumRows);
+  ws1['!cols']=Object.keys(sumRows[0]).map(k=>({wch:Math.max(10,k.length+2)}));
+  XLSX.utils.book_append_sheet(wb,ws1,'Summary');
+  // Runs: per-item detail
+  const aiCache={};
+  const detRows=rows.slice().sort((a,b)=>a.JobNum.localeCompare(b.JobNum)||a.Phase.localeCompare(b.Phase)||String(a.Area).localeCompare(String(b.Area))).map(r=>{
+    if(!(r.JobNum in aiCache))aiCache[r.JobNum]=actualByItem(r.JobNum);
+    const pct=pctOf(r.JobNum,r.ItemID);
+    const row={'Job':r.JobNum,'Phase':r.Phase,'Area':r.Area,'ID':r.ItemID,'Type':r.ItemType,'Description':r.Descr,
+      'Bid Qty':r.BidQty||'','Unit':r.Unit,'Installed':r.BidQty?r1(r.BidQty*pct/100):'','% Done':r1(pct),
+      'Bid Hrs':r1(r.BidHrs),'Earned Hrs':r1(r.BidHrs*pct/100),'Remaining Hrs':r1(r.BidHrs*(1-pct/100))};
+    const ai=aiCache[r.JobNum];
+    row['Burned Hrs']=ai?r1(ai[nid(r.ItemID)]||0):'';
+    return row;
+  });
+  const ws2=XLSX.utils.json_to_sheet(detRows);
+  ws2['!cols']=Object.keys(detRows[0]).map(k=>({wch:k==='Description'?32:Math.max(9,k.length+2)}));
+  XLSX.utils.book_append_sheet(wb,ws2,'Runs');
+  const stamp=new Date().toISOString().slice(0,10);
+  XLSX.writeFile(wb,'VH-Tracker-'+(job||'All-Jobs')+'-'+stamp+'.xlsx');
+  toast('Workbook downloaded');
 }
 // === IMPORT ===
 const IMP_FIELDS=[['ItemID','ID / Run'],['Descr','Description'],['BidHrs','Bid hrs'],['BidQty','Qty'],['Unit','Unit'],['Area','Area'],['Phase','Phase'],['ItemType','Type'],['PctDone','% done']];
