@@ -134,12 +134,12 @@ const FALLBACK_ADMINS=['dmorris@valentiheld.com','abewley@valentiheld.com','jroe
 const SCOPE_LIST_NAME='JobScope';
 const STATUS_LIST_NAME='TrackerStatus';
 const PHASE_LABELS={'300':'Earth — Mass','310':'Earth — Finish','400':'Storm','450':'Storm — Other','500':'Sanitary','600':'Water'};
-const VH_TRK_BUILD='2026-07-01.6';
+const VH_TRK_BUILD='2026-07-01.7';
 console.log('[VH] Job Trackers build',VH_TRK_BUILD);
 
 let mi;
 let auth={user:null,account:null,isAdmin:false};
-let S={view:'portfolio',job:'',phase:'ALL',lists:null,scope:[],status:{},jobLines:[],loaded:false,imp:null,busy:false,setupErr:''};
+let S={view:'portfolio',job:'',phase:'ALL',lists:null,scope:[],status:{},jobLines:[],loaded:false,imp:null,busy:false,setupErr:'',cmap:null};
 
 // === MSAL ===
 async function initMsal(){
@@ -211,7 +211,7 @@ async function ensureLists(){
 }
 async function rescanLists(){
   if(S.busy)return;S.busy=true;S.setupErr='';render();
-  localStorage.removeItem('vhtrk_lists');
+  localStorage.removeItem('vhtrk_lists');S.cmap=null;
   await ensureLists();
   if(S.lists){await loadAll();toast('Lists found');}
   else toast('Lists not found yet','err');
@@ -251,23 +251,43 @@ async function createLists(){
 }
 
 // === DATA ===
+const WANT_COLS={scope:['JobNum','Phase','Discipline','ItemType','Descr','BidHrs','BidQty','Unit','Area'],
+                 status:['JobNum','ItemID','PctDone','Note']};
+async function resolveCols(tok){
+  S.cmap={scope:{},status:{}};
+  for(const k of ['scope','status']){
+    const cols=await vhGetAll(tok,`https://graph.microsoft.com/v1.0/sites/${FD_SITE}/lists/${S.lists[k]}/columns?$select=name,displayName&$top=200`,'columns');
+    for(const w of WANT_COLS[k]){
+      const exact=cols.find(c=>c.name.toLowerCase()===w.toLowerCase());
+      const disp=cols.find(c=>(c.displayName||'').toLowerCase()===w.toLowerCase());
+      S.cmap[k][w]=(exact||disp||{name:w}).name;
+    }
+  }
+}
+function packFields(kind,logical){ // {logicalName:value} -> {internalName:value}; Title passes through
+  const m=S.cmap[kind],out={};
+  for(const[k,v]of Object.entries(logical))out[k==='Title'?'Title':(m[k]||k)]=v;
+  return out;
+}
 async function loadAll(){
   try{
     const tok=await getToken();if(!tok)return;
+    if(!S.cmap)await resolveCols(tok);
     const [scopeItems,statusItems,jlItems]=await Promise.all([
       vhGetAll(tok,`https://graph.microsoft.com/v1.0/sites/${FD_SITE}/lists/${S.lists.scope}/items?$expand=fields&$top=999`,'JobScope'),
       vhGetAll(tok,`https://graph.microsoft.com/v1.0/sites/${FD_SITE}/lists/${S.lists.status}/items?$expand=fields&$top=999`,'TrackerStatus'),
       // No $select on fields: when the ItemID column lands on TimesheetJobLines it flows in automatically.
       vhGetAll(tok,`https://graph.microsoft.com/v1.0/sites/${FD_SITE}/lists/${TSJL_LIST}/items?$expand=fields&$top=999`,'TimesheetJobLines')
     ]);
-    S.scope=scopeItems.map(it=>({spId:it.id,ItemID:it.fields.Title||'',JobNum:String(it.fields.JobNum||'').trim(),
-      Phase:String(it.fields.Phase||'').trim(),Discipline:it.fields.Discipline||'',ItemType:(it.fields.ItemType||'run').toLowerCase(),
-      Descr:it.fields.Descr||'',BidHrs:+it.fields.BidHrs||0,BidQty:+it.fields.BidQty||0,Unit:it.fields.Unit||'',Area:it.fields.Area||''}))
+    const cs=S.cmap.scope,ct=S.cmap.status;
+    S.scope=scopeItems.map(it=>({spId:it.id,ItemID:it.fields.Title||'',JobNum:String(it.fields[cs.JobNum]||'').trim(),
+      Phase:String(it.fields[cs.Phase]||'').trim(),Discipline:it.fields[cs.Discipline]||'',ItemType:(it.fields[cs.ItemType]||'run').toLowerCase(),
+      Descr:it.fields[cs.Descr]||'',BidHrs:+it.fields[cs.BidHrs]||0,BidQty:+it.fields[cs.BidQty]||0,Unit:it.fields[cs.Unit]||'',Area:it.fields[cs.Area]||''}))
       .filter(r=>r.ItemID&&r.JobNum);
     S.status={};
     statusItems.forEach(it=>{
-      const k=String(it.fields.JobNum||'').trim()+'|'+String(it.fields.ItemID||'').trim();
-      S.status[k]={spId:it.id,pct:Math.max(0,Math.min(100,+it.fields.PctDone||0)),note:it.fields.Note||''};
+      const k=String(it.fields[ct.JobNum]||'').trim()+'|'+String(it.fields[ct.ItemID]||'').trim();
+      S.status[k]={spId:it.id,pct:Math.max(0,Math.min(100,+it.fields[ct.PctDone]||0)),note:it.fields[ct.Note]||''};
     });
     S.jobLines=jlItems.map(it=>it.fields).filter(f=>f&&f.WorkDate);
     S.loaded=true;
@@ -291,12 +311,12 @@ async function setPct(job,itemId,pct){
       if(cur.spId){
         const r=await fetch(`https://graph.microsoft.com/v1.0/sites/${FD_SITE}/lists/${S.lists.status}/items/${cur.spId}/fields`,{
           method:'PATCH',headers:{Authorization:'Bearer '+tok,'Content-Type':'application/json','If-Match':'*'},
-          body:JSON.stringify({PctDone:cur.pct})});
+          body:JSON.stringify(packFields('status',{PctDone:cur.pct}))});
         if(!r.ok)throw new Error('PATCH '+r.status);
       }else{
         const r=await fetch(`https://graph.microsoft.com/v1.0/sites/${FD_SITE}/lists/${S.lists.status}/items`,{
           method:'POST',headers:{Authorization:'Bearer '+tok,'Content-Type':'application/json'},
-          body:JSON.stringify({fields:{Title:k,JobNum:job,ItemID:itemId,PctDone:cur.pct}})});
+          body:JSON.stringify({fields:packFields('status',{Title:k,JobNum:job,ItemID:itemId,PctDone:cur.pct})})});
         if(!r.ok)throw new Error('POST '+r.status);
         const j=await r.json();S.status[k].spId=j.id;
       }
@@ -475,9 +495,10 @@ function guessCol(h){
   const s=h.toLowerCase().replace(/[^a-z0-9]/g,'');
   if(/^(itemid|runid|run|id|structure|str)$/.test(s))return 'ItemID';
   if(/desc/.test(s))return 'Descr';
-  if(/pctdone|percentdone|done$|complete/.test(s))return 'PctDone';
-  if(/pipe|prod|rate/.test(s))return ''; // pipe-only / rate columns: never the bid number
-  if(/bidhr|hours|hrs/.test(s))return 'BidHrs';
+  if(/^(pctdone|percentdone|pctcomplete|done|pct|percent|complete)$/.test(s))return 'PctDone';
+  if(/bid/.test(s))return 'BidHrs'; // anything with "bid" is the bid number, even "bid hrs (pipe+MH+wye)"
+  if(/pipe|prod|rate|earned|remaining|hrsdone/.test(s))return ''; // per-run derived columns: never auto-map
+  if(/hours|hrs/.test(s))return 'BidHrs';
   if(/qty|quantity|lf|length/.test(s))return 'BidQty';
   if(/unit/.test(s))return 'Unit';
   if(/area|section/.test(s))return 'Area';
@@ -551,7 +572,7 @@ async function impUpload(){
     for(const batch of chunk(p.rows,20)){
       const resp=await gBatch(tok,batch.map((row,i)=>({id:String(i+1),method:'POST',
         url:`/sites/${FD_SITE}/lists/${S.lists.scope}/items`,
-        headers:{'Content-Type':'application/json'},body:{fields:row}})));
+        headers:{'Content-Type':'application/json'},body:{fields:packFields('scope',row)}})));
       const bad=resp.filter(r=>r.status>=400);
       if(bad.length)throw new Error(bad.length+' rows failed (HTTP '+bad[0].status+')');
       done+=batch.length;S.imp.prog=done/p.rows.length*100;render();
@@ -564,9 +585,9 @@ async function impUpload(){
           const key=job+'|'+x.itemId;const cur=S.status[key];
           return cur&&cur.spId
             ?{id:String(i+1),method:'PATCH',url:`/sites/${FD_SITE}/lists/${S.lists.status}/items/${cur.spId}/fields`,
-              headers:{'Content-Type':'application/json','If-Match':'*'},body:{PctDone:x.pct}}
+              headers:{'Content-Type':'application/json','If-Match':'*'},body:packFields('status',{PctDone:x.pct})}
             :{id:String(i+1),method:'POST',url:`/sites/${FD_SITE}/lists/${S.lists.status}/items`,
-              headers:{'Content-Type':'application/json'},body:{fields:{Title:key,JobNum:job,ItemID:x.itemId,PctDone:x.pct}}};
+              headers:{'Content-Type':'application/json'},body:{fields:packFields('status',{Title:key,JobNum:job,ItemID:x.itemId,PctDone:x.pct})}};
         }));
       }
     }
