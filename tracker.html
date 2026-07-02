@@ -134,12 +134,12 @@ const FALLBACK_ADMINS=['dmorris@valentiheld.com','abewley@valentiheld.com','jroe
 const SCOPE_LIST_NAME='JobScope';
 const STATUS_LIST_NAME='TrackerStatus';
 const PHASE_LABELS={'300':'Earth — Mass','310':'Earth — Finish','400':'Storm','450':'Storm — Other','500':'Sanitary','600':'Water'};
-const VH_TRK_BUILD='2026-07-01.4';
+const VH_TRK_BUILD='2026-07-01.5';
 console.log('[VH] Job Trackers build',VH_TRK_BUILD);
 
 let mi;
 let auth={user:null,account:null,isAdmin:false};
-let S={view:'portfolio',job:'',phase:'ALL',lists:null,scope:[],status:{},jobLines:[],loaded:false,imp:null,busy:false};
+let S={view:'portfolio',job:'',phase:'ALL',lists:null,scope:[],status:{},jobLines:[],loaded:false,imp:null,busy:false,setupErr:''};
 
 // === MSAL ===
 async function initMsal(){
@@ -209,26 +209,44 @@ async function ensureLists(){
     else S.lists=null; // triggers setup screen
   }catch(e){console.warn('ensureLists:',e);S.lists=null;}
 }
+async function rescanLists(){
+  if(S.busy)return;S.busy=true;S.setupErr='';render();
+  localStorage.removeItem('vhtrk_lists');
+  await ensureLists();
+  if(S.lists){await loadAll();toast('Lists found');}
+  else toast('Lists not found yet','err');
+  S.busy=false;render();
+}
 async function createLists(){
-  if(S.busy)return;S.busy=true;render();
+  if(S.busy)return;S.busy=true;S.setupErr='';render();
   try{
-    const tok=await getToken(true);if(!tok)throw new Error('no token');
+    const tok=await getToken(true);if(!tok)throw new Error('Sign-in expired — tap again after signing in.');
+    // Idempotent: find what already exists first, so a partial earlier attempt (or a
+    // manually created list) is reused instead of failing on "name already exists".
+    const lists=await vhGetAll(tok,`https://graph.microsoft.com/v1.0/sites/${FD_SITE}/lists?$select=id,displayName&$top=200`,'lists');
+    const find=n=>{const l=lists.find(x=>(x.displayName||'').toLowerCase()===n.toLowerCase());return l?l.id:null;};
+    let scopeId=find(SCOPE_LIST_NAME), statusId=find(STATUS_LIST_NAME);
     const mk=async(body)=>{
       const r=await fetch(`https://graph.microsoft.com/v1.0/sites/${FD_SITE}/lists`,{
         method:'POST',headers:{Authorization:'Bearer '+tok,'Content-Type':'application/json'},body:JSON.stringify(body)});
-      if(!r.ok){const t=await r.text();throw new Error('create list '+r.status+': '+t.slice(0,200));}
+      if(!r.ok){
+        let msg='HTTP '+r.status;
+        try{const j=await r.json();if(j.error&&j.error.message)msg+=' — '+j.error.message;}catch(e2){}
+        if(r.status===403)msg+=' (no permission to create lists on the Field Operations site — use the manual steps below, the app will find the lists by name)';
+        throw new Error('Creating "'+body.displayName+'": '+msg);
+      }
       return (await r.json()).id;
     };
     const txt=n=>({name:n,text:{}}), num=n=>({name:n,number:{}});
-    const scopeId=await mk({displayName:SCOPE_LIST_NAME,list:{template:'genericList'},
+    if(!scopeId)scopeId=await mk({displayName:SCOPE_LIST_NAME,list:{template:'genericList'},
       columns:[txt('JobNum'),txt('Phase'),txt('Discipline'),txt('ItemType'),txt('Descr'),num('BidHrs'),num('BidQty'),txt('Unit'),txt('Area')]});
-    const statusId=await mk({displayName:STATUS_LIST_NAME,list:{template:'genericList'},
+    if(!statusId)statusId=await mk({displayName:STATUS_LIST_NAME,list:{template:'genericList'},
       columns:[txt('JobNum'),txt('ItemID'),num('PctDone'),txt('Note')]});
     S.lists={scope:scopeId,status:statusId};
     localStorage.setItem('vhtrk_lists',JSON.stringify(S.lists));
-    toast('Lists created on Field Operations site');
+    toast('Lists ready on Field Operations site');
     await loadAll();
-  }catch(e){toast('Create failed: '+e.message,'err');}
+  }catch(e){S.setupErr=e.message;}
   S.busy=false;render();
 }
 
@@ -351,7 +369,15 @@ function renderSetup(){
     <p class="note" style="margin-bottom:12px">Two lists are needed on the <b>Field Operations</b> site:
     <b>${SCOPE_LIST_NAME}</b> (every run / lot / phase with bid hours) and <b>${STATUS_LIST_NAME}</b> (percent-complete per item).
     ${auth.isAdmin?'Tap once and they\'ll be created with the right columns.':'Ask an admin to open this page and run setup.'}</p>
-    ${auth.isAdmin?`<button class="btn btn-p" ${S.busy?'disabled':''} onclick="createLists()">${S.busy?'Creating…':'Create both lists now'}</button>`:''}
+    ${S.setupErr?`<div style="background:rgba(200,16,46,.1);border:1px solid var(--red);border-radius:6px;padding:10px 12px;font-size:12.5px;color:var(--red);margin-bottom:12px;word-break:break-word">${esc(S.setupErr)}</div>`:''}
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+    ${auth.isAdmin?`<button class="btn btn-p" ${S.busy?'disabled':''} onclick="createLists()">${S.busy?'Working…':'Create both lists now'}</button>`:''}
+    <button class="btn" ${S.busy?'disabled':''} onclick="rescanLists()"><i class="ti ti-refresh"></i> Re-check for lists</button></div>
+    <details style="margin-top:14px"><summary style="font-size:12.5px;font-weight:600;cursor:pointer;color:var(--text2)">Manual creation (if the button can't — takes ~3 min)</summary>
+    <div class="note" style="margin-top:8px;line-height:1.7">On the <b>Field Operations</b> SharePoint site → Site contents → New → List → Blank list.<br>
+    <b>1. List named exactly "${SCOPE_LIST_NAME}"</b> — add columns (Single line of text unless noted): JobNum, Phase, Discipline, ItemType, Descr, Unit, Area · Number: BidHrs, BidQty.<br>
+    <b>2. List named exactly "${STATUS_LIST_NAME}"</b> — text: JobNum, ItemID, Note · Number: PctDone.<br>
+    Column names must match exactly, no spaces. Then come back here and tap <b>Re-check for lists</b>.</div></details>
   </div>`;
 }
 function renderPortfolio(){
