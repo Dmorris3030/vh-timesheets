@@ -80,6 +80,7 @@ body{min-height:100vh;padding-bottom:env(safe-area-inset-bottom);
 .run-id{font-weight:700;font-size:13px;min-width:74px;letter-spacing:-.2px}
 .run-desc{flex:1;min-width:0;font-size:11.5px;color:var(--text2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .run-bid{font-family:'Barlow Condensed','Inter',sans-serif;font-size:14px;font-weight:600;min-width:52px;text-align:right;color:var(--text2)}
+.qbtn{font:inherit;font-size:11px;font-weight:600;color:var(--brand);background:none;border:none;border-bottom:1px dotted var(--brand);cursor:pointer;padding:2px 0;white-space:nowrap;flex-shrink:0}
 .run-bid b{color:var(--text)}
 /* Pct segmented control */
 .pcts{display:flex;border:1px solid var(--border);border-radius:6px;overflow:hidden;flex-shrink:0}
@@ -87,7 +88,7 @@ body{min-height:100vh;padding-bottom:env(safe-area-inset-bottom);
 .pcts button:last-child{border-right:none}
 .pcts button.on{background:var(--brand);color:#fff}
 .pcts button.on.full{background:var(--green)}
-@media(max-width:520px){.run-desc{display:none}.pcts button{width:38px;padding:9px 0}}
+@media(max-width:520px){.run-desc{display:none}.pcts button{width:33px;padding:9px 0}.run-id{min-width:64px;font-size:12px}.qbtn{font-size:10.5px}}
 /* Lot chips (laterals) */
 .lots{display:flex;gap:7px;flex-wrap:wrap}
 .lot{font:inherit;font-size:12px;font-weight:700;min-width:46px;padding:9px 8px;border-radius:6px;border:1px solid var(--border);background:var(--card);color:var(--text2);cursor:pointer;text-align:center}
@@ -134,7 +135,7 @@ const FALLBACK_ADMINS=['dmorris@valentiheld.com','abewley@valentiheld.com','jroe
 const SCOPE_LIST_NAME='JobScope';
 const STATUS_LIST_NAME='TrackerStatus';
 const PHASE_LABELS={'300':'Earth — Mass','310':'Earth — Finish','400':'Storm','450':'Storm — Other','500':'Sanitary','600':'Water'};
-const VH_TRK_BUILD='2026-07-01.7';
+const VH_TRK_BUILD='2026-07-01.9';
 console.log('[VH] Job Trackers build',VH_TRK_BUILD);
 
 let mi;
@@ -287,7 +288,7 @@ async function loadAll(){
     S.status={};
     statusItems.forEach(it=>{
       const k=String(it.fields[ct.JobNum]||'').trim()+'|'+String(it.fields[ct.ItemID]||'').trim();
-      S.status[k]={spId:it.id,pct:Math.max(0,Math.min(100,+it.fields[ct.PctDone]||0)),note:it.fields[ct.Note]||''};
+      S.status[k]={spId:it.id,pct:Math.max(0,Math.min(100,Math.round((+it.fields[ct.PctDone]||0)*10)/10)),note:it.fields[ct.Note]||''};
     });
     S.jobLines=jlItems.map(it=>it.fields).filter(f=>f&&f.WorkDate);
     S.loaded=true;
@@ -300,6 +301,7 @@ const __pending={};
 async function setPct(job,itemId,pct){
   const k=job+'|'+itemId;
   const prev=S.status[k]?{...S.status[k]}:null;
+  pct=Math.round(pct*10)/10;
   S.status[k]=Object.assign({spId:prev?prev.spId:null,note:prev?prev.note:''},{pct});
   render(); // optimistic
   if(__pending[k])clearTimeout(__pending[k]);
@@ -481,13 +483,28 @@ function renderPhase(job,rows,phase,actual,actItem){
 function runRow(job,r,actItem){
   const pct=pctOf(job,r.ItemID);
   const burned=actItem?(actItem[r.ItemID]||0):null;
+  const rp=Math.round(pct);
   const seg=[0,25,50,75,100].map(v=>
-    `<button class="${pct===v?'on'+(v===100?' full':''):''}" onclick="setPct('${esc(job)}','${esc(r.ItemID)}',${v})">${v===100?'✓':v||'—'}</button>`).join('');
+    `<button class="${rp===v?'on'+(v===100?' full':''):''}" onclick="setPct('${esc(job)}','${esc(r.ItemID)}',${v})">${v===100?'✓':v||'—'}</button>`).join('');
+  const qtyBit=r.BidQty>0
+    ?`<button class="qbtn" onclick="editInstalled('${esc(job)}','${esc(r.ItemID)}')">${fmt(Math.round(r.BidQty*pct/100))}/${fmt(r.BidQty)} ${esc(r.Unit)}${[0,25,50,75,100].includes(rp)?'':' · '+rp+'%'}</button>`
+    :'';
   return `<div class="run">
     <span class="run-id">${esc(r.ItemID)}</span>
-    <span class="run-desc">${esc(r.Descr)}${r.BidQty?` · ${fmt(r.BidQty)} ${esc(r.Unit)}`:''}</span>
+    <span class="run-desc">${esc(r.Descr)}</span>
+    ${qtyBit}
     <span class="run-bid"><b>${fmt(r.BidHrs)}</b>${burned!=null?` / ${fmt(burned)}`:''} h</span>
     <div class="pcts">${seg}</div></div>`;
+}
+function editInstalled(job,itemId){
+  const r=S.scope.find(x=>x.JobNum===job&&x.ItemID===itemId);
+  if(!r||!(r.BidQty>0))return;
+  const cur=Math.round(r.BidQty*pctOf(job,itemId)/100);
+  const v=prompt('Installed '+(r.Unit||'qty')+' for '+itemId+' (of '+fmt(r.BidQty)+')',cur);
+  if(v==null)return;
+  const n=parseFloat(String(v).replace(/,/g,''));
+  if(isNaN(n)||n<0){toast('Enter a number','err');return;}
+  setPct(job,itemId,Math.max(0,Math.min(100,n/r.BidQty*100)));
 }
 // === IMPORT ===
 const IMP_FIELDS=[['ItemID','ID / Run'],['Descr','Description'],['BidHrs','Bid hrs'],['BidQty','Qty'],['Unit','Unit'],['Area','Area'],['Phase','Phase'],['ItemType','Type'],['PctDone','% done']];
@@ -559,9 +576,10 @@ async function impUpload(){
   try{
     const tok=await getToken(true);if(!tok)throw new Error('no token');
     const job=S.imp.job.trim();
-    // replace mode: delete this job's scope rows ONLY for phases present in the import (other phases untouched)
+    // replace mode: delete this job's scope rows ONLY where phase AND item type match the
+    // incoming rows — mains (run) and laterals (lot) share phase 500 but never clobber each other
     if(S.imp.replace){
-      const victims=S.scope.filter(r=>r.JobNum===job&&p.rows.some(n=>n.Phase===r.Phase));
+      const victims=S.scope.filter(r=>r.JobNum===job&&p.rows.some(n=>n.Phase===r.Phase&&n.ItemType===r.ItemType));
       for(const batch of chunk(victims,20)){
         await gBatch(tok,batch.map((v,i)=>({id:String(i+1),method:'DELETE',
           url:`/sites/${FD_SITE}/lists/${S.lists.scope}/items/${v.spId}`,headers:{'If-Match':'*'}})));
@@ -616,7 +634,7 @@ function renderImport(){
       <div class="fg"><label>Default type</label><select onchange="S.imp.defType=this.value">
         ${['run','structure','lot','lateral','task'].map(t=>`<option ${S.imp.defType===t?'selected':''}>${t}</option>`).join('')}</select></div>
       <div class="fg"><label>Replace existing</label><select onchange="S.imp.replace=this.value==='yes'">
-        <option value="yes" ${S.imp.replace?'selected':''}>Yes — clear job+phase first</option>
+        <option value="yes" ${S.imp.replace?'selected':''}>Yes — clear job+phase+type first</option>
         <option value="no" ${!S.imp.replace?'selected':''}>No — append</option></select></div>
     </div>
     <table class="map-tbl"><tr>${S.imp.headers.map((h,i)=>`<th>${esc(h)}<br>
