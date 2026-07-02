@@ -134,7 +134,7 @@ const FALLBACK_ADMINS=['dmorris@valentiheld.com','abewley@valentiheld.com','jroe
 const SCOPE_LIST_NAME='JobScope';
 const STATUS_LIST_NAME='TrackerStatus';
 const PHASE_LABELS={'300':'Earth — Mass','310':'Earth — Finish','400':'Storm','450':'Storm — Other','500':'Sanitary','600':'Water'};
-const VH_TRK_BUILD='2026-07-01.5';
+const VH_TRK_BUILD='2026-07-01.6';
 console.log('[VH] Job Trackers build',VH_TRK_BUILD);
 
 let mi;
@@ -470,11 +470,13 @@ function runRow(job,r,actItem){
     <div class="pcts">${seg}</div></div>`;
 }
 // === IMPORT ===
-const IMP_FIELDS=[['ItemID','ID / Run'],['Descr','Description'],['BidHrs','Bid hrs'],['BidQty','Qty'],['Unit','Unit'],['Area','Area'],['Phase','Phase'],['ItemType','Type']];
+const IMP_FIELDS=[['ItemID','ID / Run'],['Descr','Description'],['BidHrs','Bid hrs'],['BidQty','Qty'],['Unit','Unit'],['Area','Area'],['Phase','Phase'],['ItemType','Type'],['PctDone','% done']];
 function guessCol(h){
-  const s=h.toLowerCase().replace(/[^a-z]/g,'');
+  const s=h.toLowerCase().replace(/[^a-z0-9]/g,'');
   if(/^(itemid|runid|run|id|structure|str)$/.test(s))return 'ItemID';
   if(/desc/.test(s))return 'Descr';
+  if(/pctdone|percentdone|done$|complete/.test(s))return 'PctDone';
+  if(/pipe|prod|rate/.test(s))return ''; // pipe-only / rate columns: never the bid number
   if(/bidhr|hours|hrs/.test(s))return 'BidHrs';
   if(/qty|quantity|lf|length/.test(s))return 'BidQty';
   if(/unit/.test(s))return 'Unit';
@@ -488,18 +490,30 @@ function impParse(){
   const lines=txt.split(/\r?\n/).filter(l=>l.trim());
   if(lines.length<2){toast('Paste at least a header row and one data row','err');return;}
   const delim=lines[0].includes('\t')?'\t':',';
-  const headers=lines[0].split(delim).map(h=>h.trim());
+  let headers=lines[0].split(delim).map(h=>h.trim());
   const rows=lines.slice(1).map(l=>l.split(delim).map(c=>c.trim()));
+  const maxCols=Math.max(headers.length,...rows.map(r=>r.length));
+  while(headers.length<maxCols)headers.push('Col '+(headers.length+1));
   S.imp={headers,rows,map:headers.map(guessCol),job:S.imp&&S.imp.job||S.job||'',defPhase:S.imp&&S.imp.defPhase||'',defType:'run',replace:true,prog:-1};
   render();
 }
-function impSetMap(i,v){S.imp.map[i]=v;render();}
+function impSetMap(i,v){S.imp.map[i]=v;impSync();}
+function impSync(){
+  const p=impRows();
+  const pv=document.getElementById('imp-pv');
+  if(pv)pv.innerHTML=p.err?`<span style="color:var(--red)">${esc(p.err)}</span>`
+    :`<b>${p.rows.length}</b> rows ready · ${fmt0(p.rows.reduce((a,r)=>a+r.BidHrs,0))} bid hrs total${p.pcts&&p.pcts.length?` · ${p.pcts.length} with % done`:''}`;
+  const btn=document.getElementById('imp-up');
+  if(btn)btn.disabled=!!(S.busy||p.err);
+}
 function impRows(){
   const {headers,rows,map,job,defPhase,defType}=S.imp;
-  const idx={};map.forEach((m,i)=>{if(m&&!(m in idx))idx[m]=i;});
+  const idx={};const dups=[];
+  map.forEach((m,i)=>{if(!m)return;if(m in idx)dups.push(m);else idx[m]=i;});
+  if(dups.length)return {err:'Two columns are mapped to the same field ('+[...new Set(dups)].join(', ')+') — set one to skip.'};
   if(!('ItemID' in idx))return {err:'Map a column to ID / Run.'};
   if(!job.trim())return {err:'Enter the job number.'};
-  const out=[];
+  const out=[];const pcts=[];
   rows.forEach(r=>{
     const g=f=>(f in idx)?(r[idx[f]]||''):'';
     const id=g('ItemID');if(!id)return;
@@ -508,8 +522,12 @@ function impRows(){
       BidHrs:parseFloat(String(g('BidHrs')).replace(/,/g,''))||0,
       BidQty:parseFloat(String(g('BidQty')).replace(/,/g,''))||0,
       Unit:g('Unit'),Area:g('Area')});
+    if('PctDone' in idx){
+      const p=parseFloat(String(g('PctDone')).replace(/[%,]/g,''));
+      if(!isNaN(p)&&p>0)pcts.push({itemId:id,pct:Math.max(0,Math.min(100,p<=1?p*100:p))});
+    }
   });
-  return {rows:out};
+  return {rows:out,pcts};
 }
 async function impUpload(){
   if(S.busy)return;
@@ -538,7 +556,21 @@ async function impUpload(){
       if(bad.length)throw new Error(bad.length+' rows failed (HTTP '+bad[0].status+')');
       done+=batch.length;S.imp.prog=done/p.rows.length*100;render();
     }
-    toast(done+' scope rows loaded for '+job);
+    // seed progress from the imported % done column (statuses key on JobNum|ItemID,
+    // so they survive scope re-imports)
+    if(p.pcts&&p.pcts.length){
+      for(const batch of chunk(p.pcts,20)){
+        await gBatch(tok,batch.map((x,i)=>{
+          const key=job+'|'+x.itemId;const cur=S.status[key];
+          return cur&&cur.spId
+            ?{id:String(i+1),method:'PATCH',url:`/sites/${FD_SITE}/lists/${S.lists.status}/items/${cur.spId}/fields`,
+              headers:{'Content-Type':'application/json','If-Match':'*'},body:{PctDone:x.pct}}
+            :{id:String(i+1),method:'POST',url:`/sites/${FD_SITE}/lists/${S.lists.status}/items`,
+              headers:{'Content-Type':'application/json'},body:{fields:{Title:key,JobNum:job,ItemID:x.itemId,PctDone:x.pct}}};
+        }));
+      }
+    }
+    toast(done+' scope rows loaded for '+job+(p.pcts&&p.pcts.length?' · '+p.pcts.length+' progress values seeded':''));
     S.imp=null;S.view='job';S.job=job;S.phase='ALL';
     await loadAll();
   }catch(e){toast('Import failed: '+e.message,'err');}
@@ -558,8 +590,8 @@ function renderImport(){
   if(hasParse){
     const p=impRows();
     mapUI=`<div class="frow">
-      <div class="fg"><label>Job number</label><input value="${esc(S.imp.job)}" oninput="S.imp.job=this.value" placeholder="2610-Millbrook"></div>
-      <div class="fg"><label>Default phase</label><input value="${esc(S.imp.defPhase)}" oninput="S.imp.defPhase=this.value" placeholder="400" style="min-width:70px"></div>
+      <div class="fg"><label>Job number</label><input value="${esc(S.imp.job)}" oninput="S.imp.job=this.value;impSync()" placeholder="2610-Millbrook"></div>
+      <div class="fg"><label>Default phase</label><input value="${esc(S.imp.defPhase)}" oninput="S.imp.defPhase=this.value;impSync()" placeholder="400" style="min-width:70px"></div>
       <div class="fg"><label>Default type</label><select onchange="S.imp.defType=this.value">
         ${['run','structure','lot','lateral','task'].map(t=>`<option ${S.imp.defType===t?'selected':''}>${t}</option>`).join('')}</select></div>
       <div class="fg"><label>Replace existing</label><select onchange="S.imp.replace=this.value==='yes'">
@@ -573,10 +605,10 @@ function renderImport(){
       </select></th>`).join('')}</tr>
       ${S.imp.rows.slice(0,8).map(r=>`<tr>${r.map(c=>`<td>${esc(c)}</td>`).join('')}</tr>`).join('')}
     </table>`;
-    preview=p.err?`<p class="note" style="color:var(--red);margin-top:10px">${esc(p.err)}</p>`
-      :`<p class="note" style="margin-top:10px"><b>${p.rows.length}</b> rows ready · ${fmt0(p.rows.reduce((a,r)=>a+r.BidHrs,0))} bid hrs total</p>`;
+    preview=`<p class="note" id="imp-pv" style="margin-top:10px">${p.err?`<span style="color:var(--red)">${esc(p.err)}</span>`
+      :`<b>${p.rows.length}</b> rows ready · ${fmt0(p.rows.reduce((a,r)=>a+r.BidHrs,0))} bid hrs total${p.pcts&&p.pcts.length?` · ${p.pcts.length} with % done`:''}`}</p>`;
     actions=`<div style="margin-top:12px;display:flex;gap:8px">
-      <button class="btn btn-p" ${S.busy||p.err?'disabled':''} onclick="impUpload()">${S.busy?'Uploading…':'Upload to JobScope'}</button>
+      <button class="btn btn-p" id="imp-up" ${S.busy||p.err?'disabled':''} onclick="impUpload()">${S.busy?'Uploading…':'Upload to JobScope'}</button>
       <button class="btn" onclick="S.imp=null;render()">Reset</button></div>
       ${S.busy&&S.imp.prog>=0?`<div class="prog"><div class="progfill" style="width:${S.imp.prog}%"></div></div>`:''}`;
   }
