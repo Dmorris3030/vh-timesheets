@@ -432,7 +432,7 @@ async function initApp(){
   }catch(e){console.warn(e);}
   initWeeks();updUC();updNav();render();updBadge();
 }
-const VH_BUILD='2026-07-01.6';
+const VH_BUILD='2026-07-01.7';
 console.log('[VH] Timesheets build',VH_BUILD);
 let __vhAuthToastAt=0;
 // interactive=true only from a user-initiated action: saves drafts, then allows the MSAL
@@ -509,6 +509,8 @@ function showUM(){showM(`<div class="mh"></div><div style="display:flex;align-it
 function setSS(s){const d=document.getElementById('sd');if(d)d.className='sd '+s;}
 
 
+// Freshest-touch timestamp on a week — used to merge concurrent edits instead of stomping them.
+function vhAct(w){let m=0;['submittedAt','returnedAt','approvedAt'].forEach(f=>{const t=Date.parse((w&&w[f])||'')||0;if(t>m)m=t;});return m;}
 async function saveAllSubmittedSP(){
   const tok=await getTok();if(!tok)return false;
   const base=`https://graph.microsoft.com/v1.0/sites/${SITE_ID}/drive/root:/${SFN}`;
@@ -516,18 +518,27 @@ async function saveAllSubmittedSP(){
     try{
       // Pull current SP state + eTag, merge in our changes, write back with If-Match so a
       // concurrent submit from another device forces a re-read instead of being overwritten.
-      let etag=null;
-      try{const metaR=await fetch(base,{headers:{Authorization:'Bearer '+tok}});if(metaR.ok){const meta=await metaR.json();etag=meta.eTag||null;}}catch(e){/*first write*/}
-      const r=await fetch(base+':/content',{headers:{Authorization:'Bearer '+tok}});
+      let etag=null,readOk=false;
       let existing={submissions:{},managers:S.managers,adminEmails:S.adminEmails,settings:S.settings};
-      if(r.ok)existing=await r.json();
+      try{
+        const metaR=await fetch(base,{headers:{Authorization:'Bearer '+tok}});
+        if(metaR.status===404){readOk=true;} // first-ever write is the only time an empty base is legit
+        else if(metaR.ok){
+          const meta=await metaR.json();etag=meta.eTag||null;
+          const r=await fetch(base+':/content',{headers:{Authorization:'Bearer '+tok}});
+          if(r.ok){const d=await r.json();if(d&&typeof d==='object'){existing=d;readOk=true;}}
+        }
+      }catch(e){console.warn('saveAllSubmittedSP read:',e);}
+      if(!readOk){if(attempt<2)continue;console.error('saveAllSubmittedSP: could not read shared file — aborting so nothing gets wiped');return false;}
       if(!existing.submissions)existing.submissions={};
       const myEmail=(auth.user?.email||'unknown').toLowerCase();
       // Iterate every entry in S.weeks. iso-only keys are own submissions; composite keys (containing ':') are foreign (I'm the manager).
       Object.entries(S.weeks).forEach(([k,wk])=>{
         if(!wk.status)return;
         if(k.includes(':')){
-          existing.submissions[k]=wk;
+          const theirs=existing.submissions[k];
+          if(!theirs||vhAct(wk)>=vhAct(theirs)){existing.submissions[k]=wk;}
+          else{S.weeks[k]=theirs;} // foreman touched it after we loaded (e.g. resubmit) — adopt theirs, never stomp
         } else {
           if(wk.status==='draft'||wk.status==='returned')return;
           const matchKey=Object.keys(existing.submissions).find(ek=>{
@@ -581,25 +592,36 @@ async function saveSP(){
     try{
       let etag=null;
       let existing={submissions:{},managers:S.managers,adminEmails:S.adminEmails,settings:S.settings,customEmployees:S.customEmployees||[],hiddenEmployees:S.hiddenEmployees||[],photoRecipients:S.photoRecipients||[],phaseLabels:S.phaseLabels||{}};
+      let readOk=false;
       try{
         const metaR=await fetch(base,{headers:{Authorization:'Bearer '+tok}});
-        if(metaR.ok){const meta=await metaR.json();etag=meta.eTag||null;}
-        const rGet=await fetch(base+':/content',{headers:{Authorization:'Bearer '+tok}});
-        if(rGet.ok){const d=await rGet.json();if(d&&d.submissions)existing.submissions=d.submissions;}
+        if(metaR.status===404){readOk=true;} // first-ever write
+        else if(metaR.ok){
+          const meta=await metaR.json();etag=meta.eTag||null;
+          const rGet=await fetch(base+':/content',{headers:{Authorization:'Bearer '+tok}});
+          if(rGet.ok){const d=await rGet.json();if(d&&typeof d==='object'){if(d.submissions)existing.submissions=d.submissions;readOk=true;}}
+        }
       }catch(e){console.warn('SP read:',e);}
+      if(!readOk){
+        if(attempt<2)continue;
+        setSS('err');toast('Could not reach the timesheet file — nothing was sent. Check signal and try again.','error');
+        return false; // NEVER write with an unverified base: that wipes everyone else's submissions
+      }
       // Add this user's submitted weeks — own subs only. Foreign subs saved by saveAllSubmittedSP.
       const myEmailLC=(auth.user?.email||'unknown').toLowerCase();
       Object.entries(S.weeks).forEach(([iso,wk])=>{
         if(iso.includes(':'))return; // foreign sub, skip
         if(wk.status&&wk.status!=='draft'&&wk.status!=='returned'){
-          Object.keys(existing.submissions).forEach(ek=>{
+          const mine=Object.keys(existing.submissions).filter(ek=>{
             const p=ek.split(':');
-            if(p[0]===iso && (p[1]||'').toLowerCase()===myEmailLC){
-              delete existing.submissions[ek];
-            }
+            return p[0]===iso && (p[1]||'').toLowerCase()===myEmailLC;
           });
-          const key=iso+':'+(auth.user?.email||'unknown')+':'+(wk.assignedManager||'');
-          existing.submissions[key]=wk;
+          const freshest=mine.reduce((a,ek)=>Math.max(a,vhAct(existing.submissions[ek])),0);
+          if(vhAct(wk)>=freshest){
+            mine.forEach(ek=>{delete existing.submissions[ek];});
+            const key=iso+':'+(auth.user?.email||'unknown')+':'+(wk.assignedManager||'');
+            existing.submissions[key]=wk;
+          } // else: the manager acted on this week after our copy — leave theirs; loadSP will bring it down
         }
       });
       if(S.adminEmails.map(e=>e.toLowerCase()).includes((auth.user?.email||'').toLowerCase())){
