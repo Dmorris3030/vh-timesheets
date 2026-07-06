@@ -11,6 +11,8 @@
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@2.47.0/tabler-icons.min.css">
 <script src="https://cdn.jsdelivr.net/npm/@azure/msal-browser@2.38.3/lib/msal-browser.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js"></script>
 <style>
 :root{
   --bg:#fafafa;--bg2:#f0f0f0;--border:#e5e5e5;--text:#111;--text2:#555;--text3:#888;
@@ -137,7 +139,7 @@ const FALLBACK_ADMINS=['dmorris@valentiheld.com','abewley@valentiheld.com','jroe
 const SCOPE_LIST_NAME='JobScope';
 const STATUS_LIST_NAME='TrackerStatus';
 const PHASE_LABELS={'300':'Earth — Mass','310':'Earth — Finish','400':'Storm','450':'Storm — Other','500':'Sanitary','600':'Water'};
-const VH_TRK_BUILD='2026-07-01.11';
+const VH_TRK_BUILD='2026-07-01.14';
 console.log('[VH] Job Trackers build',VH_TRK_BUILD);
 
 let mi;
@@ -377,6 +379,7 @@ function hdr(){
     <div class="hbtns">
       ${auth.isAdmin?`<button class="btn btn-sm" onclick="S.view='import';render()"><i class="ti ti-file-import"></i> Import scope</button>`:''}
       ${S.loaded&&S.scope.length?`<button class="btn btn-sm" onclick="exportXlsx(S.view==='job'?S.job:'')"><i class="ti ti-file-spreadsheet"></i> Export</button>`:''}
+      ${S.view==='job'&&S.job&&S.loaded?`<button class="btn btn-sm" onclick="openProgress()"><i class="ti ti-highlight"></i> What's done</button>`:''}
       <button class="btn btn-sm" onclick="location.href='production.html'"><i class="ti ti-chart-bar"></i> Dashboard</button>
       <button class="btn btn-sm" onclick="location.href='index.html'"><i class="ti ti-clock"></i> Timesheets</button>
       <button class="btn btn-sm" onclick="refresh()"><i class="ti ti-refresh"></i></button>
@@ -460,7 +463,8 @@ function renderPhase(job,rows,phase,actual,actItem){
   let bid=0,earned=0;
   rows.forEach(r=>{bid+=r.BidHrs;earned+=r.BidHrs*pctOf(job,r.ItemID)/100;});
   const varr=actual-earned;
-  const lots=rows.filter(r=>r.ItemType==='lot'||r.ItemType==='lateral');
+  const lots=rows.filter(r=>r.ItemType==='lot'||r.ItemType==='lateral')
+    .sort((a,b)=>String(a.ItemID).localeCompare(String(b.ItemID),undefined,{numeric:true})); // lot 2 before lot 10
   const runs=rows.filter(r=>!(r.ItemType==='lot'||r.ItemType==='lateral'));
   // group runs by Area
   const areas={};runs.forEach(r=>{(areas[r.Area||'']=areas[r.Area||'']||[]).push(r);});
@@ -555,12 +559,12 @@ function exportXlsx(job){
   toast('Workbook downloaded');
 }
 // === IMPORT ===
-const IMP_FIELDS=[['ItemID','ID / Run'],['Descr','Description'],['BidHrs','Bid hrs'],['BidQty','Qty'],['Unit','Unit'],['Area','Area'],['Phase','Phase'],['ItemType','Type'],['PctDone','% done']];
+const IMP_FIELDS=[['ItemID','ID / Run'],['Descr','Description'],['BidHrs','Bid hrs'],['BidQty','Qty'],['Unit','Unit'],['Area','Area'],['Phase','Phase'],['ItemType','Type'],['PctDone','% done / X / date']];
 function guessCol(h){
   const s=h.toLowerCase().replace(/[^a-z0-9]/g,'');
   if(/^(itemid|runid|run|id|structure|str)$/.test(s))return 'ItemID';
   if(/desc/.test(s))return 'Descr';
-  if(/^(pctdone|percentdone|pctcomplete|done|pct|percent|complete)$/.test(s))return 'PctDone';
+  if(/^(pctdone|percentdone|pctcomplete|done|pct|percent|complete|tiedin|datetied|tied)$/.test(s))return 'PctDone';
   if(/bid/.test(s))return 'BidHrs'; // anything with "bid" is the bid number, even "bid hrs (pipe+MH+wye)"
   if(/pipe|prod|rate|earned|remaining|hrsdone/.test(s))return ''; // per-run derived columns: never auto-map
   if(/hours|hrs/.test(s))return 'BidHrs';
@@ -609,8 +613,18 @@ function impRows(){
       BidQty:parseFloat(String(g('BidQty')).replace(/,/g,''))||0,
       Unit:g('Unit'),Area:g('Area')});
     if('PctDone' in idx){
-      const p=parseFloat(String(g('PctDone')).replace(/[%,]/g,''));
-      if(!isNaN(p)&&p>0)pcts.push({itemId:id,pct:Math.max(0,Math.min(100,p<=1?p*100:p))});
+      const raw=String(g('PctDone')).trim();
+      if(raw){
+        // Field crews mark tied-in lots with X / check / a date, not a percent — all mean 100.
+        // Dates MUST be caught before parseFloat: parseFloat('6/12') would seed 6%.
+        if(/^(x+|✓|✔|yes|y|done|complete|comp|tied.?in|true)$/i.test(raw)
+           ||/^\d{1,2}[\/\-.]\d{1,2}([\/\-.]\d{2,4})?$/.test(raw)){
+          pcts.push({itemId:id,pct:100});
+        }else{
+          const p=parseFloat(raw.replace(/[%,]/g,''));
+          if(!isNaN(p)&&p>0)pcts.push({itemId:id,pct:Math.max(0,Math.min(100,p<=1?p*100:p))});
+        }
+      }
     }
   });
   return {rows:out,pcts};
@@ -720,6 +734,128 @@ function render(){
   else body=renderPortfolio();
   document.getElementById('app').innerHTML=hdr()+`<div class="container">${body}</div>
     <div style="text-align:center;font-size:11px;color:var(--text3);opacity:.7;padding-bottom:14px">Build ${VH_TRK_BUILD}</div>`;
+}
+// ===== WHAT'S-DONE PDF ======================================================
+// Composites every saved daily plan markup (JobPlans/{job}/Marks/*.json from the
+// timesheet app) onto the clean plan sheet -> one highlighted progress PDF.
+const PG_SITE='valentiheld.sharepoint.com,155c9359-7fd3-4f2c-8c6a-b04a722b6f64,801969a1-b2a1-4f9a-8c3a-05ae5405e710';
+const MK_ROOT='JobPlans';
+const PG_COLORS={'300':'#8a5a2b','310':'#8a5a2b','400':'#ff8800','450':'#9333ea','500':'#1faa4b','600':'#1466d6'};
+const PG_LABEL={'300':'Earthwork','310':'Fine Grade','400':'Storm','450':'Force Main','500':'Sanitary','600':'Watermain'};
+let PG=null;
+function tsUrl(p){return 'https://graph.microsoft.com/v1.0/sites/'+PG_SITE+'/drive/root:/'+p;}
+async function openProgress(){
+  const job=S.job;if(!job)return;
+  toast('Loading plan markups…');
+  const tok=await getToken(true);if(!tok)return;
+  let plans=[],marks=[];
+  try{
+    const pr=await fetch(tsUrl(MK_ROOT+'/'+encodeURIComponent(job))+':/children?$top=200',{headers:{Authorization:'Bearer '+tok}});
+    if(pr.status===404){toast('No plans uploaded for '+job+' yet (JobPlans/'+job+')','err');return;}
+    if(!pr.ok)throw new Error('plans '+pr.status);
+    plans=((await pr.json()).value||[]).filter(c=>c.file&&/\.pdf$/i.test(c.name||''));
+    const mr=await fetch(tsUrl(MK_ROOT+'/'+encodeURIComponent(job)+'/Marks')+':/children?$top=999',{headers:{Authorization:'Bearer '+tok}});
+    marks=mr.ok?((await mr.json()).value||[]).filter(c=>/\.json$/i.test(c.name||'')):[];
+  }catch(e){toast('Could not load plans: '+e.message,'err');return;}
+  if(!marks.length){toast('No saved markups for '+job+' yet — foremen save them from the timesheet app.','err');return;}
+  const bySheet={};
+  marks.forEach(m=>{const mm=m.name.match(/^(\d{4}-\d{2}-\d{2})__(.+)\.json$/i);if(!mm)return;
+    (bySheet[mm[2]]=bySheet[mm[2]]||[]).push({date:mm[1],name:m.name});});
+  const sheetBase=n=>n.replace(/\.pdf$/i,'').replace(/[^A-Za-z0-9_-]+/g,'_');
+  const sheets=plans.map(p=>({pdf:p.name,base:sheetBase(p.name),marks:(bySheet[sheetBase(p.name)]||[]).sort((a,b)=>a.date<b.date?-1:1)})).filter(s=>s.marks.length);
+  if(!sheets.length){toast('Markups exist but no matching plan PDFs — was a plan renamed?','err');return;}
+  const dates=marks.map(m=>(m.name.match(/^(\d{4}-\d{2}-\d{2})/)||[])[1]).filter(Boolean).sort();
+  PG={job,sheets,tok};
+  const wrap=document.createElement('div');wrap.id='pg-modal';
+  wrap.innerHTML=`<div style="position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:400;display:flex;align-items:center;justify-content:center;padding:16px" onclick="if(event.target===this)pgClose()">
+    <div style="background:#171b22;border:1px solid #2a3140;border-radius:14px;padding:18px;max-width:440px;width:100%;color:inherit">
+    <h3 style="font-weight:800;margin-bottom:4px"><i class="ti ti-highlight"></i> What's-done PDF — Job ${esc(job)}</h3>
+    <p class="note" style="margin-bottom:10px">Overlays every saved daily markup onto the clean plan sheet.</p>
+    ${sheets.map((s,i)=>`<label style="display:flex;gap:8px;align-items:center;margin-bottom:6px;font-size:13px;cursor:pointer"><input type="checkbox" id="pg-s${i}" checked> <span style="word-break:break-all">${esc(s.pdf)}</span> <span class="note" style="white-space:nowrap">${s.marks.length} day${s.marks.length>1?'s':''}</span></label>`).join('')}
+    <div style="display:flex;gap:8px;margin:10px 0">
+      <div style="flex:1"><div class="note">From</div><input type="date" id="pg-from" value="${dates[0]||''}" style="width:100%;padding:7px;border-radius:8px;border:1px solid #2a3140;background:transparent;color:inherit"></div>
+      <div style="flex:1"><div class="note">Through</div><input type="date" id="pg-to" value="${dates[dates.length-1]||''}" style="width:100%;padding:7px;border-radius:8px;border:1px solid #2a3140;background:transparent;color:inherit"></div></div>
+    <div id="pg-st" class="note" style="min-height:18px"></div>
+    <div style="display:flex;gap:8px;margin-top:8px">
+      <button class="btn" style="flex:1;justify-content:center" onclick="pgClose()">Cancel</button>
+      <button class="btn" id="pg-go" style="flex:1;justify-content:center;background:#2563eb;color:#fff;border-color:#2563eb" onclick="pgGenerate()"><i class="ti ti-file-type-pdf"></i> Generate</button></div>
+    </div></div>`;
+  document.body.appendChild(wrap);
+}
+function pgClose(){const m=document.getElementById('pg-modal');if(m)m.remove();PG=null;}
+function pgRot(p,d){d=((d%360)+360)%360;let x=p[0],y=p[1];for(let i=0;i<d;i+=90){const nx=1-y,ny=x;x=nx;y=ny;}return [x,y];}
+function pgArrow(ctx,x1,y1,x2,y2,sz,col){const a=Math.atan2(y2-y1,x2-x1);ctx.save();ctx.globalAlpha=.95;ctx.fillStyle=col;
+  ctx.beginPath();ctx.moveTo(x2,y2);ctx.lineTo(x2-sz*Math.cos(a-.45),y2-sz*Math.sin(a-.45));ctx.lineTo(x2-sz*Math.cos(a+.45),y2-sz*Math.sin(a+.45));ctx.closePath();ctx.fill();ctx.restore();}
+async function pgGenerate(){
+  const go=document.getElementById('pg-go');if(go)go.disabled=true;
+  const st=x=>{const e=document.getElementById('pg-st');if(e)e.textContent=x;};
+  try{
+    if(!window.pdfjsLib||!window.PDFLib){st('PDF tools still loading — try again in a second.');if(go)go.disabled=false;return;}
+    pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+    const from=document.getElementById('pg-from').value||'0000',to=document.getElementById('pg-to').value||'9999';
+    const picked=PG.sheets.filter((s,i)=>{const c=document.getElementById('pg-s'+i);return c&&c.checked;});
+    if(!picked.length){st('Pick at least one sheet.');if(go)go.disabled=false;return;}
+    const {PDFDocument}=PDFLib;const out=await PDFDocument.create();
+    const H={Authorization:'Bearer '+PG.tok};
+    let pages=0;const usedDates=[];
+    for(const s of picked){
+      st('Loading marks for '+s.pdf+'…');
+      const js=[];
+      for(const m of s.marks){
+        if(m.date<from||m.date>to)continue;
+        const r=await fetch(tsUrl(MK_ROOT+'/'+encodeURIComponent(PG.job)+'/Marks/'+encodeURIComponent(m.name))+':/content',{headers:H});
+        if(r.ok){const j=await r.json();j.__date=m.date;js.push(j);}
+      }
+      if(!js.length)continue;
+      st('Rendering '+s.pdf+'…');
+      const pb=await (await fetch(tsUrl(MK_ROOT+'/'+encodeURIComponent(PG.job)+'/'+encodeURIComponent(s.pdf))+':/content',{headers:H})).arrayBuffer();
+      const doc=await pdfjsLib.getDocument({data:pb}).promise;
+      const page=await doc.getPage(1);
+      const rots={};js.forEach(j=>{const r0=(+j.userRot||0)%360;rots[r0]=(rots[r0]||0)+1;});
+      const rRot=+Object.keys(rots).sort((a,b)=>rots[b]-rots[a])[0]||0;
+      const vp0=page.getViewport({scale:1,rotation:(page.rotate+rRot)%360});
+      const EXP=Math.min(3,Math.max(1.2,Math.sqrt(12e6/(vp0.width*vp0.height))));
+      const vp=page.getViewport({scale:EXP,rotation:(page.rotate+rRot)%360});
+      const cv=document.createElement('canvas');cv.width=Math.round(vp.width);cv.height=Math.round(vp.height);
+      const cx=cv.getContext('2d');
+      await page.render({canvasContext:cx,viewport:vp}).promise;
+      const phasesSeen={};
+      js.forEach(j=>{usedDates.push(j.__date);
+        const delta=rRot-((+j.userRot||0)%360);
+        (j.strokes||[]).forEach(sk=>{
+          const pts=(sk.pts||[]).map(p=>pgRot(p,delta));if(pts.length<2)return;
+          phasesSeen[sk.phase||j.phase||'']=1;
+          cx.lineCap='round';cx.lineJoin='round';cx.strokeStyle=sk.color||'#c8102e';
+          cx.globalAlpha=sk.kind==='line'?.85:.4;cx.lineWidth=(+sk.width||3)*EXP;
+          cx.beginPath();pts.forEach((p,i)=>{const x=p[0]*cv.width,y=p[1]*cv.height;i?cx.lineTo(x,y):cx.moveTo(x,y);});cx.stroke();
+          if(sk.kind==='line'){const n=pts.length;
+            pgArrow(cx,pts[n-2][0]*cv.width,pts[n-2][1]*cv.height,pts[n-1][0]*cv.width,pts[n-1][1]*cv.height,Math.max(14,(+sk.width||3)*3)*EXP,sk.color||'#c8102e');}
+        });});
+      cx.globalAlpha=1;
+      const lh=Math.round(20*EXP);cx.fillStyle='rgba(255,255,255,.9)';cx.fillRect(0,0,cv.width,lh);
+      cx.fillStyle='#111';cx.textBaseline='middle';cx.font='700 '+Math.round(11*EXP)+'px Arial';
+      let hx=8*EXP;const t1="Job "+PG.job+" — WHAT'S DONE through "+(to==='9999'?'today':to);
+      cx.fillText(t1,hx,lh/2);hx+=cx.measureText(t1).width+14*EXP;
+      cx.font='400 '+Math.round(10*EXP)+'px Arial';
+      Object.keys(phasesSeen).sort().forEach(ph=>{
+        cx.fillStyle=PG_COLORS[ph]||'#c8102e';cx.fillRect(hx,lh*0.32,14*EXP,lh*0.36);hx+=17*EXP;
+        cx.fillStyle='#111';const lb=PG_LABEL[ph]||('Ph '+ph);cx.fillText(lb,hx,lh/2);hx+=cx.measureText(lb).width+12*EXP;});
+      const img=await out.embedJpg(cv.toDataURL('image/jpeg',.85));
+      const pg2=out.addPage([cv.width/EXP,cv.height/EXP]);
+      pg2.drawImage(img,{x:0,y:0,width:cv.width/EXP,height:cv.height/EXP});
+      pages++;if(doc.destroy)doc.destroy();
+    }
+    if(!pages){st('No markups in that date range.');if(go)go.disabled=false;return;}
+    st('Writing PDF…');
+    const bytes=await out.save();
+    const blob=new Blob([bytes],{type:'application/pdf'});
+    const a=document.createElement('a');a.href=URL.createObjectURL(blob);
+    usedDates.sort();
+    a.download='VH_'+PG.job+'_whats-done_'+(usedDates[usedDates.length-1]||'')+'.pdf';
+    document.body.appendChild(a);a.click();
+    setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove();},4000);
+    toast("What's-done PDF ready");pgClose();
+  }catch(e){console.error('pg',e);st('Failed: '+e.message);if(go)go.disabled=false;}
 }
 initMsal().catch(e=>{document.getElementById('app').innerHTML=`<div class="empty">${esc(e.message)}</div>`;});
 </script>
