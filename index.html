@@ -432,7 +432,7 @@ async function initApp(){
   }catch(e){console.warn(e);}
   initWeeks();updUC();updNav();render();updBadge();
 }
-const VH_BUILD='2026-07-01.7';
+const VH_BUILD='2026-07-01.8';
 console.log('[VH] Timesheets build',VH_BUILD);
 let __vhAuthToastAt=0;
 // interactive=true only from a user-initiated action: saves drafts, then allows the MSAL
@@ -509,6 +509,145 @@ function showUM(){showM(`<div class="mh"></div><div style="display:flex;align-it
 function setSS(s){const d=document.getElementById('sd');if(d)d.className='sd '+s;}
 
 
+// ===== RECOVERY / AUDIT (build .8) ==========================================
+// 1) Sent archive: submit no longer deletes the local copy — it moves it here.
+function vhArchiveSent(iso,wk){
+  try{
+    const arc=JSON.parse(localStorage.getItem('vhts_sent')||'{}');
+    arc[iso]={wk:JSON.parse(JSON.stringify(wk)),at:new Date().toISOString()};
+    const keys=Object.keys(arc).sort();
+    while(keys.length>10){delete arc[keys[0]];keys.shift();}
+    localStorage.setItem('vhts_sent',JSON.stringify(arc));
+  }catch(e){console.warn('vhArchiveSent:',e);}
+}
+function vhSentList(){try{return JSON.parse(localStorage.getItem('vhts_sent')||'{}');}catch(e){return{};}}
+function vhRestoreSent(iso){
+  const arc=vhSentList();const c=arc[iso];
+  if(!c||!c.wk){toast('No sent copy on this device for that week.','error');return;}
+  // If a live server copy of this week is APPROVED, restoring+resubmitting would overwrite it — make that deliberate.
+  const myEmail=(auth.user?.email||'').toLowerCase();
+  const live=Object.entries(S.weeks).find(([k,w])=>{const p=k.split(':');return p.length>1&&p[0]===iso&&(p[1]||'').toLowerCase()===myEmail;});
+  if(live&&live[1].status==='approved'&&!confirm('This week was already APPROVED by a manager. Restoring and resubmitting will replace the approved copy. Continue?'))return;
+  const wk=c.wk;
+  wk.status='draft';wk.submittedBy='';wk.submittedAt='';wk.approvedBy='';wk.approvedAt='';wk.returnedAt='';
+  S.weeks[iso]=wk;
+  try{_writeDrafts();}catch(e){}
+  S.currentWeek=iso;showPage('entry');
+  toast('Sent copy restored as a draft — review and resubmit.','success');
+}
+// 2) Build gate: refuse submits from app versions older than settings.minBuild.
+function cmpBuild(a,b){
+  const pa=String(a||'').split('.'),pb=String(b||'').split('.');
+  const da=pa[0]||'',db=pb[0]||'';
+  if(da!==db)return da<db?-1:1;
+  const na=parseInt(pa[1]||'0',10)||0,nb=parseInt(pb[1]||'0',10)||0;
+  return na===nb?0:(na<nb?-1:1);
+}
+function vhBuildOK(){
+  const min=S.settings&&S.settings.minBuild;
+  if(!min)return true;
+  return cmpBuild(VH_BUILD,min)>=0;
+}
+// 3) Targeted, guarded write of ONE submission into the shared file (ETag loop, freshest-wins).
+async function vhInjectSubmission(key,wk){
+  const tok=await getTok(true);if(!tok)return{ok:false,msg:'Sign in first.'};
+  const base=`https://graph.microsoft.com/v1.0/sites/${SITE_ID}/drive/root:/${SFN}`;
+  for(let a=0;a<3;a++){
+    try{
+      const metaR=await fetch(base,{headers:{Authorization:'Bearer '+tok}});
+      if(!metaR.ok)return{ok:false,msg:'Could not read shared file ('+metaR.status+').'};
+      const etag=(await metaR.json()).eTag;
+      const cur=await (await fetch(base+':/content',{headers:{Authorization:'Bearer '+tok}})).json();
+      if(!cur||!cur.submissions)return{ok:false,msg:'Shared file unreadable — aborted, nothing written.'};
+      const prev=cur.submissions[key];
+      if(prev&&vhAct(prev)>=vhAct(wk))return{ok:false,msg:'A same-or-newer copy already exists for that week — nothing written.'};
+      cur.submissions[key]=wk;
+      const put=await fetch(base+':/content',{method:'PUT',headers:{Authorization:'Bearer '+tok,'Content-Type':'application/json','If-Match':etag},body:JSON.stringify(cur)});
+      if(put.status===412)continue;
+      if(!put.ok)return{ok:false,msg:'Write failed ('+put.status+').'};
+      return{ok:true};
+    }catch(e){return{ok:false,msg:e.message};}
+  }
+  return{ok:false,msg:'Gave up after repeated write conflicts — try again.'};
+}
+// 4) Week audit: TSJL hour rows vs submissions file, with one-tap rebuild.
+function vhWeekShift(iso,days){const d=new Date(iso+'T12:00:00Z');d.setUTCDate(d.getUTCDate()+days);return d.toISOString().slice(0,10);}
+async function vhWeekAudit(iso){
+  iso=iso||S.currentWeek;
+  showM(`<div class="mh"></div><h2><i class="ti ti-list-search"></i> Week audit</h2><p>Loading ${fw(iso)}…</p>`,'wa');
+  const tok=await getTok(true);if(!tok)return;
+  let rows=[];
+  try{
+    const L=await vhGetList(tok,'TimesheetJobLines');
+    if(!L)throw new Error('TimesheetJobLines not found');
+    const filt=encodeURIComponent(`fields/WeekIso eq '${iso}'`);
+    const r=await fetch(`https://graph.microsoft.com/v1.0/sites/${L.siteId}/lists/${L.listId}/items?$expand=fields&$filter=${filt}&$top=999`,{headers:{Authorization:'Bearer '+tok,'Prefer':'HonorNonIndexedQueriesWarningMayFailRandomly'}});
+    if(!r.ok)throw new Error('query '+r.status);
+    rows=((await r.json()).value||[]).map(i=>i.fields);
+  }catch(e){showM(`<div class="mh"></div><h2>Week audit</h2><p style="color:var(--red,#e5484d)">Could not read hour rows: ${e.message}</p>`,'wa');return;}
+  window.__vhAuditRows=rows;window.__vhAuditIso=iso;
+  const bySub={};
+  rows.forEach(f=>{
+    const s=(f.SubmittedBy||'?').toLowerCase();
+    if(!bySub[s])bySub[s]={rows:0,hrs:0,emps:new Set(),at:''};
+    bySub[s].rows++;bySub[s].hrs+=parseFloat(f.Hours)||0;bySub[s].emps.add(f.EmployeeId);
+    if((f.SubmittedAt||'')>bySub[s].at)bySub[s].at=f.SubmittedAt;
+  });
+  const subs={};
+  Object.entries(S.weeks).forEach(([k,w])=>{const p=k.split(':');if(p.length>1&&p[0]===iso)subs[(p[1]||'').toLowerCase()]=w.status;});
+  const escT=x=>String(x).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;');
+  let body='';
+  const emails=[...new Set([...Object.keys(bySub),...Object.keys(subs)])].sort();
+  if(!emails.length)body='<p style="color:var(--text2);font-size:14px">No hour rows and no submissions for this week.</p>';
+  emails.forEach(em=>{
+    const a=bySub[em],st=subs[em];
+    const name=escT(em.replace(/@.*$/,''));
+    let right;
+    if(st)right=`<span class="sb sb-${st.slice(0,2)}">${st}</span>`;
+    else if(a)right=`<button class="btn btn-p btn-sm" onclick="vhRebuild('${escT(em)}')"><i class="ti ti-wand"></i> Rebuild</button>`;
+    body+=`<div style="display:flex;align-items:center;gap:10px;padding:11px 0;border-bottom:0.5px solid var(--border)">
+      <div style="flex:1;min-width:0"><strong style="font-size:14px">${name}</strong><br>
+      <span style="font-size:12.5px;color:var(--text2)">${a?a.rows+' rows · '+a.emps.size+' crew · '+a.hrs.toFixed(1)+'h · synced '+String(a.at).slice(0,16).replace('T',' '):'no hour rows synced'}</span></div>
+      ${right}</div>`;
+    if(a&&!st)body+=`<div class="ib" style="margin:6px 0 10px"><i class="ti ti-alert-triangle"></i><span>Hour rows exist but no submission — this crew's week was lost. Rebuild recreates it for review (clock times will be blank).</span></div>`;
+  });
+  showM(`<div class="mh"></div><h2><i class="ti ti-list-search"></i> Week audit</h2>
+    <div style="display:flex;align-items:center;gap:10px;margin:6px 0 12px">
+      <button class="btn btn-sm" onclick="vhWeekAudit(vhWeekShift('${iso}',-7))"><i class="ti ti-chevron-left"></i></button>
+      <strong style="flex:1;text-align:center;font-size:15px">${fw(iso)}</strong>
+      <button class="btn btn-sm" onclick="vhWeekAudit(vhWeekShift('${iso}',7))"><i class="ti ti-chevron-right"></i></button>
+    </div>
+    <p style="font-size:13px;color:var(--text2);margin-bottom:10px">Synced hour rows vs. submissions. Anyone with rows but no submission lost their week.</p>
+    ${body}`,'wa');
+}
+async function vhRebuild(email){
+  const iso=window.__vhAuditIso,rows=(window.__vhAuditRows||[]).filter(f=>(f.SubmittedBy||'').toLowerCase()===email.toLowerCase());
+  if(!rows.length){toast('No rows for that submitter.','error');return;}
+  if(!confirm('Rebuild '+email.replace(/@.*$/,'')+"'s "+fw(iso)+' from '+rows.length+' synced hour rows and submit it for review?'))return;
+  const entries={};const emps=new Set();let subAt='';
+  rows.forEach(f=>{
+    const eid=f.EmployeeId,dt=String(f.WorkDate||'').slice(0,10);
+    if(!eid||!dt)return;
+    emps.add(eid);
+    const k=eid+':'+dt;
+    if(!entries[k])entries[k]={jobLines:[]};
+    let eq=[];try{eq=JSON.parse(f.Equipment||'[]')||[];}catch(e){}
+    entries[k].jobLines.push({job:String(f.Jobnumber||''),phase:String(f.Phase||''),startTime:'',stopTime:'',lunch:'',hours:String(f.Hours||''),equipment:eq});
+    if((f.SubmittedAt||'')>subAt)subAt=f.SubmittedAt;
+  });
+  const wk={employees:[...emps],entries,equipmentEntries:{},status:'submitted',
+    submittedBy:email.replace(/@.*$/,''),submittedAt:subAt||new Date().toISOString(),
+    approvedBy:'',approvedAt:'',returnedAt:'',
+    assignedManager:auth.user?.email||'',
+    comments:'[RECOVERED] Rebuilt from synced hour rows by '+(auth.user?.name||'admin')+' on '+new Date().toLocaleDateString()+'. Jobs/phases/hours/equipment are as synced; clock in-out times were not recoverable.',
+    production:{}};
+  const key=iso+':'+email+':'+(auth.user?.email||'');
+  const res=await vhInjectSubmission(key,wk);
+  if(!res.ok){toast(res.msg,'error');return;}
+  await loadSP();
+  toast('Rebuilt — it\'s now in your approval queue.','success');
+  vhWeekAudit(iso);
+}
 // Freshest-touch timestamp on a week — used to merge concurrent edits instead of stomping them.
 function vhAct(w){let m=0;['submittedAt','returnedAt','approvedAt'].forEach(f=>{const t=Date.parse((w&&w[f])||'')||0;if(t>m)m=t;});return m;}
 async function saveAllSubmittedSP(){
@@ -1810,6 +1949,7 @@ function rReview(){const wk=S.weeks[S.currentWeek];const dates=wd(S.currentWeek)
   h+=`</div>`;document.getElementById('mc').innerHTML=h;
 }
 async function subTS(){
+  if(!vhBuildOK()){toast('App update required before submitting — fully close and reopen the app, then try again.','error');return;}
   const wk=S.weeks[S.currentWeek];
   const by=document.getElementById('sb').value.trim();if(!by){toast('Enter your name.','error');return;}
   const sel=document.querySelector('input[name=mgr]:checked');if(!sel){toast('Select a manager.','error');return;}
@@ -1827,7 +1967,9 @@ async function subTS(){
     toast('Submit failed — nothing was sent. Check your signal and try again.','error');
     render();return;
   }
-  // 2. Submission landed: clear the local draft copy
+  // 2. Submission landed: archive a sent copy on this device, THEN clear the draft.
+  //    If the submission is ever lost server-side, the foreman restores it in two taps.
+  vhArchiveSent(S.currentWeek,wk);
   try{const drafts=JSON.parse(localStorage.getItem('vhts_drafts')||'{}');delete drafts[S.currentWeek];localStorage.setItem('vhts_drafts',JSON.stringify(drafts));}catch(e){}
   // 3. Push the reporting lists and be honest about the outcome (periodic sync retries failures)
   const [prodR,jlR]=await Promise.all([submitProductionToSP(wk,true),submitJobLinesToSP(wk,true)]);
@@ -1848,7 +1990,7 @@ function rApproval(){
   const foreignPend=Object.entries(S.weeks).filter(([k,w])=>k.includes(':') && ['submitted','approved','rejected'].includes(w.status));
   // My own subs (iso-keyed) — read-only status view
   const ownPend=Object.entries(S.weeks).filter(([k,w])=>!k.includes(':') && ['submitted','approved','rejected'].includes(w.status));
-  let h=`<div class="pg"><div class="ph" style="display:flex;align-items:flex-start;justify-content:space-between"><div><h1>Approvals</h1><p>Review and approve submitted timesheets.</p></div><button class="btn btn-sm" onclick="loadSP().then(()=>rApproval())" style="flex-shrink:0;margin-top:4px"><i class="ti ti-refresh"></i> Refresh</button></div>`;
+  let h=`<div class="pg"><div class="ph" style="display:flex;align-items:flex-start;justify-content:space-between"><div><h1>Approvals</h1><p>Review and approve submitted timesheets.</p></div><div style="display:flex;gap:6px;flex-shrink:0;margin-top:4px">${auth.isAdmin?`<button class="btn btn-sm" onclick="vhWeekAudit()"><i class="ti ti-list-search"></i> Audit</button>`:''}<button class="btn btn-sm" onclick="loadSP().then(()=>rApproval())"><i class="ti ti-refresh"></i> Refresh</button></div></div>`;
   if(!foreignPend.length && !ownPend.length){
     h+=`<div class="nd"><i class="ti ti-shield-check"></i>No timesheets pending approval.</div>`;
   } else {
@@ -1874,6 +2016,15 @@ function rApproval(){
         h+=`<div class="card"><div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:12px"><div><strong style="font-size:16px;font-weight:700;letter-spacing:-.3px">${fw(iso)}</strong><br><span style="font-size:13px;color:var(--text2)">${wk.employees.length} employees · ${tot.toFixed(1)}h</span>${wk.assignedManager?`<br><span style="font-size:12px;color:var(--text3)">→ ${S.managers.find(m=>m.email===wk.assignedManager)?.name||wk.assignedManager}</span>`:''}</div><span class="sb sb-${wk.status.slice(0,2)}">${wk.status}</span></div>${wk.status==='submitted'?`<div class="ib" style="margin:0"><i class="ti ti-clock"></i><span>Awaiting manager approval.</span></div>`:`<button class="btn btn-bl" onclick="vwWk('${iso}')"><i class="ti ti-eye"></i> View details</button>`}</div>`;
       });
     }
+  }
+  const sent=vhSentList();const sentKeys=Object.keys(sent).sort().reverse();
+  if(sentKeys.length){
+    h+=`<div style="font-size:13px;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:.4px;margin:24px 0 10px">Sent copies on this device</div>`;
+    h+=`<div class="card"><p style="font-size:13px;color:var(--text2);margin-bottom:10px">Backups of what this device submitted. If a submitted week ever goes missing, restore it here and resubmit.</p>`;
+    sentKeys.forEach(iso=>{
+      h+=`<div style="display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:0.5px solid var(--border)"><div style="flex:1"><strong style="font-size:14px">${fw(iso)}</strong><br><span style="font-size:12.5px;color:var(--text2)">sent ${String(sent[iso].at||'').slice(0,16).replace('T',' ')}</span></div><button class="btn btn-sm" onclick="vhRestoreSent('${iso}')"><i class="ti ti-restore"></i> Restore to draft</button></div>`;
+    });
+    h+=`</div>`;
   }
   h+=`</div>`;document.getElementById('mc').innerHTML=h;
 }
@@ -2114,7 +2265,7 @@ function rSettings(){let h=`<div class="pg"><div class="ph"><h1>Settings</h1></d
       ${S.managers.map((m,i)=>`<div style="display:flex;align-items:center;gap:10px;padding:12px 0;border-bottom:0.5px solid var(--border)"><div style="flex:1"><strong style="font-size:14px">${m.name}</strong><br><span style="font-size:13px;color:var(--text2)">${m.email}</span></div><button class="btn btn-sm btn-d" onclick="rmMgr(${i})"><i class="ti ti-trash"></i></button></div>`).join('')}
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:14px"><input type="text" id="nn" placeholder="Full name" style="padding:11px 14px;font-size:16px;background:var(--bg2);border:0.5px solid var(--border);border-radius:var(--r3);color:var(--text);-webkit-appearance:none;font-family:inherit"/><input type="email" id="ne" placeholder="Email" style="padding:11px 14px;font-size:16px;background:var(--bg2);border:0.5px solid var(--border);border-radius:var(--r3);color:var(--text);-webkit-appearance:none;font-family:inherit"/></div>
       <button class="btn btn-p btn-bl" style="margin-top:10px" onclick="addMgr()"><i class="ti ti-plus"></i> Add manager</button></div>`;
-    h+=`<div class="card"><strong style="font-size:16px;font-weight:700;display:block;margin-bottom:14px;letter-spacing:-.2px">Spectrum settings</strong><div class="fr"><label>Company code</label><input type="text" value="${S.settings.companyCode}" oninput="S.settings.companyCode=this.value"/></div><div class="fr" style="margin:0"><label>Batch year prefix</label><input type="text" value="${S.settings.batchPrefix}" oninput="S.settings.batchPrefix=this.value"/></div></div>`;
+    h+=`<div class="card"><strong style="font-size:16px;font-weight:700;display:block;margin-bottom:14px;letter-spacing:-.2px">Spectrum settings</strong><div class="fr"><label>Company code</label><input type="text" value="${S.settings.companyCode}" oninput="S.settings.companyCode=this.value"/></div><div class="fr"><label>Batch year prefix</label><input type="text" value="${S.settings.batchPrefix}" oninput="S.settings.batchPrefix=this.value"/></div><div class="fr" style="margin:0"><label>Minimum app build to submit</label><input type="text" value="${S.settings.minBuild||''}" placeholder="e.g. ${VH_BUILD}" oninput="S.settings.minBuild=this.value.trim()"/></div><p style="font-size:12.5px;color:var(--text2);margin-top:8px">Phones on an older build are blocked from submitting and told to update. This app is <strong>${VH_BUILD}</strong>. Bump this after every safety fix.</p></div>`;
     h+=buildPhaseSettingsSection();
     h+=buildPhotoRecipientsSection();
     h+=buildEmpSection();
