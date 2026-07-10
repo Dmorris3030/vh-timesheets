@@ -139,7 +139,7 @@ const FALLBACK_ADMINS=['dmorris@valentiheld.com','abewley@valentiheld.com','jroe
 const SCOPE_LIST_NAME='JobScope';
 const STATUS_LIST_NAME='TrackerStatus';
 const PHASE_LABELS={'300':'Earth — Mass','310':'Earth — Finish','400':'Storm','450':'Storm — Other','500':'Sanitary','600':'Water'};
-const VH_TRK_BUILD='2026-07-01.14';
+const VH_TRK_BUILD='2026-07-01.15';
 console.log('[VH] Job Trackers build',VH_TRK_BUILD);
 
 let mi;
@@ -783,6 +783,18 @@ async function openProgress(){
   document.body.appendChild(wrap);
 }
 function pgClose(){const m=document.getElementById('pg-modal');if(m)m.remove();PG=null;}
+async function pgEnsureWorker(){
+  // A cross-origin workerSrc can't start a real Worker; fetch the script and serve it
+  // same-origin as a blob so pdf.js gets a true worker instead of a fragile fallback.
+  if(window.__pgWorkerReady)return;
+  try{
+    const js=await (await fetch('https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js')).text();
+    pdfjsLib.GlobalWorkerOptions.workerSrc=URL.createObjectURL(new Blob([js],{type:'text/javascript'}));
+  }catch(e){
+    pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+  }
+  window.__pgWorkerReady=1;
+}
 function pgRot(p,d){d=((d%360)+360)%360;let x=p[0],y=p[1];for(let i=0;i<d;i+=90){const nx=1-y,ny=x;x=nx;y=ny;}return [x,y];}
 function pgArrow(ctx,x1,y1,x2,y2,sz,col){const a=Math.atan2(y2-y1,x2-x1);ctx.save();ctx.globalAlpha=.95;ctx.fillStyle=col;
   ctx.beginPath();ctx.moveTo(x2,y2);ctx.lineTo(x2-sz*Math.cos(a-.45),y2-sz*Math.sin(a-.45));ctx.lineTo(x2-sz*Math.cos(a+.45),y2-sz*Math.sin(a+.45));ctx.closePath();ctx.fill();ctx.restore();}
@@ -791,7 +803,7 @@ async function pgGenerate(){
   const st=x=>{const e=document.getElementById('pg-st');if(e)e.textContent=x;};
   try{
     if(!window.pdfjsLib||!window.PDFLib){st('PDF tools still loading — try again in a second.');if(go)go.disabled=false;return;}
-    pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+    await pgEnsureWorker();
     const from=document.getElementById('pg-from').value||'0000',to=document.getElementById('pg-to').value||'9999';
     const picked=PG.sheets.filter((s,i)=>{const c=document.getElementById('pg-s'+i);return c&&c.checked;});
     if(!picked.length){st('Pick at least one sheet.');if(go)go.disabled=false;return;}
@@ -818,7 +830,12 @@ async function pgGenerate(){
       const vp=page.getViewport({scale:EXP,rotation:(page.rotate+rRot)%360});
       const cv=document.createElement('canvas');cv.width=Math.round(vp.width);cv.height=Math.round(vp.height);
       const cx=cv.getContext('2d');
-      await page.render({canvasContext:cx,viewport:vp}).promise;
+      // intent:'print' schedules on timers, not requestAnimationFrame — display intent
+      // suspends indefinitely when the tab loses focus, which reads as "stuck on Rendering".
+      await Promise.race([
+        page.render({canvasContext:cx,viewport:vp,intent:'print'}).promise,
+        new Promise((_,rj)=>setTimeout(()=>rj(new Error('Rendering timed out on '+s.pdf+' — try again with this tab in the foreground.')),120000))
+      ]);
       const phasesSeen={};
       js.forEach(j=>{usedDates.push(j.__date);
         const delta=rRot-((+j.userRot||0)%360);
