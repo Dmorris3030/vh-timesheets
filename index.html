@@ -432,7 +432,7 @@ async function initApp(){
   }catch(e){console.warn(e);}
   initWeeks();updUC();updNav();render();updBadge();
 }
-const VH_BUILD='2026-07-01.8';
+const VH_BUILD='2026-07-01.10';
 console.log('[VH] Timesheets build',VH_BUILD);
 let __vhAuthToastAt=0;
 // interactive=true only from a user-initiated action: saves drafts, then allows the MSAL
@@ -933,9 +933,9 @@ function buildProdField(f,entry,ro){
     WEATHER_OPTIONS.forEach(function(w){s+='<option value="'+w+'" '+(entry[f.id]===w?'selected':'')+'>'+w+'</option>';});
     s+='</select>';
   }else if(f.id==='strId'){
-    var dlid='dlpr'+String(id).replace(/\D/g,'');
-    s+='<input type="text" class="di" autocomplete="off" value="'+val+'" '+(ro?'disabled':'')+' placeholder="e.g. D03-D04, S10-S11" list="'+dlid+'" style="font-size:15px;padding:8px 10px" data-id="'+id+'" data-f="strId" onfocus="vhFillProdDL(this)" oninput="setProdField(+this.dataset.id,this.dataset.f,this.value)"/>';
-    s+='<datalist id="'+dlid+'"></datalist>';
+    // Native datalist is unusable on phones (keyboard dismisses, 300 options unscrollable) —
+    // readonly field opens a full-screen searchable picker instead.
+    s+='<input type="text" class="di" readonly value="'+val+'" '+(ro?'disabled':'')+' placeholder="Tap to pick run / lot" style="font-size:15px;padding:8px 10px;cursor:pointer" data-id="'+id+'" data-f="strId" onclick="if(!this.disabled)vhStrPick(this)"/>';
   }else{
     s+='<input type="'+(f.type==='text'?'text':'number')+'" class="di" '+(f.type!=='text'?'inputmode="decimal"':'')+' value="'+val+'" '+(ro?'disabled':'')+' placeholder="'+f.label+'" style="font-size:15px;padding:8px 10px" data-id="'+id+'" data-f="'+f.id+'" oninput="setProdField(+this.dataset.id,this.dataset.f,this.value)"/>';
   }
@@ -1078,7 +1078,7 @@ async function mkPickPlan(i){
     const buf=await mkFileBytes(MK.planIdx);MK.bytes=buf;
     pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
     MK.pdfDoc=await pdfjsLib.getDocument({data:buf.slice(0)}).promise;
-    MK.userRot=0;MK.strokes=[];MK.redo=[];MK.calibLine=null;
+    MK.userRot=0;MK.strokes=[];MK.redo=[];MK.calibLine=null;MK.pinning=false;MK.pins=null;MK.pinDirty=false;
     await mkLoadScale();
     await mkLoadExisting();
     await mkRender(true);mkStatus('');mkMeasure();mkSyncScale();
@@ -1142,6 +1142,7 @@ async function mkFit(){await mkRender(true);}
 function mkRotate(){const t=function(p){return{x:1-p.y,y:p.x};};
   MK.strokes.forEach(function(s){s.pts=s.pts.map(t);});MK.redo.forEach(function(s){s.pts=s.pts.map(t);});
   if(MK.calibLine)MK.calibLine={p1:t(MK.calibLine.p1),p2:t(MK.calibLine.p2)};MK.calibPts=MK.calibPts.map(t);
+  if(MK.pins){Object.keys(MK.pins).forEach(function(k){const p=MK.pins[k];if(p)MK.pins[k]=[1-p[1],p[0]];});}
   MK.userRot=(MK.userRot+90)%360;mkRender(true);}
 
 function mkStyle(ctx,st,sc){ctx.lineCap='round';ctx.lineJoin='round';ctx.strokeStyle=st.color;
@@ -1158,6 +1159,15 @@ function mkRedraw(){
   if(cp.length===2){ctx.save();ctx.strokeStyle='#00b3ff';ctx.lineWidth=Math.max(2,MK.backing*1.2);ctx.setLineDash([10,7]);
     ctx.beginPath();ctx.moveTo(cp[0].x*oc.width,cp[0].y*oc.height);ctx.lineTo(cp[1].x*oc.width,cp[1].y*oc.height);ctx.stroke();ctx.restore();}
   cp.forEach(function(p){ctx.fillStyle='#00b3ff';ctx.beginPath();ctx.arc(p.x*oc.width,p.y*oc.height,Math.max(6,MK.backing*4),0,Math.PI*2);ctx.fill();ctx.lineWidth=Math.max(2,MK.backing);ctx.strokeStyle='#fff';ctx.stroke();});
+  if(MK.pinning&&MK.pins){
+    Object.keys(MK.pins).forEach(function(k){const p=MK.pins[k];if(!p)return;
+      ctx.globalAlpha=.95;ctx.fillStyle=k.charAt(0)==='L'?'#18b04b':'#6f42c1';
+      ctx.beginPath();ctx.arc(p[0]*oc.width,p[1]*oc.height,Math.max(5,MK.backing*3.2),0,Math.PI*2);ctx.fill();
+      ctx.lineWidth=Math.max(1.5,MK.backing*.9);ctx.strokeStyle='#fff';ctx.stroke();});
+    ctx.globalAlpha=1;
+    const tgt=MK.pinTargets&&MK.pinTargets[MK.pinIdx];
+    if(tgt&&MK.pins[tgt.key]){const p=MK.pins[tgt.key];ctx.strokeStyle='#ff3355';ctx.lineWidth=Math.max(2,MK.backing);ctx.beginPath();ctx.arc(p[0]*oc.width,p[1]*oc.height,Math.max(9,MK.backing*6),0,Math.PI*2);ctx.stroke();}
+  }
 }
 function mkPt(e){const oc=document.getElementById('mk-ink'),r=oc.getBoundingClientRect();const t=e.touches&&e.touches[0]?e.touches[0]:e;
   return{x:mkClamp((t.clientX-r.left)/r.width,0,1),y:mkClamp((t.clientY-r.top)/r.height,0,1)};}
@@ -1167,6 +1177,7 @@ function mkTMid(e){const a=e.touches[0],b=e.touches[1];const r=document.getEleme
 function mkDown(e){
   if(e.touches&&e.touches.length===2){e.preventDefault();mkHideDetail();MK.gOn=true;MK.drawing=false;MK.cur=null;mkRedraw();MK.gd=Math.max(1,mkTDist(e));const m=mkTMid(e);MK.gfx=(m.x-MK.tx)/(MK.cssW*MK.zoom);MK.gfy=(m.y-MK.ty)/(MK.cssH*MK.zoom);MK.gz=MK.zoom;MK.lz=MK.zoom;MK.lmx=m.x;MK.lmy=m.y;return;}
   if(MK.calibrating){if(!MK.gOn){e.preventDefault&&e.preventDefault();mkCalibTap(mkPt(e));}return;}
+  if(MK.pinning){if(!MK.gOn){e.preventDefault&&e.preventDefault();pinTap(mkPt(e));}return;}
   if((!e.touches||e.touches.length===1)&&!MK.gOn){e.preventDefault&&e.preventDefault();MK.drawing=true;MK.cur={color:MK.color,width:MK.width,kind:MK.markKind,phase:MK.phase,pts:[mkPt(e)]};}
 }
 function mkMove(e){
@@ -1205,6 +1216,63 @@ function mkSyncScale(){const b=document.getElementById('mk-scalebtn');if(!b)retu
   if(MK.ftPerPoint){b.textContent='Scale ✓';b.style.background='#1f8f3a';}else{b.textContent='Set scale';b.style.background='#0d6efd';}}
 
 // measurement
+// ===== STRUCTURE PINNING (build .9) =========================================
+// One-time per sheet: an admin taps each structure/lot once, so the tracker can
+// highlight done work on the What's-done PDF from TrackerStatus forever after.
+// Geometry saved to JobPlans/{job}/{sheet}.geo.json (same convention as .scale.json).
+function pinPath(){return MK_PLANS_ROOT+'/'+encodeURIComponent(MK.job)+'/'+encodeURIComponent(mkSheetBase(MK.plans[MK.planIdx].name)+'.geo.json');}
+function pinRotN(p,d){d=((d%360)+360)%360;let x=p[0],y=p[1];for(let i=0;i<d;i+=90){const nx=1-y,ny=x;x=nx;y=ny;}return[x,y];}
+async function pinStart(){
+  if(MK.pinning){pinCancel();return;}
+  const cache=vhScopeCache();
+  if(!cache||!cache.rows||!cache.rows.length){toast('Loading job scope \u2014 try again in a few seconds.','error');vhLoadScope(true);return;}
+  const rows=cache.rows.filter(function(r){return r.j===MK.job;});
+  if(!rows.length){toast('No scope imported for job '+MK.job+' \u2014 import runs/lots in the tracker first.','error');return;}
+  const seen={};const targets=[];
+  rows.forEach(function(r){
+    if(r.t==='lot'||r.t==='lateral'){const k='L:'+String(r.id).trim();if(!seen[k]){seen[k]=1;targets.push({key:k,label:'Lot '+r.id});}}
+    else{String(r.id).split('-').forEach(function(e2){e2=e2.trim();if(!e2)return;const k='S:'+e2;if(!seen[k]){seen[k]=1;targets.push({key:k,label:'STR '+e2+' (ph '+r.p+')'});}});}
+  });
+  MK.pins={};
+  try{const tok=await getTok();const r=await fetch(mkDriveUrl(pinPath()+':/content'),{headers:{Authorization:'Bearer '+tok}});
+    if(r.ok){const g=await r.json();const gp=g.pins||{};const d=(MK.userRot-((+g.userRot||0)%360));
+      Object.keys(gp).forEach(function(k){if(gp[k])MK.pins[k]=pinRotN(gp[k],d);});}}catch(e){}
+  MK.pinTargets=targets;MK.pinDirty=false;MK.pinning=true;
+  MK.pinIdx=targets.findIndex(function(x){return !MK.pins[x.key];});if(MK.pinIdx<0)MK.pinIdx=0;
+  document.getElementById('mk-pinpanel').style.display='flex';
+  pinBanner();mkRedraw();
+}
+function pinBanner(){
+  const t=MK.pinTargets[MK.pinIdx];const done=Object.keys(MK.pins).length;
+  const pr=document.getElementById('mk-pinprog');if(pr)pr.textContent=done+'/'+MK.pinTargets.length;
+  mkBanner(t?('Tap: '+t.label+(MK.pins[t.key]?'  (pinned \u2014 tap again to move)':'')):'All pinned \u2014 Save & done.');
+}
+function pinTap(p){
+  const t=MK.pinTargets[MK.pinIdx];if(!t)return;
+  MK.pins[t.key]=[p.x,p.y];MK.pinDirty=true;
+  let n=-1;
+  for(let i=1;i<=MK.pinTargets.length;i++){const j=(MK.pinIdx+i)%MK.pinTargets.length;if(!MK.pins[MK.pinTargets[j].key]){n=j;break;}}
+  MK.pinIdx=n>=0?n:Math.min(MK.pinIdx+1,MK.pinTargets.length-1);
+  if(Object.keys(MK.pins).length%20===0)pinSave(false); // autosave: never lose 300 taps
+  pinBanner();mkRedraw();
+}
+function pinSkip(){if(!MK.pinTargets.length)return;MK.pinIdx=(MK.pinIdx+1)%MK.pinTargets.length;pinBanner();mkRedraw();}
+function pinBack(){if(!MK.pinTargets.length)return;MK.pinIdx=(MK.pinIdx-1+MK.pinTargets.length)%MK.pinTargets.length;pinBanner();mkRedraw();}
+async function pinSave(announce){
+  try{const tok=await getTok(true);if(!tok)return false;
+    const r=await fetch(mkDriveUrl(pinPath()+':/content'),{method:'PUT',headers:{Authorization:'Bearer '+tok,'Content-Type':'application/json'},
+      body:JSON.stringify({job:MK.job,sheet:MK.plans[MK.planIdx].name,userRot:MK.userRot,pins:MK.pins,updatedAt:new Date().toISOString(),by:(auth.user&&auth.user.name)||''})});
+    if(!r.ok)throw new Error('HTTP '+r.status);
+    MK.pinDirty=false;
+    if(announce!==false)toast('Pins saved \u2014 the What\u2019s-done PDF will highlight tracker progress on this sheet.','success');
+    return true;
+  }catch(e){toast('Pin save failed: '+e.message,'error');return false;}
+}
+async function pinDone(){if(await pinSave(true))pinCancel(true);}
+function pinCancel(saved){
+  if(MK.pinDirty&&saved!==true&&!confirm('Exit pin mode without saving the newest pins?'))return;
+  MK.pinning=false;const pp=document.getElementById('mk-pinpanel');if(pp)pp.style.display='none';mkBanner('');mkRedraw();
+}
 function mkFmt(n){return Math.round(n).toLocaleString();}
 function mkLen(st){let L=0;for(let i=1;i<st.pts.length;i++){const a=mkPPt(st.pts[i-1]),b=mkPPt(st.pts[i]);L+=Math.hypot(b.x-a.x,b.y-a.y);}return L;}
 function mkArea(st){let A=0;const p=st.pts;for(let i=0;i<p.length;i++){const a=mkPPt(p[i]),b=mkPPt(p[(i+1)%p.length]);A+=a.x*b.y-b.x*a.y;}return Math.abs(A)/2;}
@@ -1321,6 +1389,13 @@ function mkBuildOverlay(){
   o.style.cssText='position:fixed;inset:0;background:#1a1a1a;z-index:400;display:flex;flex-direction:column';
   o.innerHTML=
    '<div id="mk-banner" style="display:none;position:fixed;top:10px;left:50%;transform:translateX(-50%);background:#00b3ff;color:#00121c;font-weight:700;padding:10px 16px;border-radius:10px;z-index:60;font-size:13px;max-width:92vw;text-align:center"></div>'+
+   '<div id="mk-pinpanel" style="display:none;position:fixed;bottom:14px;left:50%;transform:translateX(-50%);background:#fff;color:#111;padding:10px 12px;border-radius:12px;z-index:61;align-items:center;gap:8px;max-width:94vw;box-shadow:0 8px 28px rgba(0,0,0,.5)">'+
+     '<span id="mk-pinprog" style="font-size:13px;font-weight:700;white-space:nowrap"></span>'+
+     '<button onclick="pinBack()" style="background:#e9ecef;color:#111;border:none;border-radius:7px;padding:8px 12px;cursor:pointer">\u25c0 Back</button>'+
+     '<button onclick="pinSkip()" style="background:#e9ecef;color:#111;border:none;border-radius:7px;padding:8px 12px;cursor:pointer">Skip \u25b6</button>'+
+     '<button onclick="pinDone()" style="background:#1f8f3a;color:#fff;border:none;border-radius:7px;padding:8px 12px;cursor:pointer;font-weight:700">Save & done</button>'+
+     '<button onclick="pinCancel()" style="background:#6c757d;color:#fff;border:none;border-radius:7px;padding:8px 12px;cursor:pointer">\u2715</button>'+
+   '</div>'+
    '<div id="mk-calibpanel" style="display:none;position:fixed;top:10px;left:50%;transform:translateX(-50%);background:#fff;color:#111;padding:12px 14px;border-radius:12px;z-index:61;align-items:center;gap:8px;flex-wrap:wrap;max-width:94vw;box-shadow:0 8px 28px rgba(0,0,0,.5)">'+
      '<span style="font-size:13px;font-weight:600">Distance between points:</span><input id="mk-calibft" type="number" inputmode="decimal" placeholder="feet" style="width:90px;padding:8px;border:1px solid #ccc;border-radius:7px;font-size:15px"/><span style="font-weight:600">ft</span>'+
      '<button onclick="mkApplyCalib()" style="background:#2563eb;color:#fff;border:none;border-radius:7px;padding:8px 12px;cursor:pointer">Apply</button>'+
@@ -1331,6 +1406,7 @@ function mkBuildOverlay(){
      '<span style="display:inline-block;width:14px;height:14px;border-radius:3px;background:'+MK.color+';margin-left:2px"></span>'+
      (MK.plans.length>1?'<select onchange="mkPickPlan(this.value)" style="margin-left:6px;font-size:12px;padding:5px;border-radius:6px;border:none;max-width:130px">'+MK.plans.map(function(p,i){return '<option value="'+i+'">'+(p.name||'').replace(/\.pdf$/i,'')+'</option>';}).join('')+'</select>':'')+
      '<button id="mk-scalebtn" onclick="mkStartCalib()" style="margin-left:auto;background:#0d6efd;border:none;color:#fff;border-radius:7px;padding:7px 10px;cursor:pointer;font-size:13px">Set scale</button>'+
+     (auth.isAdmin?'<button id="mk-pinbtn" onclick="pinStart()" style="margin-left:8px;background:#6f42c1;border:none;color:#fff;border-radius:7px;padding:7px 10px;cursor:pointer;font-size:13px">Pin</button>':'')+
    '</div>'+
    '<div style="display:flex;align-items:center;gap:5px;flex-wrap:wrap;padding:6px 10px;background:#2b2b2b">'+
      '<button id="mk-kArea" onclick="mkSetKind(\'area\')" style="'+tb+'">▭ Area</button>'+
@@ -1505,21 +1581,66 @@ async function vhLoadScope(force){
   }catch(e){console.warn('vhLoadScope:',e);}
   finally{__vhScopeLoading=false;}
 }
-function vhFillProdDL(inp){
-  // STR ID typeahead on the PRODUCTION form — runs belong to the crew's day, not a person.
-  const dl=document.getElementById(inp.getAttribute('list'));if(!dl)return;
+// ===== RUN / LOT PICKER (build .10) =========================================
+// Full-screen searchable picker for the production form's STR ID field.
+// Replaces the native datalist, which is broken on phones (keyboard dismisses,
+// long lists unscrollable). Search input at TOP so the keyboard never covers it.
+function vhStrPick(inp){
   const cache=vhScopeCache();
-  if(!cache){vhLoadScope(true);dl.innerHTML='';return;}
+  if(!cache||!cache.rows||!cache.rows.length){vhLoadScope(true);toast('Loading run list \u2014 give it a few seconds and tap again.','error');return;}
   if(Date.now()-cache.ts>4*3600*1000)vhLoadScope(); // background refresh
   const wk=S.weeks[S.currentWeek];
   const entry=(typeof prodEntries==='function'?prodEntries(wk):[]).find(function(e){return e.id==inp.dataset.id;})||{};
   const job=String(entry.job||'').trim(),ph=String(entry.phase||'').trim();
-  let m=cache.rows.filter(r=>(!job||r.j===job||r.j.indexOf(job)===0)&&(!ph||r.p===ph));
-  if(!m.length&&job)m=cache.rows.filter(r=>r.j===job);
-  if(!m.length)m=cache.rows;
-  const escA=t=>String(t).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;');
-  dl.innerHTML=m.slice(0,300).map(r=>'<option value="'+escA(r.id)+'">'+escA((r.t==='lot'||r.t==='lateral'?'Lot ':'')+r.d)+'</option>').join('');
+  let rows=cache.rows.filter(function(r){return (!job||r.j===job||r.j.indexOf(job)===0)&&(!ph||r.p===ph);});
+  let scopeNote=(job?('job '+job):'all jobs')+(ph?(' \u00b7 phase '+ph):'');
+  if(!rows.length&&job){rows=cache.rows.filter(function(r){return r.j===job;});scopeNote='job '+job+' (all phases)';}
+  if(!rows.length){rows=cache.rows;scopeNote='all jobs';}
+  rows=rows.slice().sort(function(a,b){return String(a.id).localeCompare(String(b.id),undefined,{numeric:true});});
+  window.__strPick={entryId:inp.dataset.id,inputEl:inp,rows:rows};
+  let el=document.getElementById('str-sheet');if(el)el.remove();
+  el=document.createElement('div');el.id='str-sheet';
+  el.innerHTML='<div style="position:fixed;inset:0;background:var(--bg,#0d1117);z-index:300;display:flex;flex-direction:column">'+
+    '<div style="display:flex;gap:8px;align-items:center;padding:calc(10px + env(safe-area-inset-top)) 12px 10px">'+
+      '<button onclick="vhStrClose()" style="background:none;border:none;color:inherit;font-size:24px;padding:4px 8px;cursor:pointer">\u2715</button>'+
+      '<input id="str-q" type="search" autocomplete="off" autocorrect="off" autocapitalize="characters" placeholder="Type to filter \u2014 D03, 1747, lot 20\u2026" style="flex:1;font-size:16px;padding:11px 12px;border-radius:10px;border:1px solid var(--border,#2a3140);background:var(--card,#171b22);color:inherit" oninput="vhStrFilter()"/>'+
+    '</div>'+
+    '<div style="padding:0 14px 6px;font-size:12px;opacity:.55">Showing '+scopeNote+' \u00b7 tap a row to select</div>'+
+    '<div id="str-list" style="overflow-y:auto;-webkit-overflow-scrolling:touch;flex:1;padding:0 8px calc(12px + env(safe-area-inset-bottom))"></div>'+
+  '</div>';
+  document.body.appendChild(el);
+  vhStrFilter();
 }
+function vhStrFilter(){
+  const c=window.__strPick;if(!c)return;
+  const raw=((document.getElementById('str-q')||{}).value||'').trim();
+  const qq=raw.toUpperCase().replace(/\s+/g,'');
+  const m=qq?c.rows.filter(function(r){
+    return String(r.id).toUpperCase().replace(/\s+/g,'').indexOf(qq)>=0
+        ||String(r.d||'').toUpperCase().indexOf(raw.toUpperCase())>=0;
+  }):c.rows;
+  const escH=function(x){return String(x).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');};
+  let h='';
+  if(raw&&!m.some(function(r){return String(r.id).toUpperCase().replace(/\s+/g,'')===qq;})){
+    h+='<div onclick="vhStrChoose(this.dataset.v)" data-v="'+escH(raw)+'" style="padding:14px 10px;border-bottom:0.5px solid var(--border,#2a3140);cursor:pointer;color:var(--blue,#4593f8)"><strong style="font-size:15px">Use \u201c'+escH(raw)+'\u201d as typed</strong></div>';
+  }
+  m.slice(0,400).forEach(function(r){
+    const lot=(r.t==='lot'||r.t==='lateral');
+    h+='<div onclick="vhStrChoose(this.dataset.v)" data-v="'+escH(r.id)+'" style="padding:14px 10px;border-bottom:0.5px solid var(--border,#2a3140);cursor:pointer;display:flex;align-items:baseline;gap:10px">'+
+       '<strong style="font-size:16px;min-width:104px">'+(lot?'Lot ':'')+escH(r.id)+'</strong>'+
+       '<span style="font-size:12.5px;opacity:.6;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+escH(r.d||'')+(r.p?' \u00b7 ph '+escH(r.p):'')+'</span></div>';
+  });
+  if(m.length>400)h+='<div style="padding:12px;opacity:.5;font-size:12.5px">'+(m.length-400)+' more \u2014 keep typing to narrow down.</div>';
+  if(!h)h='<div style="padding:18px;opacity:.6;font-size:14px">Nothing matches \u201c'+escH(raw)+'\u201d.</div>';
+  const L=document.getElementById('str-list');if(L)L.innerHTML=h;
+}
+function vhStrChoose(id){
+  const c=window.__strPick;if(!c)return;
+  setProdField(+c.entryId,'strId',id);
+  if(c.inputEl)c.inputEl.value=id; // update the visible field without re-rendering the form
+  vhStrClose();
+}
+function vhStrClose(){const el=document.getElementById('str-sheet');if(el)el.remove();window.__strPick=null;}
 setTimeout(function(){try{vhLoadScope();}catch(e){}},6000);
 async function submitJobLinesToSP(wk, silent){
   if(window.__VH_JLW_INFLIGHT)return{ok:false,busy:true};

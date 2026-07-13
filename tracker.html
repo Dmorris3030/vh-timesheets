@@ -139,7 +139,7 @@ const FALLBACK_ADMINS=['dmorris@valentiheld.com','abewley@valentiheld.com','jroe
 const SCOPE_LIST_NAME='JobScope';
 const STATUS_LIST_NAME='TrackerStatus';
 const PHASE_LABELS={'300':'Earth — Mass','310':'Earth — Finish','400':'Storm','450':'Storm — Other','500':'Sanitary','600':'Water'};
-const VH_TRK_BUILD='2026-07-01.15';
+const VH_TRK_BUILD='2026-07-01.17';
 console.log('[VH] Job Trackers build',VH_TRK_BUILD);
 
 let mi;
@@ -296,6 +296,7 @@ async function loadAll(){
       S.status[k]={spId:it.id,pct:Math.max(0,Math.min(100,Math.round((+it.fields[ct.PctDone]||0)*10)/10)),note:it.fields[ct.Note]||''};
     });
     S.prod=fdItems.map(it=>it.fields).filter(f=>f&&(f.Jobnumber||f['STR_x0020_ID']));
+    S._aq={}; // reported-qty cache follows Field Data
     S.loaded=true;
   }catch(e){console.warn('loadAll:',e);toast('Load failed: '+e.message,'err');}
 }
@@ -356,10 +357,35 @@ function actualByItem(job){ // production hours grouped by STR ID from the crews
   });
   return any?m:null;
 }
+function autoQtyByItem(job){ // installed quantity reported on the crews' production forms, by STR ID
+  if(!S._aq)S._aq={};
+  if(S._aq[job])return S._aq[job];
+  const m={};
+  S.prod.forEach(l=>{
+    if(String(l.Jobnumber||'').trim()!==job)return;
+    const id=nid(l['STR_x0020_ID']);if(!id)return;
+    const q=parseFloat(String(l['Yardage_x002f_production']||'').replace(/,/g,''));
+    if(q>0)m[id]=(m[id]||0)+q;
+  });
+  S._aq[job]=m;return m;
+}
+// Effective % done = the higher of the manually tapped value and the value implied by
+// reported production quantity vs bid quantity. Production reports advance progress
+// automatically; taps can push higher; downward corrections are made by fixing the
+// production report (or Installed qty), since footage on the books shouldn't vanish.
+function effPct(job,r){
+  const man=pctOf(job,r.ItemID);
+  let auto=0;
+  if(r.BidQty>0){
+    const q=autoQtyByItem(job)[nid(r.ItemID)]||0;
+    if(q>0)auto=Math.min(100,q/r.BidQty*100);
+  }
+  return Math.max(man,Math.round(auto*10)/10);
+}
 function jobSummary(job){
   const rows=S.scope.filter(r=>r.JobNum===job);
   let bid=0,earned=0;
-  rows.forEach(r=>{bid+=r.BidHrs;earned+=r.BidHrs*pctOf(job,r.ItemID)/100;});
+  rows.forEach(r=>{bid+=r.BidHrs;earned+=r.BidHrs*effPct(job,r)/100;});
   const act=actualByJobPhase(job);
   const actual=Object.values(act).reduce((a,b)=>a+b,0);
   return {bid,earned,actual,pct:bid?earned/bid*100:0,items:rows.length};
@@ -461,7 +487,7 @@ function renderJob(){
 }
 function renderPhase(job,rows,phase,actual,actItem){
   let bid=0,earned=0;
-  rows.forEach(r=>{bid+=r.BidHrs;earned+=r.BidHrs*pctOf(job,r.ItemID)/100;});
+  rows.forEach(r=>{bid+=r.BidHrs;earned+=r.BidHrs*effPct(job,r)/100;});
   const varr=actual-earned;
   const lots=rows.filter(r=>r.ItemType==='lot'||r.ItemType==='lateral')
     .sort((a,b)=>String(a.ItemID).localeCompare(String(b.ItemID),undefined,{numeric:true})); // lot 2 before lot 10
@@ -471,14 +497,14 @@ function renderPhase(job,rows,phase,actual,actItem){
   const areaKeys=Object.keys(areas).sort();
   const runHtml=areaKeys.map(a=>{
     const list=areas[a];
-    let ab=0,ae=0;list.forEach(r=>{ab+=r.BidHrs;ae+=r.BidHrs*pctOf(job,r.ItemID)/100;});
+    let ab=0,ae=0;list.forEach(r=>{ab+=r.BidHrs;ae+=r.BidHrs*effPct(job,r)/100;});
     const head=a?`<div class="area-h"><span>${esc(a)}</span><span class="ah-num">${fmt0(ae)} / ${fmt0(ab)} hrs</span></div>`:'';
     return head+list.map(r=>runRow(job,r,actItem)).join('');
   }).join('');
   const lotHtml=lots.length?`<div class="area-h"><span>Laterals — tap lot when tied in</span>
-      <span class="ah-num">${lots.filter(r=>pctOf(job,r.ItemID)>=100).length} / ${lots.length} done</span></div>
+      <span class="ah-num">${lots.filter(r=>effPct(job,r)>=100).length} / ${lots.length} done</span></div>
     <div class="lots">${lots.map(r=>{
-      const done=pctOf(job,r.ItemID)>=100;
+      const done=effPct(job,r)>=100;
       return `<button class="lot${done?' done':''}" onclick="setPct('${esc(job)}','${esc(r.ItemID)}',${done?0:100})" title="${esc(r.Descr)}">${esc(r.ItemID.replace(/^LOT-?/i,''))}</button>`;
     }).join('')}</div>`:'';
   return `<div class="sec"><h2>${esc(PHASE_LABELS[phase]||('Phase '+phase))} <span class="h2-sub">phase ${esc(phase)} · ${rows.length} items</span></h2>
@@ -490,13 +516,15 @@ function renderPhase(job,rows,phase,actual,actItem){
     </div>${runHtml}${lotHtml}</div>`;
 }
 function runRow(job,r,actItem){
-  const pct=pctOf(job,r.ItemID);
+  const man=pctOf(job,r.ItemID);
+  const pct=effPct(job,r);
+  const isAuto=pct>man+0.05; // progress currently driven by production reports
   const burned=actItem?(actItem[nid(r.ItemID)]||0):null;
   const rp=Math.round(pct);
   const seg=[0,25,50,75,100].map(v=>
     `<button class="${rp===v?'on'+(v===100?' full':''):''}" onclick="setPct('${esc(job)}','${esc(r.ItemID)}',${v})">${v===100?'✓':v||'—'}</button>`).join('');
   const qtyBit=r.BidQty>0
-    ?`<button class="qbtn" onclick="editInstalled('${esc(job)}','${esc(r.ItemID)}')">${fmt(Math.round(r.BidQty*pct/100))}/${fmt(r.BidQty)} ${esc(r.Unit)}${[0,25,50,75,100].includes(rp)?'':' · '+rp+'%'}</button>`
+    ?`<button class="qbtn" title="${isAuto?'from crew production reports':'tap to set installed qty'}" onclick="editInstalled('${esc(job)}','${esc(r.ItemID)}')">${isAuto?'<i class="ti ti-bolt" style="font-size:11px"></i> ':''}${fmt(Math.round(r.BidQty*pct/100))}/${fmt(r.BidQty)} ${esc(r.Unit)}${[0,25,50,75,100].includes(rp)?'':' · '+rp+'%'}</button>`
     :'';
   return `<div class="run">
     <span class="run-id">${esc(r.ItemID)}</span>
@@ -508,7 +536,7 @@ function runRow(job,r,actItem){
 function editInstalled(job,itemId){
   const r=S.scope.find(x=>x.JobNum===job&&x.ItemID===itemId);
   if(!r||!(r.BidQty>0))return;
-  const cur=Math.round(r.BidQty*pctOf(job,itemId)/100);
+  const cur=Math.round(r.BidQty*effPct(job,r)/100);
   const v=prompt('Installed '+(r.Unit||'qty')+' for '+itemId+' (of '+fmt(r.BidQty)+')',cur);
   if(v==null)return;
   const n=parseFloat(String(v).replace(/,/g,''));
@@ -527,7 +555,7 @@ function exportXlsx(job){
   rows.forEach(r=>{
     const k=r.JobNum+'|'+r.Phase;
     const o=sum[k]=sum[k]||{job:r.JobNum,ph:r.Phase,bid:0,earn:0,items:0,done:0};
-    const pct=pctOf(r.JobNum,r.ItemID);
+    const pct=effPct(r.JobNum,r);
     o.bid+=r.BidHrs;o.earn+=r.BidHrs*pct/100;o.items++;if(pct>=100)o.done++;
   });
   const sumRows=Object.values(sum).sort((a,b)=>a.job.localeCompare(b.job)||a.ph.localeCompare(b.ph)).map(o=>{
@@ -543,7 +571,7 @@ function exportXlsx(job){
   const aiCache={};
   const detRows=rows.slice().sort((a,b)=>a.JobNum.localeCompare(b.JobNum)||a.Phase.localeCompare(b.Phase)||String(a.Area).localeCompare(String(b.Area))).map(r=>{
     if(!(r.JobNum in aiCache))aiCache[r.JobNum]=actualByItem(r.JobNum);
-    const pct=pctOf(r.JobNum,r.ItemID);
+    const pct=effPct(r.JobNum,r);
     const row={'Job':r.JobNum,'Phase':r.Phase,'Area':r.Area,'ID':r.ItemID,'Type':r.ItemType,'Description':r.Descr,
       'Bid Qty':r.BidQty||'','Unit':r.Unit,'Installed':r.BidQty?r1(r.BidQty*pct/100):'','% Done':r1(pct),
       'Bid Hrs':r1(r.BidHrs),'Earned Hrs':r1(r.BidHrs*pct/100),'Remaining Hrs':r1(r.BidHrs*(1-pct/100))};
@@ -836,6 +864,37 @@ async function pgGenerate(){
         page.render({canvasContext:cx,viewport:vp,intent:'print'}).promise,
         new Promise((_,rj)=>setTimeout(()=>rj(new Error('Rendering timed out on '+s.pdf+' — try again with this tab in the foreground.')),120000))
       ]);
+      // Tracker-driven layer (drawn UNDER the foremen's ink): done/partial runs and
+      // tied-in lots straight from TrackerStatus, using the one-time pinned geometry.
+      let trkDone=0,trkPart=0;
+      try{
+        const gr=await fetch(tsUrl(MK_ROOT+'/'+encodeURIComponent(PG.job)+'/'+encodeURIComponent(s.base+'.geo.json'))+':/content',{headers:H});
+        if(gr.ok){
+          const geo=await gr.json();const pins=geo.pins||{};
+          const gd=rRot-((+geo.userRot||0)%360);
+          const P=k2=>{const p=pins[k2];return p?pgRot(p,gd):null;};
+          S.scope.filter(r=>r.JobNum===PG.job).forEach(r=>{
+            const pct=effPct(PG.job,r);
+            if(r.ItemType==='lot'||r.ItemType==='lateral'){
+              if(pct<100)return;
+              const p=P('L:'+String(r.ItemID).trim());if(!p)return;
+              cx.globalAlpha=.9;cx.fillStyle='#18b04b';
+              cx.beginPath();cx.arc(p[0]*cv.width,p[1]*cv.height,5.5*EXP,0,Math.PI*2);cx.fill();
+              cx.lineWidth=1.5*EXP;cx.strokeStyle='#fff';cx.stroke();trkDone++;
+            }else{
+              if(pct<=0)return;
+              const ends=String(r.ItemID).split('-').map(x=>x.trim());
+              if(ends.length!==2)return;
+              const a=P('S:'+ends[0]),b=P('S:'+ends[1]);if(!a||!b)return;
+              cx.globalAlpha=.45;cx.lineCap='round';
+              cx.strokeStyle=pct>=100?'#18b04b':'#f5a623';cx.lineWidth=8*EXP;
+              cx.beginPath();cx.moveTo(a[0]*cv.width,a[1]*cv.height);cx.lineTo(b[0]*cv.width,b[1]*cv.height);cx.stroke();
+              if(pct>=100)trkDone++;else trkPart++;
+            }
+          });
+          cx.globalAlpha=1;
+        }
+      }catch(e){console.warn('geo layer',e);}
       const phasesSeen={};
       js.forEach(j=>{usedDates.push(j.__date);
         const delta=rRot-((+j.userRot||0)%360);
@@ -857,6 +916,10 @@ async function pgGenerate(){
       Object.keys(phasesSeen).sort().forEach(ph=>{
         cx.fillStyle=PG_COLORS[ph]||'#c8102e';cx.fillRect(hx,lh*0.32,14*EXP,lh*0.36);hx+=17*EXP;
         cx.fillStyle='#111';const lb=PG_LABEL[ph]||('Ph '+ph);cx.fillText(lb,hx,lh/2);hx+=cx.measureText(lb).width+12*EXP;});
+      if(trkDone||trkPart){
+        const leg=[['#18b04b','Done (tracker)']].concat(trkPart?[['#f5a623','In progress']]:[]);
+        leg.forEach(L=>{cx.fillStyle=L[0];cx.fillRect(hx,lh*0.32,14*EXP,lh*0.36);hx+=17*EXP;cx.fillStyle='#111';cx.fillText(L[1],hx,lh/2);hx+=cx.measureText(L[1]).width+12*EXP;});
+      }
       const img=await out.embedJpg(cv.toDataURL('image/jpeg',.85));
       const pg2=out.addPage([cv.width/EXP,cv.height/EXP]);
       pg2.drawImage(img,{x:0,y:0,width:cv.width/EXP,height:cv.height/EXP});
