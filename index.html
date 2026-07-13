@@ -432,7 +432,7 @@ async function initApp(){
   }catch(e){console.warn(e);}
   initWeeks();updUC();updNav();render();updBadge();
 }
-const VH_BUILD='2026-07-01.10';
+const VH_BUILD='2026-07-01.11';
 console.log('[VH] Timesheets build',VH_BUILD);
 let __vhAuthToastAt=0;
 // interactive=true only from a user-initiated action: saves drafts, then allows the MSAL
@@ -1230,22 +1230,41 @@ async function pinStart(){
   if(!rows.length){toast('No scope imported for job '+MK.job+' \u2014 import runs/lots in the tracker first.','error');return;}
   const seen={};const targets=[];
   rows.forEach(function(r){
-    if(r.t==='lot'||r.t==='lateral'){const k='L:'+String(r.id).trim();if(!seen[k]){seen[k]=1;targets.push({key:k,label:'Lot '+r.id});}}
-    else{String(r.id).split('-').forEach(function(e2){e2=e2.trim();if(!e2)return;const k='S:'+e2;if(!seen[k]){seen[k]=1;targets.push({key:k,label:'STR '+e2+' (ph '+r.p+')'});}});}
+    if(r.t==='lot'||r.t==='lateral'){const k='L:'+String(r.id).trim();if(!seen[k]){seen[k]=1;targets.push({key:k,label:'Lot '+r.id,ph:String(r.p||'')});}}
+    else{String(r.id).split('-').forEach(function(e2){e2=e2.trim();if(!e2)return;const k='S:'+e2;if(!seen[k]){seen[k]=1;targets.push({key:k,label:'STR '+e2+' (ph '+r.p+')',ph:String(r.p||'')});}});}
   });
   MK.pins={};
   try{const tok=await getTok();const r=await fetch(mkDriveUrl(pinPath()+':/content'),{headers:{Authorization:'Bearer '+tok}});
     if(r.ok){const g=await r.json();const gp=g.pins||{};const d=(MK.userRot-((+g.userRot||0)%360));
       Object.keys(gp).forEach(function(k){if(gp[k])MK.pins[k]=pinRotN(gp[k],d);});}}catch(e){}
-  MK.pinTargets=targets;MK.pinDirty=false;MK.pinning=true;
-  MK.pinIdx=targets.findIndex(function(x){return !MK.pins[x.key];});if(MK.pinIdx<0)MK.pinIdx=0;
+  MK.pinAll=targets;MK.pinDirty=false;MK.pinning=true;
   document.getElementById('mk-pinpanel').style.display='flex';
+  pinApplyFilter('ALL');mkRedraw();
+}
+// Phase filter — on a storm sheet you shouldn't have to Skip through 300 sanitary targets.
+function pinApplyFilter(f){
+  MK.pinFilter=f;
+  MK.pinTargets=f==='ALL'?MK.pinAll
+    :(f==='LOTS'?MK.pinAll.filter(function(x){return x.key.charAt(0)==='L';})
+    :MK.pinAll.filter(function(x){return x.key.charAt(0)==='S'&&x.ph===f;}));
+  MK.pinIdx=MK.pinTargets.findIndex(function(x){return !MK.pins[x.key];});if(MK.pinIdx<0)MK.pinIdx=0;
+  const b=document.getElementById('mk-pinfilter');
+  if(b)b.textContent=f==='ALL'?'All':(f==='LOTS'?'Lots':'Ph '+f);
   pinBanner();mkRedraw();
 }
+function pinFilterCycle(){
+  const phases=[];MK.pinAll.forEach(function(x){if(x.key.charAt(0)==='S'&&x.ph&&phases.indexOf(x.ph)<0)phases.push(x.ph);});
+  phases.sort();
+  const opts=['ALL'].concat(phases);
+  if(MK.pinAll.some(function(x){return x.key.charAt(0)==='L';}))opts.push('LOTS');
+  const i=opts.indexOf(MK.pinFilter||'ALL');
+  pinApplyFilter(opts[(i+1)%opts.length]);
+}
 function pinBanner(){
-  const t=MK.pinTargets[MK.pinIdx];const done=Object.keys(MK.pins).length;
+  const t=MK.pinTargets[MK.pinIdx];const done=MK.pinTargets.filter(function(x){return MK.pins[x.key];}).length;
   const pr=document.getElementById('mk-pinprog');if(pr)pr.textContent=done+'/'+MK.pinTargets.length;
-  mkBanner(t?('Tap: '+t.label+(MK.pins[t.key]?'  (pinned \u2014 tap again to move)':'')):'All pinned \u2014 Save & done.');
+  mkBanner(!MK.pinTargets.length?'No targets in this filter \u2014 tap the phase button.'
+    :(t?('Tap: '+t.label+(MK.pins[t.key]?'  (pinned \u2014 tap again to move)':'')):'All pinned in this filter \u2014 Save & done or switch phase.'));
 }
 function pinTap(p){
   const t=MK.pinTargets[MK.pinIdx];if(!t)return;
@@ -1391,6 +1410,7 @@ function mkBuildOverlay(){
    '<div id="mk-banner" style="display:none;position:fixed;top:10px;left:50%;transform:translateX(-50%);background:#00b3ff;color:#00121c;font-weight:700;padding:10px 16px;border-radius:10px;z-index:60;font-size:13px;max-width:92vw;text-align:center"></div>'+
    '<div id="mk-pinpanel" style="display:none;position:fixed;bottom:14px;left:50%;transform:translateX(-50%);background:#fff;color:#111;padding:10px 12px;border-radius:12px;z-index:61;align-items:center;gap:8px;max-width:94vw;box-shadow:0 8px 28px rgba(0,0,0,.5)">'+
      '<span id="mk-pinprog" style="font-size:13px;font-weight:700;white-space:nowrap"></span>'+
+     '<button id="mk-pinfilter" onclick="pinFilterCycle()" style="background:#0d6efd;color:#fff;border:none;border-radius:7px;padding:8px 12px;cursor:pointer;font-weight:700">All</button>'+
      '<button onclick="pinBack()" style="background:#e9ecef;color:#111;border:none;border-radius:7px;padding:8px 12px;cursor:pointer">\u25c0 Back</button>'+
      '<button onclick="pinSkip()" style="background:#e9ecef;color:#111;border:none;border-radius:7px;padding:8px 12px;cursor:pointer">Skip \u25b6</button>'+
      '<button onclick="pinDone()" style="background:#1f8f3a;color:#fff;border:none;border-radius:7px;padding:8px 12px;cursor:pointer;font-weight:700">Save & done</button>'+
