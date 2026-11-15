@@ -139,7 +139,7 @@ const FALLBACK_ADMINS=['dmorris@valentiheld.com','abewley@valentiheld.com','jroe
 const SCOPE_LIST_NAME='JobScope';
 const STATUS_LIST_NAME='TrackerStatus';
 const PHASE_LABELS={'300':'Earth — Mass','310':'Earth — Finish','400':'Storm','450':'Storm — Other','500':'Sanitary','600':'Water'};
-const VH_TRK_BUILD='2026-11-15.20';
+const VH_TRK_BUILD='2026-11-15.21';
 console.log('[VH] Job Trackers build',VH_TRK_BUILD);
 
 let mi;
@@ -162,6 +162,7 @@ async function initMsal(){
     await loadRoles();
     await ensureLists();
     if(S.lists){await loadAll();}
+    if(S.lists&&!S.loaded&&!S.loadErr)S.loadErr='Sign-in token not available ('+(S.tokErr||'no token')+').';
     render();
   } else renderAuth();
 }
@@ -171,6 +172,7 @@ let __authToastAt=0;
 async function getToken(interactive){
   try{const r=await mi.acquireTokenSilent({scopes:SCOPES,account:auth.account});return r.accessToken;}
   catch(e){
+    S.tokErr=(e&&(e.errorCode||e.message))||'unknown';
     if(e instanceof msal.InteractionRequiredAuthError){
       if(interactive){await mi.acquireTokenRedirect({scopes:SCOPES,account:auth.account});}
       else if(Date.now()-__authToastAt>60000){__authToastAt=Date.now();toast('Session expired — sign in again to refresh.','err');}
@@ -300,7 +302,7 @@ async function loadAll(){
     S.loaded=true;
     setTimeout(()=>saveOfficeTracker(true),4000); // keep the office copy fresh (at most every 30 min per device)
     setTimeout(()=>pkAuto(),1500); // pick up new job folders / new field packets
-  }catch(e){console.warn('loadAll:',e);toast('Load failed: '+e.message,'err');}
+  }catch(e){console.warn('loadAll:',e);S.loadErr='Load failed: '+e.message;toast('Load failed: '+e.message,'err');}
 }
 async function refresh(){toast('Refreshing…');await loadAll();if(S.view==='earth'){S.earth=null;await loadEarth();}render();toast('Up to date');}
 
@@ -810,7 +812,7 @@ function render(){
   if(!auth.user){renderAuth();return;}
   let body;
   if(!S.lists)body=renderSetup();
-  else if(!S.loaded)body=`<div class="loading"><div class="spinner"></div><div>Loading scope…</div></div>`;
+  else if(!S.loaded)body=S.loadErr?`<div class="sec"><b>The tracker could not load.</b><p class="note" style="margin:6px 0 10px">${esc(S.loadErr)}</p><p class="note" style="margin-bottom:10px">If this is the test address: open the live tracker in this same browser, sign in there, then come back here and press Try again.</p><button class="btn" onclick="location.reload()">Try again</button> <button class="btn" onclick="signIn()">Sign in</button></div>`:`<div class="loading"><div class="spinner"></div><div>Loading scope…</div></div>`;
   else if(S.view==='import')body=renderImport();
   else if(S.view==='earth')body=renderEarth();
   else if(S.view==='packets')body=renderPackets();
