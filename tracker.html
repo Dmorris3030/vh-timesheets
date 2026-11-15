@@ -139,7 +139,7 @@ const FALLBACK_ADMINS=['dmorris@valentiheld.com','abewley@valentiheld.com','jroe
 const SCOPE_LIST_NAME='JobScope';
 const STATUS_LIST_NAME='TrackerStatus';
 const PHASE_LABELS={'300':'Earth — Mass','310':'Earth — Finish','400':'Storm','450':'Storm — Other','500':'Sanitary','600':'Water'};
-const VH_TRK_BUILD='2026-11-15.25';
+const VH_TRK_BUILD='2026-11-15.26';
 console.log('[VH] Job Trackers build',VH_TRK_BUILD);
 
 let mi;
@@ -302,6 +302,7 @@ async function loadAll(){
     S.loaded=true;
     setTimeout(()=>saveOfficeTracker(true),4000); // keep the office copy fresh (at most every 30 min per device)
     setTimeout(()=>pkAuto(),1500); // pick up new job folders / new field packets
+    loadTests().then(()=>{if(S.view==='job')render();});
   }catch(e){console.warn('loadAll:',e);S.loadErr='Load failed: '+e.message;toast('Load failed: '+e.message,'err');}
 }
 async function refresh(){toast('Refreshing…');await loadAll();if(S.view==='earth'){S.earth=null;await loadEarth();}render();toast('Up to date');}
@@ -500,7 +501,7 @@ function renderJob(){
       <div class="k"><div class="lbl">Burned</div><div class="val${over?' bad':''}">${fmt0(s.actual)}</div><div class="sub">production hrs</div></div>
       <div class="k"><div class="lbl">Remaining</div><div class="val">${fmt0(s.bid-s.earned)}</div></div>
       <div class="k"><div class="lbl">Complete</div><div class="val${s.pct>=99.5?' good':''}">${fmt0(s.pct)}%</div></div>
-    </div>${chips}${secs}
+    </div>${tsJobCard(job)}${chips}${secs}
     ${actItem?'':'<p class="note" style="margin-top:4px"><i class="ti ti-info-circle"></i> Burned hours shown per phase only — per-run burn appears once daily production reports carry an STR ID for this job.</p>'}`;
 }
 function renderPhase(job,rows,phase,actual,actItem){
@@ -533,6 +534,48 @@ function renderPhase(job,rows,phase,actual,actItem){
       <span>Variance <b class="${varr>0.5?'ov':(varr<-0.5?'un':'')}">${varr>0?'+':''}${fmt0(varr)}</b></span>
     </div>${runHtml}${lotHtml}</div>`;
 }
+// ===== TESTING STATUS ==========================================================
+// Test results come from each job's Testing/tests.json (written by the time app's Testing form).
+// A run is complete only when EVERY required test for its utility has a passing latest result.
+const TS_REQ={'400':['Mandrel','Televising','Visual / lamping'],'500':['Air test','Mandrel','Televising'],'600':['Pressure test','Chlorination','Bac-T sample','Flushing','Tracer wire']};
+async function loadTests(){
+  if(S.testsLoading)return;S.testsLoading=true;
+  try{
+    const tok=await getToken();if(!tok)return;
+    const folders=await pkJobList(tok);const out={};
+    await Promise.all(Object.keys(folders).map(async function(job){
+      try{const r=await fetch(pkUrl(PK_ROOT+'/'+folders[job]+'/Testing/tests.json')+':/content',{headers:{Authorization:'Bearer '+tok}});
+        if(r.ok){const d=await r.json();if(Array.isArray(d))out[job]=d;}}catch(e){}
+    }));
+    S.tests=out;
+  }catch(e){console.warn('loadTests',e);S.tests=S.tests||{};}
+  finally{S.testsLoading=false;}
+}
+function tsRun(job,r){
+  const req=TS_REQ[r.Phase];if(!req||r.ItemType==='lateral'||r.ItemType==='lot')return null;
+  const rows=((S.tests||{})[String(job).toUpperCase()]||[]).filter(function(x){return nid(x.run)===nid(r.ItemID);});
+  const last={};
+  rows.forEach(function(x){const key=String(x.date||'')+String(x.at||'');if(!last[x.test]||key>last[x.test].k)last[x.test]={k:key,result:x.result};});
+  let pass=0;const fail=[],miss=[];
+  req.forEach(function(q){const l=last[q];if(l&&l.result==='Pass')pass++;else if(l&&l.result==='Fail')fail.push(q);else miss.push(q);});
+  return {req:req,pass:pass,fail:fail,miss:miss,any:rows.length>0};
+}
+function tsBadge(job,r){
+  if(!S.tests)return '';const s=tsRun(job,r);if(!s)return '';
+  const done=effPct(job,r)>=100;if(!done&&!s.any)return '';
+  const col=s.fail.length?'#dc2626':(s.pass===s.req.length?'#16a34a':(done?'#d97706':'#6b7280'));
+  const txt=s.fail.length?'FAIL '+s.fail.join(', '):(s.pass===s.req.length?'Tested':'Tests '+s.pass+'/'+s.req.length);
+  return '<span title="'+esc(s.miss.length?'Still needed: '+s.miss.join(', '):'All required tests passed')+'" style="font-size:11px;font-weight:700;color:#fff;background:'+col+';border-radius:10px;padding:2px 8px;white-space:nowrap">'+esc(txt)+'</span>';
+}
+function tsJobCard(job){
+  if(!S.tests)return '';
+  let inst=0,ok=0,wait=0;const open=[];
+  S.scope.forEach(function(r){if(r.JobNum!==job)return;const s=tsRun(job,r);if(!s)return;const done=effPct(job,r)>=100;
+    if(s.fail.length)open.push(r.ItemID+' ('+s.fail.join(', ')+')');
+    if(done){inst++;if(s.pass===s.req.length)ok++;else if(!s.fail.length)wait++;}});
+  if(!inst&&!open.length)return '';
+  return '<div class="sec"><h2>Testing <span class="h2-sub">a run is complete when every required test has passed</span></h2><div class="jmeta"><span>Installed runs <b class="num">'+inst+'</b></span><span>All tests passed <b class="num" style="color:var(--green,#16a34a)">'+ok+'</b></span><span>Waiting on tests <b class="num" style="color:#d97706">'+wait+'</b></span><span>Failed, needs retest <b class="num" style="color:var(--red)">'+open.length+'</b></span></div>'+(open.length?'<p class="note" style="margin-top:6px;color:var(--red)">Failed: '+esc(open.slice(0,12).join(', '))+(open.length>12?', and more':'')+'</p>':'')+'</div>';
+}
 function runRow(job,r,actItem){
   const man=pctOf(job,r.ItemID);
   const pct=effPct(job,r);
@@ -547,7 +590,7 @@ function runRow(job,r,actItem){
   return `<div class="run">
     <span class="run-id">${esc(r.ItemID)}</span>
     <span class="run-desc">${esc(r.Descr)}</span>
-    ${qtyBit}
+    ${qtyBit}${tsBadge(job,r)}
     <span class="run-bid"><b>${fmt(r.BidHrs)}</b>${burned!=null?` / ${fmt(burned)}`:''} h</span>
     <div class="pcts">${seg}</div></div>`;
 }
@@ -634,7 +677,18 @@ function xlModel(job){
     return {job:String(f.Jobnumber||'').trim(),date:String(f.Date||f.Created||'').slice(0,10),foreman:f.Foreman||'',work:PHASE_LABELS[ph]||ph,run:f['STR_x0020_ID']||'',qty:isFinite(q)?q:null,unit:f.Unit||'',
       hrs:(+f['Production_x0020_Hours'])||null,crew:(+f['Crew_x0020_Size'])||null,notes:f.Notes||''};
   }).sort(function(a,b){return b.date.localeCompare(a.date)||a.job.localeCompare(b.job);});
-  return {job:job||'',util:util,runs:runs,earth:earth,edaily:edaily,daily:daily};
+  const tests=[],closeout=[],tsum={};
+  if(S.tests){
+    Object.keys(S.tests).forEach(function(j){if(job&&j!==String(job).toUpperCase())return;(S.tests[j]||[]).forEach(function(x){
+      tests.push({job:j,date:x.date||'',util:x.util||'',test:x.test||'',run:x.run||'',result:x.result||'',readings:Object.keys(x.readings||{}).map(function(k){return k+': '+x.readings[k];}).join('; '),witness:x.witness||'',by:x.by||'',notes:x.notes||''});});});
+    tests.sort(function(a,b){return b.date.localeCompare(a.date)||a.job.localeCompare(b.job);});
+    rows.forEach(function(r){const s=tsRun(r.JobNum,r);if(!s)return;const p=effPct(r.JobNum,r);const done=p>=100;
+      const k=r.JobNum+'|'+r.Phase;const o=tsum[k]=tsum[k]||{job:r.JobNum,label:(PHASE_LABELS[r.Phase]||'Phase')+' ('+r.Phase+')',inst:0,ok:0,wait:0,fail:0};
+      if(s.fail.length)o.fail++;
+      if(done){o.inst++;if(s.pass===s.req.length)o.ok++;else if(!s.fail.length)o.wait++;}
+      if((done||s.any)&&s.pass<s.req.length)closeout.push({job:r.JobNum,id:r.ItemID,label:PHASE_LABELS[r.Phase]||r.Phase,area:r.Area,pct:p/100,passed:s.pass+' of '+s.req.length,failed:s.fail.join(', '),need:s.miss.join(', ')});});
+  }
+  return {job:job||'',util:util,runs:runs,earth:earth,edaily:edaily,daily:daily,tests:tests,closeout:closeout,tsum:Object.values(tsum).filter(function(o){return o.inst||o.fail;})};
 }
 async function xlBuild(X,m){
   const NAVY='FF0F2A47',BLUE='FF185FA5',BAND='FFF3F6FA',GREEN='FF15803D',RED='FFC62828',INK='FF111827',MUTE='FF6B7280',LINE='FFD9DEE5',WHITE='FFFFFFFF';
@@ -676,12 +730,16 @@ async function xlBuild(X,m){
     {h:'Labor Hrs',key:'lab',w:11,fmt:'#,##0.0'},{h:'Cost',key:'cost',w:12,fmt:'$#,##0'},{h:'$ / Unit',key:'per',w:11,fmt:'$#,##0.00',color:function(v,r){return r.bidU!=null?(v>r.bidU?RED:GREEN):null;}}]);
   const cRuns=J.concat([{h:'Run / Lot',key:'id',w:16},{h:'% Done',key:'pct',w:14,fmt:'0%',bar:'FF63BE7B',align:'center'},{h:'Phase',key:'phase',w:8,align:'center'},{h:'Plan Sheet',key:'area',w:11,align:'center'},{h:'Type',key:'type',w:9,align:'center'},{h:'Description',key:'descr',w:28},
     {h:'Bid Qty',key:'qty',w:10,fmt:'#,##0.#'},{h:'Installed',key:'inst',w:10,fmt:'#,##0.#'},{h:'Unit',key:'unit',w:7,align:'center'},{h:'Bid Hrs',key:'bid',w:10,fmt:'#,##0.0'},{h:'Earned Hrs',key:'earn',w:11,fmt:'#,##0.0'},{h:'Remaining Hrs',key:'rem',w:12,fmt:'#,##0.0'},{h:'Burned Hrs',key:'burn',w:11,fmt:'#,##0.0',color:function(v,r){return (v>r.bid+0.05&&r.bid>0)?RED:null;}}]);
+  const cTsum=J.concat([{h:'Utility',key:'label',w:24},{h:'Installed Runs',key:'inst',w:16,fmt:'#,##0',align:'center'},{h:'All Tests Passed',key:'ok',w:12,fmt:'#,##0',color:function(v){return v>0?GREEN:null;}},{h:'Waiting On Tests',key:'wait',w:12,fmt:'#,##0'},{h:'Failed, Needs Retest',key:'fail',w:12,fmt:'#,##0',color:function(v){return v>0?RED:null;}}]);
+  const cTests=J.concat([{h:'Date',key:'date',w:13},{h:'Result',key:'result',w:10,align:'center',color:function(v){return v==='Fail'?RED:(v==='Pass'?GREEN:null);}},{h:'Utility',key:'util',w:12},{h:'Test',key:'test',w:20},{h:'Run / Structure',key:'run',w:16},{h:'Readings',key:'readings',w:38,wrap:true},{h:'Witnessed By',key:'witness',w:18},{h:'Tested By',key:'by',w:18},{h:'Notes',key:'notes',w:40,wrap:true}]);
+  const cClose=J.concat([{h:'Run',key:'id',w:16},{h:'% Installed',key:'pct',w:14,fmt:'0%',bar:'FF63BE7B',align:'center'},{h:'Utility',key:'label',w:14},{h:'Plan Sheet',key:'area',w:11,align:'center'},{h:'Tests Passed',key:'passed',w:13,align:'center'},{h:'Failed, Needs Retest',key:'failed',w:26,color:function(){return RED;}},{h:'Still Needed',key:'need',w:40}]);
   // ---- Overview
   const NC=11+(all?1:0);
   let ws=wb.addWorksheet('Overview',{views:[{showGridLines:false}],pageSetup:{orientation:'landscape',fitToPage:true,fitToWidth:1,fitToHeight:0}});
   title(ws,NC);let r=4;
   section(ws,r,'Utilities: bid hours vs earned and burned',NC);r++;
   if(m.util.length){r=table(ws,r,cUtil,m.util);widths(ws,cUtil);}else{note(ws,r,'No utility scope loaded for this job yet.',NC);}
+  if(m.tsum&&m.tsum.length){r+=2;section(ws,r,'Testing: a run is complete when every required test has passed',NC);r++;r=table(ws,r,cTsum,m.tsum);widths(ws,cTsum);}
   r+=2;section(ws,r,'Earthwork: yards and cost vs bid',NC);r++;
   if(m.earth.length){r=table(ws,r,cEarth,m.earth);widths(ws,cEarth);}else{note(ws,r,'No earthwork time, production or bid numbers yet.',NC);}
   r+=2;section(ws,r,'Most recent daily reports',NC);r++;
@@ -695,6 +753,8 @@ async function xlBuild(X,m){
     else{w.getCell(4,1).value=empty;w.getCell(4,1).font={italic:true,size:10,color:{argb:MUTE}};}
     return saveSub;};
   sheet('Runs and Lots',cRuns,m.runs,'No utility scope loaded yet.');
+  sheet('Testing',cTests,m.tests||[],'No tests recorded yet.');
+  sheet('Test Closeout',cClose,m.closeout||[],'Nothing open: every installed run has passed its tests, or no runs are installed yet.');
   sheet('Daily Reports',cDaily,m.daily,'No daily production reports yet.');
   sheet('Earthwork Daily',cEDaily,m.edaily,'No earthwork days yet.');
   wb.eachSheet(function(w){w.eachRow(function(row){row.eachCell(function(c){c.font=Object.assign({name:'Calibri'},c.font||{});});});});
@@ -706,6 +766,7 @@ async function saveOfficeTracker(auto){
     if(auto){const last=+localStorage.getItem('vhtrk_office_saved')||0;if(Date.now()-last<30*60000)return;}
     const tok=await getToken(!auto);if(!tok)return;
     if(!S.earth&&!S.earthLoading)await loadEarth(true); // quiet: no re-render under someone typing
+    if(!S.tests&&!S.testsLoading)await loadTests();
     let styled=true;try{await xlLib();}catch(e){styled=false;console.warn('styled workbook unavailable',e);}
     const who=(auth.user&&auth.user.name)||'';
     const stamp='Updated '+new Date().toLocaleString()+(who?' by '+who:'')+'  \u00b7  written by the tracker app, so edits made here are overwritten';
