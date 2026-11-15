@@ -139,7 +139,7 @@ const FALLBACK_ADMINS=['dmorris@valentiheld.com','abewley@valentiheld.com','jroe
 const SCOPE_LIST_NAME='JobScope';
 const STATUS_LIST_NAME='TrackerStatus';
 const PHASE_LABELS={'300':'Earth — Mass','310':'Earth — Finish','400':'Storm','450':'Storm — Other','500':'Sanitary','600':'Water'};
-const VH_TRK_BUILD='2026-11-15.23';
+const VH_TRK_BUILD='2026-11-15.24';
 console.log('[VH] Job Trackers build',VH_TRK_BUILD);
 
 let mi;
@@ -572,10 +572,10 @@ function exportXlsx(job){
   toast('Workbook downloaded');
 }
 // Earthwork sheets (only when the earthwork data has been loaded)
-function ewSheets(wb){
+function ewSheets(wb,only){
   if(!S.earth||!S.earth.rows)return;
   const sum=[],daily=[];
-  ewJobs().forEach(j=>{
+  ewJobs().filter(j=>!only||j===only).forEach(j=>{
     const d=ewData(j);const cfg=(S.earth.setup.jobs||{})[j]||{};
     ['300','310'].forEach(ph=>{
       const s=ewSummary(j,ph,d),P=EW_PH[ph];if(!s.bidQ&&!s.cost&&!s.qty)return;
@@ -609,14 +609,26 @@ async function saveOfficeTracker(auto){
     const r=await fetch(url,{method:'PUT',headers:{Authorization:'Bearer '+tok,'Content-Type':'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'},body:buf});
     if(r.status===423||r.status===409){if(!auto)toast('The office copy is open in Excel and locked. Close it and try again.','err');return;}
     if(!r.ok)throw new Error('save '+r.status);
+    // One workbook per job, saved in that job's own folder: utilities and earthwork for that job only.
+    let nJob=0,nLock=0;
+    try{
+      const folders=(S.earth&&S.earth.folders)||await pkJobList(tok);
+      for(const job of Object.keys(folders||{})){
+        const jwb=buildTrackerWb(job,true);if(!jwb)continue;
+        const ji=XLSX.utils.aoa_to_sheet([['Job Tracker: '+folders[job].split('/').pop()],['Updated',new Date().toLocaleString()],['Updated by',who],[],['This file is written by the tracker app. Do not edit it here: changes are overwritten the next time it updates.']]);
+        ji['!cols']=[{wch:14},{wch:60}];XLSX.utils.book_append_sheet(jwb,ji,'About');jwb.SheetNames.unshift(jwb.SheetNames.pop());
+        const jr=await fetch(pkUrl(PK_ROOT+'/'+folders[job]+'/'+job+' Job Tracker.xlsx')+':/content',{method:'PUT',headers:{Authorization:'Bearer '+tok,'Content-Type':'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'},body:XLSX.write(jwb,{type:'array',bookType:'xlsx'})});
+        if(jr.ok)nJob++;else if(jr.status===423||jr.status===409)nLock++;
+      }
+    }catch(e){console.warn('per-job trackers',e);}
     localStorage.setItem('vhtrk_office_saved',String(Date.now()));
-    if(!auto)toast('Office copy saved to the Field folder');
+    if(!auto)toast('Office copy saved, plus '+nJob+' job tracker'+(nJob===1?'':'s')+(nLock?' ('+nLock+' skipped, open in Excel)':''));
   }catch(e){console.warn('office copy',e);if(!auto)toast('Office copy failed: '+e.message,'err');}
 }
 function buildTrackerWb(job,withEarth){
   const rows=S.scope.filter(r=>!job||r.JobNum===job);
   const wb=XLSX.utils.book_new();
-  if(withEarth)ewSheets(wb);
+  if(withEarth)ewSheets(wb,job);
   if(!rows.length)return wb.SheetNames.length?wb:null;
   // Summary: one row per job+phase — the remaining-hours numbers the schedule runs on
   const sum={};
@@ -1102,13 +1114,13 @@ function ewRates(job){const st=S.earth.setup;return Object.assign({},EW_DEF_RATE
 // Only real jobs are shown: a job number must match a job folder under Field/Jobs/{year}.
 // That drops typos and overhead numbers like 2600 (shop and meeting time).
 async function pkJobList(tok){
-  try{const c=JSON.parse(sessionStorage.getItem('vhtrk_jobfolders')||'null');if(c&&Date.now()-c.at<30*60000)return c.jobs;}catch(e){}
+  try{const c=JSON.parse(sessionStorage.getItem('vhtrk_jobfolders2')||'null');if(c&&Date.now()-c.at<30*60000)return c.jobs;}catch(e){}
   const H={Authorization:'Bearer '+tok};
   const kids=async p=>{const r=await fetch(pkUrl(p)+':/children?$select=name,folder&$top=400',{headers:H});if(!r.ok)throw new Error('folder read '+r.status);return (await r.json()).value||[];};
   const years=(await kids(PK_ROOT)).filter(k=>k.folder&&/^\d{4}$/.test(k.name));
   const jobs={};
-  for(const y of years){(await kids(PK_ROOT+'/'+y.name)).forEach(k=>{if(!k.folder)return;const m=k.name.match(/^\d{3,5}[A-Za-z]?(?![0-9A-Za-z])/);if(m)jobs[m[0].toUpperCase()]=k.name;});}
-  sessionStorage.setItem('vhtrk_jobfolders',JSON.stringify({at:Date.now(),jobs}));
+  for(const y of years){(await kids(PK_ROOT+'/'+y.name)).forEach(k=>{if(!k.folder)return;const m=k.name.match(/^\d{3,5}[A-Za-z]?(?![0-9A-Za-z])/);if(m)jobs[m[0].toUpperCase()]=y.name+'/'+k.name;});} // value = year/folder, used to save each job's own tracker
+  sessionStorage.setItem('vhtrk_jobfolders2',JSON.stringify({at:Date.now(),jobs}));
   return jobs;
 }
 function ewValid(){
