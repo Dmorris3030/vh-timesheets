@@ -139,7 +139,7 @@ const FALLBACK_ADMINS=['dmorris@valentiheld.com','abewley@valentiheld.com','jroe
 const SCOPE_LIST_NAME='JobScope';
 const STATUS_LIST_NAME='TrackerStatus';
 const PHASE_LABELS={'300':'Earth — Mass','310':'Earth — Finish','400':'Storm','450':'Storm — Other','500':'Sanitary','600':'Water'};
-const VH_TRK_BUILD='2026-11-15.22';
+const VH_TRK_BUILD='2026-11-15.23';
 console.log('[VH] Job Trackers build',VH_TRK_BUILD);
 
 let mi;
@@ -1074,7 +1074,8 @@ async function loadEarth(quiet){
     if(sr.ok){try{const d=await sr.json();if(d&&typeof d==='object')setup=Object.assign(setup,d);}catch(e){}}
     else if(sr.status!==404)throw new Error('setup file '+sr.status);
     const rows=tj.map(i=>i.fields).filter(f=>f&&EW_PH[String(f.Phase||'').trim()]);
-    S.earth={rows,setup};
+    let folders=null;try{folders=await pkJobList(tok);}catch(e){console.warn('job folders',e);}
+    S.earth={rows,setup,folders};
   }catch(e){console.warn('loadEarth',e);toast('Earthwork load failed: '+e.message,'err');S.earth={rows:[],setup:{rates:{},eqMap:{},jobs:{}},err:e.message};}
   finally{S.earthLoading=false;if(!quiet)render();}
 }
@@ -1098,11 +1099,37 @@ function ewCat(num,desc,setup){
 }
 function ewClass(title){const s=String(title||'').toUpperCase();if(/SUPER/.test(s))return 'SUPERVISOR';if(/FOREMAN|CREW\s?LEAD/.test(s))return 'FOREMAN';if(/OPER/.test(s))return 'OPER';return 'LABOR';}
 function ewRates(job){const st=S.earth.setup;return Object.assign({},EW_DEF_RATES,st.rates||{},((st.jobs||{})[job]||{}).rates||{});}
-function ewJobs(){
+// Only real jobs are shown: a job number must match a job folder under Field/Jobs/{year}.
+// That drops typos and overhead numbers like 2600 (shop and meeting time).
+async function pkJobList(tok){
+  try{const c=JSON.parse(sessionStorage.getItem('vhtrk_jobfolders')||'null');if(c&&Date.now()-c.at<30*60000)return c.jobs;}catch(e){}
+  const H={Authorization:'Bearer '+tok};
+  const kids=async p=>{const r=await fetch(pkUrl(p)+':/children?$select=name,folder&$top=400',{headers:H});if(!r.ok)throw new Error('folder read '+r.status);return (await r.json()).value||[];};
+  const years=(await kids(PK_ROOT)).filter(k=>k.folder&&/^\d{4}$/.test(k.name));
+  const jobs={};
+  for(const y of years){(await kids(PK_ROOT+'/'+y.name)).forEach(k=>{if(!k.folder)return;const m=k.name.match(/^\d{3,5}[A-Za-z]?(?![0-9A-Za-z])/);if(m)jobs[m[0].toUpperCase()]=k.name;});}
+  sessionStorage.setItem('vhtrk_jobfolders',JSON.stringify({at:Date.now(),jobs}));
+  return jobs;
+}
+function ewValid(){
+  const f=S.earth&&S.earth.folders;
+  if(f&&Object.keys(f).length)return f;
+  // folder list unavailable (no access or offline): fall back to jobs that have scope or a setup
+  const o={};S.scope.forEach(r=>{o[String(r.JobNum).toUpperCase()]=1;});
+  Object.keys((S.earth&&S.earth.setup.jobs)||{}).forEach(j=>{o[j.toUpperCase()]=1;});
+  return Object.keys(o).length?o:null;
+}
+function ewAllJobs(){
   const s=new Set(Object.keys(S.earth.setup.jobs||{}));
   S.earth.rows.forEach(f=>{const j=String(f.Jobnumber||'').trim();if(j)s.add(j);});
   S.prod.forEach(f=>{if(EW_PH[String(f.Phase||'').trim()]){const j=String(f.Jobnumber||'').trim();if(j)s.add(j);}});
   return [...s].sort();
+}
+function ewJobs(){const ok=ewValid();const all=ewAllJobs();return ok?all.filter(j=>ok[j.toUpperCase()]):all;}
+function ewStray(){ // job numbers with earthwork time that match no job folder, with their hours
+  const ok=ewValid();if(!ok)return [];const h={};
+  S.earth.rows.forEach(f=>{const j=String(f.Jobnumber||'').trim();if(j&&!ok[j.toUpperCase()])h[j]=(h[j]||0)+(+f.Hours||0);});
+  return Object.keys(h).sort().map(j=>({job:j,hrs:h[j]}));
 }
 function ewData(job){
   const st=S.earth.setup,rates=ewRates(job);
@@ -1166,6 +1193,8 @@ function renderEarth(){
       ${d.unmapped?`<span style="font-size:12px;color:var(--red)">${Object.values(d.equip).filter(x=>x.cat===null).length} machine(s) need a rate</span>`:''}</div>
       ${lines||'<div class="jmeta"><span>Not set up yet. Open to enter bid yards and cost.</span></div>'}</button>`;
   });
+  const stray=auth.isAdmin?ewStray():[];
+  if(stray.length)h+=`<div class="sec"><span class="note"><b>Not shown:</b> earthwork time coded to job numbers with no job folder. ${stray.map(x=>esc(x.job)+' ('+fmt(x.hrs)+' h)').join(', ')}. If one of these is a typo, that time is missing from the real job.</span></div>`;
   if(auth.isAdmin)h+=`<div class="sec"><span class="note">Set up a job that has no time yet:</span> <input id="ew-new" placeholder="Job #" style="padding:7px 9px;border-radius:8px;border:1px solid var(--border);background:transparent;color:inherit;width:110px"> <button class="btn btn-sm" onclick="const v=document.getElementById('ew-new').value.trim();if(v){S.ejob=v;S.eset=true;render();}">Set up</button></div>`;
   return h;
 }
