@@ -139,7 +139,7 @@ const FALLBACK_ADMINS=['dmorris@valentiheld.com','abewley@valentiheld.com','jroe
 const SCOPE_LIST_NAME='JobScope';
 const STATUS_LIST_NAME='TrackerStatus';
 const PHASE_LABELS={'300':'Earth — Mass','310':'Earth — Finish','400':'Storm','450':'Storm — Other','500':'Sanitary','600':'Water'};
-const VH_TRK_BUILD='2026-11-15.21';
+const VH_TRK_BUILD='2026-11-15.22';
 console.log('[VH] Job Trackers build',VH_TRK_BUILD);
 
 let mi;
@@ -404,20 +404,31 @@ function toast(msg,cls){
   document.getElementById('toasts').appendChild(t);setTimeout(()=>t.remove(),2600);
 }
 function hdr(){
-  return `<div class="hdr"><div class="hdr-in">
-    <div class="brand" onclick="S.view='portfolio';S.job='';render()"><div class="logo">VH</div>Job Trackers</div>
+  const jobsOn=S.view==='portfolio'||S.view==='job';
+  const tab=(on,click,icon,label)=>`<button class="btn${on?' btn-p':''}" onclick="S.menu=false;${click}"><i class="ti ${icon}"></i> ${label}</button>`;
+  const item=(click,icon,label)=>`<button class="btn" style="width:100%;justify-content:flex-start;border:none;border-radius:0;padding:12px 14px;font-size:14px" onclick="S.menu=false;${click}"><i class="ti ${icon}"></i> ${label}</button>`;
+  const att=auth.isAdmin&&S.pk&&S.pk.attention?S.pk.attention:0;
+  return `<div class="hdr"><div class="hdr-in" style="position:relative">
+    <div style="display:flex;align-items:center;gap:12px">
+      <button class="btn" style="font-weight:700" onclick="location.href='index.html'"><i class="ti ti-arrow-left"></i> Home</button>
+      <div class="brand" onclick="S.menu=false;S.view='portfolio';S.job='';render()">Job Tracker</div>
+    </div>
     <div class="hbtns">
-      ${auth.isAdmin?`<button class="btn btn-sm" onclick="S.view='packets';render()"><i class="ti ti-folders"></i> Packets${S.pk&&S.pk.attention?` <b style="color:var(--red)">${S.pk.attention}</b>`:''}</button>`:''}
-      ${auth.isAdmin?`<button class="btn btn-sm" onclick="S.view='import';render()"><i class="ti ti-file-import"></i> Import scope</button>`:''}
-      ${S.loaded&&S.scope.length?`<button class="btn btn-sm" onclick="exportXlsx(S.view==='job'?S.job:'')"><i class="ti ti-file-spreadsheet"></i> Export</button>`:''}
-      ${S.loaded?`<button class="btn btn-sm" title="Save the Excel copy the office opens in the Field folder" onclick="saveOfficeTracker(false)"><i class="ti ti-cloud-upload"></i> Office copy</button>`:''}
-      ${S.view==='job'&&S.job&&S.loaded?`<button class="btn btn-sm" onclick="openProgress()"><i class="ti ti-highlight"></i> What's done</button>`:''}
-      <button class="btn btn-sm" onclick="S.view='earth';S.ejob='';render()"><i class="ti ti-bulldozer"></i> Earthwork</button>
-      <button class="btn btn-sm" onclick="location.href='production.html'"><i class="ti ti-chart-bar"></i> Dashboard</button>
-      <button class="btn btn-sm" onclick="location.href='index.html'"><i class="ti ti-clock"></i> Timesheets</button>
-      <button class="btn btn-sm" onclick="refresh()"><i class="ti ti-refresh"></i></button>
-      <button class="btn btn-sm" onclick="signOut()"><i class="ti ti-logout"></i></button>
-    </div></div></div>`;
+      ${tab(jobsOn,"S.view='portfolio';S.job='';render()",'ti-list-check','Utilities')}
+      ${tab(S.view==='earth',"S.view='earth';S.ejob='';render()",'ti-bulldozer','Earthwork')}
+      ${S.view==='job'&&S.job&&S.loaded?`<button class="btn" onclick="S.menu=false;openProgress()"><i class="ti ti-highlight"></i> What's done</button>`:''}
+      <button class="btn" title="More" onclick="S.menu=!S.menu;render()"><i class="ti ti-dots"></i>${att?` <b style="color:var(--red)">${att}</b>`:''}</button>
+    </div>
+    ${S.menu?`<div style="position:absolute;right:0;top:calc(100% + 10px);background:var(--card);border:1px solid var(--border);border-radius:10px;box-shadow:0 10px 30px rgba(0,0,0,.28);overflow:hidden;min-width:240px;z-index:30">
+      ${item('refresh()','ti-refresh','Refresh')}
+      ${auth.isAdmin?item("S.view='packets';render()",'ti-folders','Field packets'+(att?' ('+att+' need a look)':'')):''}
+      ${auth.isAdmin&&S.loaded?item('render();saveOfficeTracker(false)','ti-cloud-upload','Save office copy'):''}
+      ${auth.isAdmin&&S.loaded&&S.scope.length?item("render();exportXlsx(S.view==='job'?S.job:'')",'ti-file-spreadsheet','Download Excel'):''}
+      ${auth.isAdmin?item("S.view='import';render()",'ti-file-import','Import scope by hand'):''}
+      ${auth.isAdmin?item("location.href='production.html'",'ti-chart-bar','Production dashboard'):''}
+      ${item('signOut()','ti-logout','Sign out')}
+    </div>`:''}
+  </div></div>`;
 }
 function renderAuth(){
   document.getElementById('app').innerHTML=`<div class="auth"><div class="card">
