@@ -252,7 +252,8 @@ input[type=radio]:checked::after{content:'';position:absolute;left:5px;top:5px;w
   </div>
   <div class="mc" id="mc"><div class="nd"><i class="ti ti-loader"></i>Loading...</div></div>
   <nav class="bn">
-    <button class="nb active" id="nav-entry" onclick="showPage('entry')"><i class="ti ti-clipboard-text"></i><span>Entry</span><span class="nbg" id="eb" style="display:none">0</span></button>
+    <button class="nb active" id="nav-home" onclick="showPage('home')"><i class="ti ti-home"></i><span>Home</span></button>
+    <button class="nb" id="nav-entry" onclick="showPage('entry')"><i class="ti ti-clipboard-text"></i><span>Entry</span><span class="nbg" id="eb" style="display:none">0</span></button>
     <button class="nb" id="nav-review" onclick="showPage('review')"><i class="ti ti-checklist"></i><span>Review</span></button>
     <button class="nb" id="nav-approval" onclick="showPage('approval')"><i class="ti ti-shield-check"></i><span>Approve</span><span class="nbg" id="pb" style="display:none">0</span></button>
     <button class="nb" id="nav-export" onclick="showPage('export')"><i class="ti ti-file-download"></i><span>Export</span></button>
@@ -347,7 +348,7 @@ const WEATHER_OPTIONS=['Clear','Partly Cloudy','Overcast','Light Rain','Heavy Ra
 
 let entryMode='timecards'; // 'timecards' or 'production'
 let S={currentWeek:'',weeks:{},photoRecipients:[],phaseLabels:{},managers:[{name:'Derek Morris',email:'dmorris@valentiheld.com',title:'Manager - Earthwork'},{name:'Joe Roe',email:'jroe@valentiheld.com',title:'Superintendent'},{name:'Jason Trenkamp',email:'jtrenkamp@valentiheld.com',title:'Supervisor - Utility'}],adminEmails:['dmorris@valentiheld.com','abewley@valentiheld.com'],customEmployees:[],hiddenEmployees:[],settings:{companyCode:'VHI',batchPrefix:'26'}};
-let cp='entry',eqmc=0,adys={};
+let cp='home',eqmc=0,adys={};
 
 // ── RELIABILITY INFRASTRUCTURE ───────────────────────────────────────────────
 
@@ -377,6 +378,7 @@ window.addEventListener('online',()=>{
   toast('Back online — syncing...','success');
   if(pendingSave){pendingSave=false;saveSP();}
   else{loadSP();}
+  setTimeout(function(){tkFlush(false);},4000);
 });
 window.addEventListener('offline',()=>{
   isOnline=false;setSS('off');
@@ -432,7 +434,7 @@ async function initApp(){
   }catch(e){console.warn(e);}
   initWeeks();updUC();updNav();render();updBadge();
 }
-const VH_BUILD='2026-07-01.11';
+const VH_BUILD='2026-11-15.19';
 console.log('[VH] Timesheets build',VH_BUILD);
 let __vhAuthToastAt=0;
 // interactive=true only from a user-initiated action: saves drafts, then allows the MSAL
@@ -914,6 +916,396 @@ function setProdField(id,field,val){
   if(entry)entry[field]=val;
 }
 
+// ===== MATERIAL TICKETS (build .13) ==========================================
+// Foreman photographs a stone/pipe delivery ticket and tags it. The photo and a log row land in
+// Estimating/FIELD/{job}/Tickets/. Tickets are queued on the device first (IndexedDB) so a dead
+// zone never loses one; they send when there is signal.
+const TK_DRIVE='b!bx9kGOaza0OourrHa-9_tVTRgr5ON91GmZc4OzbW_xXXtcQafX0iTa2THLVm3FW_';
+const TK_ROOT='Field/Jobs';
+// Each job's files live in its existing job packet folder, e.g.
+// Field/Jobs/2026/2610-Millbrook Section 1/Tickets. The folder is found by the job
+// number at the start of its name; the year folder comes from the first two digits of the job number.
+async function tkJobDir(tok,job){
+  job=tkClean(job);
+  let map={};try{map=JSON.parse(localStorage.getItem('vhts_tk_dirs2')||'{}');}catch(e){}
+  if(map[job])return map[job];
+  const yr=/^\d{2}/.test(job)?'20'+job.slice(0,2):String(new Date().getFullYear());
+  const base=TK_ROOT+'/'+yr;
+  const H={Authorization:'Bearer '+tok};
+  let r=await fetch(tkUrl(base)+':/children?$select=name,folder&$top=400',{headers:H});
+  if(r.status===404){
+    await fetch(tkUrl(TK_ROOT)+':/children',{method:'POST',headers:Object.assign({'Content-Type':'application/json'},H),body:JSON.stringify({name:yr,folder:{},'@microsoft.graph.conflictBehavior':'fail'})});
+    r=await fetch(tkUrl(base)+':/children?$select=name,folder&$top=400',{headers:H});
+  }
+  if(!r.ok)throw new Error('job folder lookup '+r.status);
+  const kids=((await r.json()).value||[]).filter(function(k){return k.folder;});
+  const hit=kids.find(function(k){const n=String(k.name).toUpperCase(),j=job.toUpperCase();return n===j||(n.indexOf(j)===0&&!/[0-9A-Z]/.test(n.charAt(j.length)));});
+  let name=hit?hit.name:job;
+  if(!hit){
+    const c=await fetch(tkUrl(base)+':/children',{method:'POST',headers:Object.assign({'Content-Type':'application/json'},H),body:JSON.stringify({name:job,folder:{},'@microsoft.graph.conflictBehavior':'fail'})});
+    if(!c.ok&&c.status!==409)throw new Error('job folder create '+c.status);
+  }
+  map[job]=base+'/'+name;try{localStorage.setItem('vhts_tk_dirs2',JSON.stringify(map));}catch(e){}
+  return map[job];
+}
+const TK_MATS={Stone:['#8 stone','#53 stone','#2 stone','#11 stone','#23 sand','Fill sand','B-borrow','Rip rap','Topsoil','Other'],
+               Pipe:['RCP','PVC SDR 35','PVC SDR 26','PVC C900','Ductile iron','HDPE','Structure / casting','Fittings','Other'],
+               Other:['Other']};
+const TK_UNITS={Stone:['tons','loads','CY'],Pipe:['LF','pieces'],Other:['each','tons','LF']};
+function tkUrl(path){return 'https://graph.microsoft.com/v1.0/drives/'+TK_DRIVE+'/root:/'+path.split('/').map(encodeURIComponent).join('/');}
+function tkClean(x){return String(x||'').replace(/[\\/:*?"<>|#%&{}~]+/g,'').replace(/\s+/g,' ').trim();}
+function tkMem(){try{return JSON.parse(localStorage.getItem('vhts_tk_mem')||'{}');}catch(e){return{};}}
+function tkMemSave(m){try{localStorage.setItem('vhts_tk_mem',JSON.stringify(m));}catch(e){}}
+// --- device queue ---
+function tkDB(){return new Promise(function(res,rej){const r=indexedDB.open('vhts_tickets',1);r.onupgradeneeded=function(){r.result.createObjectStore('q',{keyPath:'id'});};r.onsuccess=function(){res(r.result);};r.onerror=function(){rej(r.error);};});}
+async function tkTx(mode,fn){const db=await tkDB();return new Promise(function(res,rej){const tx=db.transaction('q',mode);const out=fn(tx.objectStore('q'));tx.oncomplete=function(){res(out&&out.result);};tx.onerror=function(){rej(tx.error);};});}
+function tkPut(rec){return tkTx('readwrite',function(s){return s.put(rec);});}
+function tkDel(id){return tkTx('readwrite',function(s){return s.delete(id);});}
+function tkAll(){return tkTx('readonly',function(s){return s.getAll();});}
+async function tkRefreshCount(){
+  const el=document.getElementById('tk-pend');if(!el)return;
+  let n=0;try{n=((await tkAll())||[]).length;}catch(e){}
+  if(n){el.innerHTML='<span style="color:#d97706;font-weight:600">'+n+' waiting to send. Tap here to retry.</span>';if(navigator.onLine&&Date.now()-(window.__tkLast||0)>60000)tkFlush(false);}
+  else el.textContent='Stone and pipe deliveries';
+}
+// --- form ---
+function tkOpen(dt,ph,job){
+  const mem=tkMem();
+  window.__tk={img:null,kind:'Stone'};
+  const today=new Date();const iso=dt||new Date(today.getTime()-today.getTimezoneOffset()*60000).toISOString().slice(0,10);
+  const lbl='font-size:12px;font-weight:600;color:var(--text2);display:block;margin:12px 0 5px';
+  const inp='width:100%;font-size:16px;padding:11px 12px;border-radius:10px;border:1px solid var(--border);background:var(--bg);color:inherit;box-sizing:border-box';
+  const phs=['',...(typeof PROD_PHASES!=='undefined'?PROD_PHASES:[])];
+  const el=document.createElement('div');el.id='tk-sheet';
+  el.innerHTML='<div style="position:fixed;inset:0;background:var(--bg);z-index:300;display:flex;flex-direction:column">'+
+   '<div style="display:flex;align-items:center;gap:8px;padding:calc(10px + env(safe-area-inset-top)) 12px 10px;border-bottom:0.5px solid var(--border)">'+
+     '<button onclick="tkClose()" style="background:none;border:none;color:inherit;font-size:24px;padding:4px 8px;cursor:pointer">\u2715</button>'+
+     '<strong style="flex:1;font-size:17px">Material ticket</strong>'+
+     '<button class="btn btn-p" id="tk-save" onclick="tkSave()" style="min-height:42px"><i class="ti ti-check"></i> Save</button></div>'+
+   '<div style="flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:6px 16px calc(24px + env(safe-area-inset-bottom));max-width:640px;width:100%;margin:0 auto;box-sizing:border-box">'+
+     '<label style="display:block;margin-top:12px;border:2px dashed var(--border);border-radius:14px;padding:18px;text-align:center;cursor:pointer" id="tk-drop">'+
+       '<input type="file" accept="image/*" capture="environment" style="display:none" onchange="tkPhoto(this)"/>'+
+       '<div id="tk-prev"><i class="ti ti-camera" style="font-size:34px;color:var(--accent)"></i><div style="font-size:15px;font-weight:600;margin-top:6px">Take photo of the ticket</div><div style="font-size:12.5px;color:var(--text2)">Fill the frame and keep it flat so the numbers are readable</div></div></label>'+
+     '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">'+
+       '<div><span style="'+lbl+'">Job #</span><input id="tk-job" inputmode="text" style="'+inp+'" value="'+String(job||mem.lastJob||'').replace(/"/g,'&quot;')+'" oninput="tkSupFill()"/></div>'+
+       '<div><span style="'+lbl+'">Phase</span><select id="tk-phase" style="'+inp+'">'+phs.map(function(p){return '<option value="'+p+'"'+(p===ph?' selected':'')+'>'+(p||'--')+'</option>';}).join('')+'</select></div>'+
+       '<div><span style="'+lbl+'">Date</span><input id="tk-date" type="date" style="'+inp+'" value="'+iso+'"/></div></div>'+
+     '<span style="'+lbl+'">Type</span><div id="tk-kinds" style="display:flex;gap:8px"></div>'+
+     '<div style="display:grid;grid-template-columns:2fr 1fr;gap:10px">'+
+       '<div><span style="'+lbl+'">Material</span><select id="tk-mat" style="'+inp+'"></select></div>'+
+       '<div><span style="'+lbl+'">Size (pipe)</span><input id="tk-size" placeholder=\'e.g. 12"\' style="'+inp+'"/></div></div>'+
+     '<div style="display:grid;grid-template-columns:2fr 1fr;gap:10px">'+
+       '<div><span style="'+lbl+'">Quantity</span><input id="tk-qty" type="text" inputmode="decimal" placeholder="e.g. 22.45" style="'+inp+'"/></div>'+
+       '<div><span style="'+lbl+'">Unit</span><select id="tk-unit" style="'+inp+'"></select></div></div>'+
+     '<span style="'+lbl+'">Supplier</span><input id="tk-sup" autocomplete="off" style="'+inp+'" oninput="tkSupFill()"/>'+
+     '<div id="tk-chips" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px"></div>'+
+     '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">'+
+       '<div><span style="'+lbl+'">Ticket #</span><input id="tk-tno" autocomplete="off" autocapitalize="characters" style="'+inp+'"/></div>'+
+       '<div><span style="'+lbl+'">PO #</span><input id="tk-po" autocomplete="off" autocapitalize="characters" style="'+inp+'"/></div></div>'+
+     '<span style="'+lbl+'">Notes (optional)</span><input id="tk-notes" style="'+inp+'" placeholder="Short load, rejected, where it was placed..."/>'+
+   '</div></div>';
+  document.body.appendChild(el);
+  tkKind('Stone');
+  const chips=document.getElementById('tk-chips');
+  (mem.sup||[]).slice(0,6).forEach(function(sn){const b=document.createElement('button');b.className='btn btn-sm';b.textContent=sn;b.onclick=function(){document.getElementById('tk-sup').value=sn;tkSupFill();};chips.appendChild(b);});
+}
+function tkKind(k){
+  window.__tk.kind=k;
+  const box=document.getElementById('tk-kinds');box.innerHTML='';
+  Object.keys(TK_MATS).forEach(function(x){const b=document.createElement('button');b.className='btn'+(x===k?' btn-p':'');b.style.cssText='flex:1;min-height:44px;justify-content:center;font-size:15px';b.textContent=x;b.onclick=function(){tkKind(x);};box.appendChild(b);});
+  document.getElementById('tk-mat').innerHTML=TK_MATS[k].map(function(m){return '<option>'+m+'</option>';}).join('');
+  document.getElementById('tk-unit').innerHTML=TK_UNITS[k].map(function(u){return '<option>'+u+'</option>';}).join('');
+  document.getElementById('tk-size').disabled=(k==='Stone');
+}
+// Remembered PO for this job + supplier, so it is typed once per job
+function tkSupFill(){
+  const mem=tkMem();const job=document.getElementById('tk-job').value.trim();const sup=document.getElementById('tk-sup').value.trim().toUpperCase();
+  const po=(mem.po||{})[job+'|'+sup];const f=document.getElementById('tk-po');
+  if(po&&!f.value)f.value=po;
+}
+function tkPhoto(inp){
+  const f=inp.files&&inp.files[0];if(!f)return;
+  const rd=new FileReader();
+  rd.onload=async function(){
+    const small=await compressPhoto(rd.result,1800,0.72);
+    window.__tk.img=small;
+    document.getElementById('tk-prev').innerHTML='<img src="'+small+'" style="max-width:100%;max-height:260px;border-radius:10px"/><div style="font-size:12.5px;color:var(--text2);margin-top:6px">Tap to retake</div>';
+    document.getElementById('tk-drop').style.borderStyle='solid';
+  };
+  rd.readAsDataURL(f);
+}
+function tkClose(){const el=document.getElementById('tk-sheet');if(el)el.remove();window.__tk=null;}
+async function tkSave(){
+  const v=function(id){return document.getElementById(id).value.trim();};
+  const st=window.__tk;if(!st)return;
+  const qty=parseFloat(v('tk-qty').replace(/,/g,''));
+  const miss=[];
+  if(!st.img)miss.push('photo');
+  if(!v('tk-job'))miss.push('job #');
+  if(!(qty>0))miss.push('quantity');
+  if(!v('tk-sup'))miss.push('supplier');
+  if(!v('tk-tno'))miss.push('ticket #');
+  if(!v('tk-po'))miss.push('PO #');
+  if(miss.length){toast('Still needed: '+miss.join(', ')+'.','error');return;}
+  const meta={date:v('tk-date'),job:v('tk-job'),phase:v('tk-phase'),kind:st.kind,material:v('tk-mat'),size:st.kind==='Stone'?'':v('tk-size'),
+    qty:qty,unit:v('tk-unit'),supplier:v('tk-sup'),ticket:v('tk-tno'),po:v('tk-po'),notes:v('tk-notes'),
+    by:(auth.user&&auth.user.name)||'',byEmail:(auth.user&&auth.user.email)||'',at:new Date().toISOString()};
+  const id=Date.now()+'-'+Math.random().toString(36).slice(2,8);
+  document.getElementById('tk-save').disabled=true;
+  try{await tkPut({id:id,meta:meta,img:st.img});}
+  catch(e){document.getElementById('tk-save').disabled=false;toast('Could not save on this device: '+(e&&e.message||e),'error');return;}
+  const mem=tkMem();mem.lastJob=meta.job;
+  mem.sup=[meta.supplier].concat((mem.sup||[]).filter(function(x){return x.toUpperCase()!==meta.supplier.toUpperCase();})).slice(0,12);
+  mem.po=mem.po||{};mem.po[meta.job+'|'+meta.supplier.toUpperCase()]=meta.po;tkMemSave(mem);
+  tkClose();
+  toast(navigator.onLine?'Ticket saved. Sending...':'Ticket saved on this iPad. It will send when you have signal.','success');
+  tkRefreshCount();tkFlush(false);
+}
+// --- send ---
+async function tkFlush(loud){
+  if(window.__tkBusy)return;
+  let recs=[];try{recs=(await tkAll())||[];}catch(e){}
+  if(!recs.length){if(loud)toast('Nothing waiting to send.','');return;}
+  if(!navigator.onLine){if(loud)toast('No signal. Tickets are safe on this iPad.','error');return;}
+  const tok=await getTok(!!loud);if(!tok){if(loud)toast('Sign in to send tickets.','error');return;}
+  window.__tkBusy=true;window.__tkLast=Date.now();let sent=0,err='';
+  for(const rec of recs){
+    try{await (rec.type==='test'?tsSend(tok,rec):tkSend(tok,rec));await tkDel(rec.id);sent++;}
+    catch(e){err=(e&&e.message)||String(e);console.warn('ticket send',e);break;}
+  }
+  window.__tkBusy=false;tkRefreshCount();
+  if(sent&&!err)toast(sent+' item'+(sent>1?'s':'')+' sent.','success');
+  else if(err&&(loud||sent))toast((sent?sent+' sent. ':'')+'Could not send the rest yet ('+err+'). They are safe on this iPad.','error');
+}
+async function tkEnsureFolder(tok,jobDir,sub){
+  await fetch(tkUrl(jobDir)+':/children',{method:'POST',headers:{Authorization:'Bearer '+tok,'Content-Type':'application/json'},body:JSON.stringify({name:sub||'Tickets',folder:{},'@microsoft.graph.conflictBehavior':'fail'})});
+}
+async function tkSend(tok,rec){
+  const m=rec.meta;const job=tkClean(m.job);const jobDir=await tkJobDir(tok,job);const dir=jobDir+'/Tickets';
+  // 1. photo (skipped on retry if it already went up)
+  if(!m.url){
+    const blob=await (await fetch(rec.img)).blob();
+    const fname=[m.date,tkClean(m.material+(m.size?' '+m.size:'')),tkClean(m.supplier),'T'+tkClean(m.ticket),'PO'+tkClean(m.po)].join('_')+'.jpg';
+    const up=function(){return fetch(tkUrl(dir+'/'+fname)+':/content?@microsoft.graph.conflictBehavior=rename',{method:'PUT',headers:{Authorization:'Bearer '+tok,'Content-Type':'image/jpeg'},body:blob});};
+    let r=await up();
+    if(r.status===404||r.status===409){await tkEnsureFolder(tok,jobDir,'Tickets');r=await up();}
+    if(!r.ok)throw new Error('photo upload '+r.status);
+    const j=await r.json();m.url=j.webUrl||'';m.file=j.name||fname;
+    await tkPut(rec);
+  }
+  // 2. log (JSON is the record; ETag-guarded so two foremen never overwrite each other)
+  const logUrl=tkUrl(dir+'/tickets.json');let rows=null;
+  for(let a=0;a<4;a++){
+    const mr=await fetch(logUrl,{headers:{Authorization:'Bearer '+tok}});
+    let etag=null;rows=[];
+    if(mr.status!==404){
+      if(!mr.ok)throw new Error('log read '+mr.status);
+      etag=(await mr.json()).eTag;
+      const cr=await fetch(logUrl+':/content',{headers:{Authorization:'Bearer '+tok}});
+      if(!cr.ok)throw new Error('log read '+cr.status);
+      const d=await cr.json();if(!Array.isArray(d))throw new Error('log unreadable');rows=d;
+    }
+    if(!rows.some(function(x){return x.id===rec.id;})){
+      const row=Object.assign({id:rec.id},m);
+      if(rows.some(function(x){return String(x.supplier).toUpperCase()===String(m.supplier).toUpperCase()&&String(x.ticket).toUpperCase()===String(m.ticket).toUpperCase();}))row.dup=true;
+      rows.push(row);
+    }
+    const H={Authorization:'Bearer '+tok,'Content-Type':'application/json'};if(etag)H['If-Match']=etag;
+    const pr=await fetch(logUrl+':/content'+(etag?'':'?@microsoft.graph.conflictBehavior=fail'),{method:'PUT',headers:H,body:JSON.stringify(rows)});
+    if(pr.status===412||pr.status===409){rows=null;continue;}
+    if(!pr.ok)throw new Error('log write '+pr.status);
+    break;
+  }
+  if(!rows)throw new Error('log busy');
+  // 3. Excel-readable copy for accounting. Best effort: if someone has it open and locked,
+  //    it is rebuilt from the JSON on the next ticket.
+  try{
+    const q=function(x){let s=String(x==null?'':x);if(/^[=+\-@]/.test(s))s="'"+s;return '"'+s.replace(/"/g,'""')+'"';};
+    const head=['Date','Job','Phase','Type','Material','Size','Qty','Unit','Supplier','Ticket #','PO #','Entered by','Notes','Photo'];
+    const lines=[head.join(',')].concat(rows.slice().sort(function(a,b){return String(a.date).localeCompare(String(b.date));}).map(function(x){
+      return [q(x.date),q(x.job),q(x.phase),q(x.kind),q(x.material),q(x.size),x.qty,q(x.unit),q(x.supplier),q(x.ticket),q(x.po),q(x.by),q((x.dup?'POSSIBLE DUPLICATE TICKET. ':'')+(x.notes||'')),x.url?'"=HYPERLINK(""'+String(x.url).replace(/"/g,'')+'"",""Open photo"")"':'""'].join(',');
+    }));
+    await fetch(tkUrl(dir+'/Ticket Log '+job+'.csv')+':/content',{method:'PUT',headers:{Authorization:'Bearer '+tok,'Content-Type':'text/csv'},body:'\ufeff'+lines.join('\r\n')});
+  }catch(e){console.warn('ticket csv',e);}
+}
+setTimeout(function(){try{tkFlush(false);}catch(e){}},9000);
+// ===== HOME PAGE (build .14) ==================================================
+// Big-button start screen so a foreman never has to hunt through tabs.
+function vhGo(where){
+  if(where==='time'){entryMode='timecards';showPage('entry');}
+  else if(where==='prod'){entryMode='production';showPage('entry');}
+  else if(where==='ticket'){
+    const d=new Date();const iso=new Date(d.getTime()-d.getTimezoneOffset()*60000).toISOString().slice(0,10);
+    tkOpen(iso,'','');
+  }
+}
+function rHome(){
+  const wk=S.weeks[S.currentWeek]||{employees:[],entries:{}};
+  let hrs=0;(wk.employees||[]).forEach(function(eid){hrs+=ct(wk,eid).c;});
+  const nFix=(wk.status==='draft'||wk.status==='returned')?vhCheckWeek(wk).filter(function(x){return x.sev==='err';}).length:0;
+  const nProd=prodEntries(wk).length;
+  const first=(auth.user&&auth.user.name?auth.user.name.split(' ')[0]:'');
+  let tsSub;
+  if(wk.status==='returned')tsSub='<span style="color:#d97706;font-weight:700">Returned by manager. Needs fixing.</span>';
+  else if(wk.status==='submitted')tsSub='Submitted. Waiting for approval.';
+  else if(wk.status==='approved')tsSub='Approved.';
+  else if(!(wk.employees||[]).length)tsSub='No crew added yet';
+  else tsSub=(wk.employees.length)+' crew \u00b7 '+hrs.toFixed(1)+' hours'+(nFix?' \u00b7 <span style="color:#dc2626;font-weight:700">'+nFix+' to fix</span>':'');
+  const tile=function(icon,color,title,sub,fn){
+    return '<button onclick="'+fn+'" style="display:flex;flex-direction:column;align-items:flex-start;justify-content:space-between;text-align:left;min-height:150px;padding:20px;border-radius:18px;border:1px solid var(--border);background:var(--bg);box-shadow:0 2px 10px rgba(0,0,0,.06);cursor:pointer;font-family:inherit;color:inherit;-webkit-appearance:none">'+
+      '<span style="width:56px;height:56px;border-radius:14px;background:'+color+';display:flex;align-items:center;justify-content:center"><i class="ti '+icon+'" style="font-size:30px;color:#fff"></i></span>'+
+      '<span><strong style="font-size:22px;font-weight:700;letter-spacing:-.3px;display:block;margin-top:14px">'+title+'</strong>'+
+      '<span style="font-size:13.5px;color:var(--text2);display:block;margin-top:4px;line-height:1.35">'+sub+'</span></span></button>';
+  };
+  let h='<div class="pg">';
+  h+='<div style="margin:6px 0 18px"><div style="font-size:26px;font-weight:800;letter-spacing:-.5px">'+(first?'Hi, '+first.replace(/</g,'&lt;'):'Valenti Held Field')+'</div>'+
+     '<div style="font-size:14px;color:var(--text2);margin-top:2px">'+fw(S.currentWeek)+'</div></div>';
+  if(!auth.user)h+='<div class="syb"><span class="sd off" style="flex-shrink:0"></span><span style="flex:1;font-size:14px">Not signed in</span><button class="btn btn-p btn-sm" onclick="signIn()" style="flex-shrink:0">Sign in</button></div>';
+  h+='<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:14px">';
+  h+=tile('ti-clock','#185fa5','Timesheets',tsSub,"vhGo('time')");
+  h+=tile('ti-shovel','#16a34a','Production',nProd?(nProd+' report'+(nProd>1?'s':'')+' this week'):'Daily footage, runs and plan markup',"vhGo('prod')");
+  h+=tile('ti-receipt','#d97706','Tickets','<span id="tk-pend-home">Photograph a stone or pipe ticket</span>',"vhGo('ticket')");
+  h+=tile('ti-gauge','#7c3aed','Testing','Air, mandrel, vacuum, pressure, televising',"tsOpen()");
+  h+=tile('ti-chart-bar','#0f766e','Job Tracker','Progress by run, what is done, earthwork yards and cost',"location.href='tracker.html'");
+  h+='</div></div>';
+  document.getElementById('mc').innerHTML=h;
+  tkAll().then(function(r){const n=(r||[]).length;const el=document.getElementById('tk-pend-home');if(el&&n)el.innerHTML='<span style="color:#d97706;font-weight:700">'+n+' waiting to send</span>';}).catch(function(){});
+}
+// ===== UTILITY TESTING (build .15) ============================================
+// One record per test per run. Saved through the same on-device queue as tickets, then to
+// Estimating/FIELD/{job}/Testing/ (tests.json + "Test Log {job}.csv" + optional photo).
+const TS_TESTS={
+  Sanitary:{phase:'500',tests:{'Air test':['Start psi','End psi','Minutes held'],'Mandrel':['Mandrel size (in)'],'Manhole vacuum':['Start inHg','End inHg','Seconds held'],'Televising':['Footage (LF)'],'Force main pressure':['Test psi','End psi','Minutes held']}},
+  Water:{phase:'600',tests:{'Pressure test':['Test psi','End psi','Minutes held','Makeup water (gal)'],'Chlorination':['Initial ppm','Residual ppm','Hours held'],'Bac-T sample':['Sample #','Lab'],'Flushing':[],'Tracer wire':[]}},
+  Storm:{phase:'400',tests:{'Mandrel':['Mandrel size (in)'],'Televising':['Footage (LF)'],'Visual / lamping':[]}}
+};
+function tsOpen(keep){
+  const mem=tkMem();
+  const d=new Date();const iso=new Date(d.getTime()-d.getTimezoneOffset()*60000).toISOString().slice(0,10);
+  window.__ts={img:null,util:(keep&&keep.util)||'Sanitary',test:(keep&&keep.test)||'',result:''};
+  const lbl='font-size:12px;font-weight:600;color:var(--text2);display:block;margin:12px 0 5px';
+  const inp='width:100%;font-size:16px;padding:11px 12px;border-radius:10px;border:1px solid var(--border);background:var(--bg);color:inherit;box-sizing:border-box';
+  const q=function(x){return String(x||'').replace(/"/g,'&quot;');};
+  const old=document.getElementById('ts-sheet');if(old)old.remove();
+  const el=document.createElement('div');el.id='ts-sheet';
+  el.innerHTML='<div style="position:fixed;inset:0;background:var(--bg);z-index:290;display:flex;flex-direction:column">'+
+   '<div style="display:flex;align-items:center;gap:8px;padding:calc(10px + env(safe-area-inset-top)) 12px 10px;border-bottom:0.5px solid var(--border)">'+
+     '<button onclick="tsClose()" style="background:none;border:none;color:inherit;font-size:24px;padding:4px 8px;cursor:pointer">\u2715</button>'+
+     '<strong style="flex:1;font-size:17px">Utility test</strong></div>'+
+   '<div style="flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:6px 16px calc(24px + env(safe-area-inset-bottom));max-width:640px;width:100%;margin:0 auto;box-sizing:border-box">'+
+     '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">'+
+       '<div><span style="'+lbl+'">Job #</span><input id="ts-job" style="'+inp+'" value="'+q((keep&&keep.job)||mem.lastJob)+'"/></div>'+
+       '<div><span style="'+lbl+'">Date</span><input id="ts-date" type="date" style="'+inp+'" value="'+((keep&&keep.date)||iso)+'"/></div></div>'+
+     '<span style="'+lbl+'">Utility</span><div id="ts-utils" style="display:flex;gap:8px"></div>'+
+     '<span style="'+lbl+'">Test</span><div id="ts-tests" style="display:flex;flex-wrap:wrap;gap:8px"></div>'+
+     '<span style="'+lbl+'">Run or structure tested</span><input id="ts-run" readonly placeholder="Tap to pick" style="'+inp+';cursor:pointer" onclick="tsPickRun(this)"/>'+
+     '<div id="ts-reads" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px"></div>'+
+     '<span style="'+lbl+'">Result</span><div id="ts-res" style="display:flex;gap:8px"></div>'+
+     '<span style="'+lbl+'">Witnessed by (inspector, if any)</span><input id="ts-wit" style="'+inp+'" value="'+q(keep&&keep.witness)+'"/>'+
+     '<span style="'+lbl+'">Notes</span><input id="ts-notes" style="'+inp+'" placeholder="Where it failed, what was repaired..."/>'+
+     '<label style="display:block;margin-top:14px;border:2px dashed var(--border);border-radius:14px;padding:14px;text-align:center;cursor:pointer" id="ts-drop">'+
+       '<input type="file" accept="image/*" capture="environment" style="display:none" onchange="tsPhoto(this)"/>'+
+       '<div id="ts-prev"><i class="ti ti-camera" style="font-size:26px;color:var(--accent)"></i><div style="font-size:14px;font-weight:600;margin-top:4px">Photo of gauge or signed form (optional)</div></div></label>'+
+     '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:18px">'+
+       '<button class="btn btn-bl" style="min-height:50px;justify-content:center" onclick="tsSave(true)"><i class="ti ti-plus"></i> Save and test next run</button>'+
+       '<button class="btn btn-p btn-bl" style="min-height:50px;justify-content:center" onclick="tsSave(false)"><i class="ti ti-check"></i> Save and finish</button></div>'+
+   '</div></div>';
+  document.body.appendChild(el);
+  tsUtil(window.__ts.util,window.__ts.test);tsRes('');
+}
+function tsBtns(boxId,items,cur,fn,colors){
+  const box=document.getElementById(boxId);box.innerHTML='';
+  items.forEach(function(x){const b=document.createElement('button');b.className='btn'+(x===cur&&!colors?' btn-p':'');
+    b.style.cssText='flex:1;min-height:46px;justify-content:center;font-size:15px;white-space:nowrap'+(colors&&x===cur?';color:#fff;border-color:'+colors[x]+';background:'+colors[x]:'');
+    b.textContent=x;b.onclick=function(){fn(x);};box.appendChild(b);});
+}
+function tsUtil(u,test){
+  const s=window.__ts;s.util=u;
+  tsBtns('ts-utils',Object.keys(TS_TESTS),u,function(x){tsUtil(x);});
+  const names=Object.keys(TS_TESTS[u].tests);
+  tsTest(test&&names.indexOf(test)>=0?test:names[0]);
+  const r=document.getElementById('ts-run');if(r&&!test)r.value='';
+}
+function tsTest(name){
+  const s=window.__ts;s.test=name;
+  tsBtns('ts-tests',Object.keys(TS_TESTS[s.util].tests),name,function(x){tsTest(x);});
+  const f=TS_TESTS[s.util].tests[name]||[];
+  document.getElementById('ts-reads').innerHTML=f.map(function(l,i){
+    const txt=/#|Lab/.test(l);
+    return '<div><span style="font-size:12px;font-weight:600;color:var(--text2);display:block;margin:12px 0 5px">'+l+'</span><input class="ts-read" data-l="'+l+'" '+(txt?'':'inputmode="decimal"')+' style="width:100%;font-size:16px;padding:11px 12px;border-radius:10px;border:1px solid var(--border);background:var(--bg);color:inherit;box-sizing:border-box"/></div>';
+  }).join('');
+}
+function tsRes(r){window.__ts.result=r;tsBtns('ts-res',['Pass','Fail'],r,function(x){tsRes(x);},{Pass:'#16a34a',Fail:'#dc2626'});}
+function tsPickRun(inp){
+  const job=document.getElementById('ts-job').value.trim();
+  if(!job){toast('Enter the job number first.','error');return;}
+  vhStrPick(inp,{job:job,phase:TS_TESTS[window.__ts.util].phase});
+}
+function tsPhoto(inp){
+  const f=inp.files&&inp.files[0];if(!f)return;const rd=new FileReader();
+  rd.onload=async function(){const small=await compressPhoto(rd.result,1800,0.72);window.__ts.img=small;
+    document.getElementById('ts-prev').innerHTML='<img src="'+small+'" style="max-width:100%;max-height:200px;border-radius:10px"/><div style="font-size:12.5px;color:var(--text2);margin-top:6px">Tap to retake</div>';};
+  rd.readAsDataURL(f);
+}
+function tsClose(){const el=document.getElementById('ts-sheet');if(el)el.remove();window.__ts=null;}
+async function tsSave(next){
+  const s=window.__ts;if(!s)return;
+  const v=function(id){return document.getElementById(id).value.trim();};
+  const miss=[];
+  if(!v('ts-job'))miss.push('job #');if(!v('ts-run'))miss.push('run or structure');if(!s.result)miss.push('pass or fail');
+  const reads={};document.querySelectorAll('.ts-read').forEach(function(i){if(i.value.trim())reads[i.dataset.l]=i.value.trim();});
+  if(s.result==='Fail'&&!v('ts-notes'))miss.push('a note on what failed');
+  if(miss.length){toast('Still needed: '+miss.join(', ')+'.','error');return;}
+  const meta={date:v('ts-date'),job:v('ts-job'),util:s.util,phase:TS_TESTS[s.util].phase,test:s.test,run:v('ts-run'),result:s.result,readings:reads,
+    witness:v('ts-wit'),notes:v('ts-notes'),by:(auth.user&&auth.user.name)||'',byEmail:(auth.user&&auth.user.email)||'',at:new Date().toISOString()};
+  const id=Date.now()+'-'+Math.random().toString(36).slice(2,8);
+  try{await tkPut({id:id,type:'test',meta:meta,img:s.img});}
+  catch(e){toast('Could not save on this device: '+(e&&e.message||e),'error');return;}
+  const mem=tkMem();mem.lastJob=meta.job;tkMemSave(mem);
+  toast(meta.test+' on '+meta.run+': '+meta.result.toUpperCase()+' saved.',meta.result==='Pass'?'success':'error');
+  if(next)tsOpen({job:meta.job,date:meta.date,util:meta.util,test:meta.test,witness:meta.witness});
+  else{tsClose();if(cp==='home')rHome();}
+  tkFlush(false);
+}
+async function tsSend(tok,rec){
+  const m=rec.meta;const job=tkClean(m.job);const jobDir=await tkJobDir(tok,job);const dir=jobDir+'/Testing';
+  if(!m.folderOk){await tkEnsureFolder(tok,jobDir,'Testing');m.folderOk=true;}
+  if(rec.img&&!m.url){
+    const blob=await (await fetch(rec.img)).blob();
+    const fname=[m.date,m.util,tkClean(m.test),tkClean(m.run),m.result.toUpperCase()].join('_')+'.jpg';
+    const r=await fetch(tkUrl(dir+'/'+fname)+':/content?@microsoft.graph.conflictBehavior=rename',{method:'PUT',headers:{Authorization:'Bearer '+tok,'Content-Type':'image/jpeg'},body:blob});
+    if(!r.ok)throw new Error('photo upload '+r.status);
+    const j=await r.json();m.url=j.webUrl||'';m.file=j.name||fname;await tkPut(rec);
+  }
+  const logUrl=tkUrl(dir+'/tests.json');let rows=null;
+  for(let a=0;a<4;a++){
+    const mr=await fetch(logUrl,{headers:{Authorization:'Bearer '+tok}});
+    let etag=null;rows=[];
+    if(mr.status!==404){
+      if(!mr.ok)throw new Error('log read '+mr.status);
+      etag=(await mr.json()).eTag;
+      const cr=await fetch(logUrl+':/content',{headers:{Authorization:'Bearer '+tok}});
+      if(!cr.ok)throw new Error('log read '+cr.status);
+      const d=await cr.json();if(!Array.isArray(d))throw new Error('log unreadable');rows=d;
+    }
+    if(!rows.some(function(x){return x.id===rec.id;})){const row=Object.assign({id:rec.id},m);delete row.folderOk;rows.push(row);}
+    const H={Authorization:'Bearer '+tok,'Content-Type':'application/json'};if(etag)H['If-Match']=etag;
+    const pr=await fetch(logUrl+':/content'+(etag?'':'?@microsoft.graph.conflictBehavior=fail'),{method:'PUT',headers:H,body:JSON.stringify(rows)});
+    if(pr.status===412||pr.status===409){rows=null;continue;}
+    if(!pr.ok)throw new Error('log write '+pr.status);
+    break;
+  }
+  if(!rows)throw new Error('log busy');
+  try{
+    const q=function(x){let s=String(x==null?'':x);if(/^[=+\-@]/.test(s))s="'"+s;return '"'+s.replace(/"/g,'""')+'"';};
+    const head=['Date','Job','Utility','Test','Run / Structure','Result','Readings','Witnessed by','Tested by','Notes','Photo'];
+    const lines=[head.join(',')].concat(rows.slice().sort(function(a,b){return String(a.date+a.at).localeCompare(String(b.date+b.at));}).map(function(x){
+      const rd=Object.keys(x.readings||{}).map(function(k){return k+': '+x.readings[k];}).join('; ');
+      return [q(x.date),q(x.job),q(x.util),q(x.test),q(x.run),q(x.result),q(rd),q(x.witness),q(x.by),q(x.notes),x.url?'"=HYPERLINK(""'+String(x.url).replace(/"/g,'')+'"",""Open photo"")"':'""'].join(',');
+    }));
+    await fetch(tkUrl(dir+'/Test Log '+job+'.csv')+':/content',{method:'PUT',headers:{Authorization:'Bearer '+tok,'Content-Type':'text/csv'},body:'\ufeff'+lines.join('\r\n')});
+  }catch(e){console.warn('test csv',e);}
+}
 function getJobSuggestions(wk,dt){
   const jobs=new Set();
   (wk.employees||[]).forEach(function(eid){
@@ -963,6 +1355,9 @@ function buildProductionView(wk,dates,ro){
 
   const dt=dates[adDay];
   const suggestions=getJobSuggestions(wk,dt);
+  // Material tickets bar (independent of timesheet status: a delivery can be logged any time)
+  s+='<div style="display:flex;align-items:center;gap:10px;background:var(--bg2);border-radius:var(--r3);padding:10px 12px;margin-bottom:14px"><i class="ti ti-receipt" style="font-size:22px;color:var(--accent);flex-shrink:0"></i><div style="flex:1;min-width:0" onclick="tkFlush(true)"><strong style="font-size:14px">Material tickets</strong><br><span id="tk-pend" style="font-size:12px;color:var(--text2)">Stone and pipe deliveries</span></div><button class="btn btn-p btn-sm" style="flex-shrink:0;min-height:40px" data-dt="'+dt+'" data-ph="'+PROD_PHASES[adPhase]+'" data-job="'+String(suggestions[0]||'').replace(/"/g,'&quot;')+'" onclick="tkOpen(this.dataset.dt,this.dataset.ph,this.dataset.job)"><i class="ti ti-camera"></i> Add ticket</button></div>';
+  setTimeout(tkRefreshCount,0);
 
   // Phase tabs
   s+='<div style="display:flex;gap:4px;margin-bottom:14px;overflow-x:auto;scrollbar-width:none;-webkit-overflow-scrolling:touch;padding-bottom:2px">';
@@ -1605,19 +2000,19 @@ async function vhLoadScope(force){
 // Full-screen searchable picker for the production form's STR ID field.
 // Replaces the native datalist, which is broken on phones (keyboard dismisses,
 // long lists unscrollable). Search input at TOP so the keyboard never covers it.
-function vhStrPick(inp){
+function vhStrPick(inp,opts){
   const cache=vhScopeCache();
   if(!cache||!cache.rows||!cache.rows.length){vhLoadScope(true);toast('Loading run list \u2014 give it a few seconds and tap again.','error');return;}
   if(Date.now()-cache.ts>4*3600*1000)vhLoadScope(); // background refresh
   const wk=S.weeks[S.currentWeek];
-  const entry=(typeof prodEntries==='function'?prodEntries(wk):[]).find(function(e){return e.id==inp.dataset.id;})||{};
+  const entry=opts?{job:opts.job,phase:opts.phase}:((typeof prodEntries==='function'?prodEntries(wk):[]).find(function(e){return e.id==inp.dataset.id;})||{});
   const job=String(entry.job||'').trim(),ph=String(entry.phase||'').trim();
   let rows=cache.rows.filter(function(r){return (!job||r.j===job||r.j.indexOf(job)===0)&&(!ph||r.p===ph);});
   let scopeNote=(job?('job '+job):'all jobs')+(ph?(' \u00b7 phase '+ph):'');
   if(!rows.length&&job){rows=cache.rows.filter(function(r){return r.j===job;});scopeNote='job '+job+' (all phases)';}
   if(!rows.length){rows=cache.rows;scopeNote='all jobs';}
   rows=rows.slice().sort(function(a,b){return String(a.id).localeCompare(String(b.id),undefined,{numeric:true});});
-  window.__strPick={entryId:inp.dataset.id,inputEl:inp,rows:rows};
+  window.__strPick={entryId:opts?null:inp.dataset.id,inputEl:inp,rows:rows};
   let el=document.getElementById('str-sheet');if(el)el.remove();
   el=document.createElement('div');el.id='str-sheet';
   el.innerHTML='<div style="position:fixed;inset:0;background:var(--bg,#0d1117);z-index:300;display:flex;flex-direction:column">'+
@@ -1656,7 +2051,7 @@ function vhStrFilter(){
 }
 function vhStrChoose(id){
   const c=window.__strPick;if(!c)return;
-  setProdField(+c.entryId,'strId',id);
+  if(c.entryId!=null)setProdField(+c.entryId,'strId',id);
   if(c.inputEl)c.inputEl.value=id; // update the visible field without re-rendering the form
   vhStrClose();
 }
@@ -1774,7 +2169,7 @@ function changeWeek(w){S.currentWeek=w;if(!S.weeks[w])S.weeks[w]=bw();adys={};re
 function showPage(p){if(p==='export'&&!auth.isAdmin){toast('Admins only.','error');return;}cp=p;document.querySelectorAll('.nb[id^=nav-]').forEach(b=>b.classList.remove('active'));const nb=document.getElementById('nav-'+p);if(nb)nb.classList.add('active');if(p==='approval'||p==='review'){loadSP().then(()=>render());}else if(p==='entry'){render();loadSP().then(()=>{updBadge();render();});}else{render();}}
 function render(){const wk=S.weeks[S.currentWeek];const ts=document.getElementById('ts');
   if(ts&&wk){const sc=wk.status==='returned'?'rt':wk.status.slice(0,2);ts.innerHTML=`<span class="sb sb-${sc}" style="font-size:11px;padding:3px 10px">${wk.status.charAt(0).toUpperCase()+wk.status.slice(1)}</span>`;}
-  updNav();if(cp==='entry')rEntry();else if(cp==='review')rReview();else if(cp==='approval')rApproval();else if(cp==='export')rExport();else if(cp==='settings')rSettings();
+  updNav();if(cp==='home')rHome();else if(cp==='entry')rEntry();else if(cp==='review')rReview();else if(cp==='approval')rApproval();else if(cp==='export')rExport();else if(cp==='settings')rSettings();
 }
 function ge(wk,eid,dt,f){return(wk.entries[`${eid}:${dt}`]||{})[f]||'';}
 function getJobLines(wk,eid,dt){
@@ -1792,6 +2187,8 @@ function setJobLine(eid,dt,idx,field,val){
   if(!wk.entries[k].jobLines[idx])wk.entries[k].jobLines[idx]={job:'',phase:'',startTime:'',stopTime:'',lunch:'',hours:'',equipment:[]};
   if(!wk.entries[k].jobLines[idx].equipment)wk.entries[k].jobLines[idx].equipment=[];
   wk.entries[k].jobLines[idx][field]=val;
+  // A time was blanked: the old calculated hours must not linger on the line.
+  if((field==='startTime'||field==='stopTime')&&val===''){wk.entries[k].jobLines[idx].hours='';}
   // Recalculate hours from start/stop/lunch for each line
   wk.entries[k].jobLines.forEach(function(ln){
     const c=calcJobHours(ln);
@@ -1813,6 +2210,7 @@ function addJobLine(eid,dt){
 function removeJobLine(eid,dt,idx){
   const wk=S.weeks[S.currentWeek];const k=`${eid}:${dt}`;
   if(!wk.entries[k]||!wk.entries[k].jobLines)return;
+  vhSnap();
   wk.entries[k].jobLines.splice(idx,1);
   if(wk.entries[k].jobLines.length===0)wk.entries[k].jobLines=[{job:'',phase:'',hours:'',equipment:[]}];
   const total=wk.entries[k].jobLines.reduce((s,l)=>s+(parseFloat(l.hours)||0),0);
@@ -1820,6 +2218,7 @@ function removeJobLine(eid,dt,idx){
   rTot(eid);
   refreshDayPanel(eid,dt);
   saveDraftSilent();
+  vhUndoBar('Job line removed');
 }
 function refreshDayPanel(eid,dt){
   const wk=S.weeks[S.currentWeek];const ro=wk.status!=='draft'&&wk.status!=='returned';
@@ -1888,7 +2287,7 @@ function rEntry(){const wk=S.weeks[S.currentWeek];const dates=wd(S.currentWeek);
   else{wk.employees.forEach(eid=>{const emp=empById(eid);
     const{l,e,c}=ct(wk,eid);const ad=adys[eid]||0;
     const dhd=dates.map(dt=>{const en=wk.entries[`${eid}:${dt}`]||{};const eq=wk.equipmentEntries[`${eid}:${dt}`]||[];return en.hours||en.job||en.phase||eq.length>0;});
-    h+=`<div class="eb"><div class="eh"><div class="ehl"><strong>${emp.name}</strong><small>${emp.title} · ${emp.id}</small></div><div class="et"><span class="cm">${c.toFixed(1)}h</span><span class="br">L:${l.toFixed(1)} E:${e.toFixed(1)}</span></div></div>
+    h+=`<div class="eb"><div class="eh"><div class="ehl"><strong>${emp.name}</strong><small>${emp.title} · ${emp.id}</small></div><div class="et"><span class="cm">${c.toFixed(1)}h</span><span class="br">L:${l.toFixed(1)} E:${e.toFixed(1)}</span></div>${ro?'':`<button class="btn btn-sm" title="Clear or remove" style="margin-left:10px;flex-shrink:0;min-width:40px;min-height:40px;justify-content:center" onclick="empMenu('${eid}')"><i class="ti ti-dots"></i></button>`}</div>
       <div class="dts" id="dts-${eid}">${DAYS.map((day,di)=>`<div class="dt${di===ad?' active':''}${dhd[di]?' hd':''}" onclick="swDay('${eid}',${di})">${day}<br><span style="font-size:9px;font-weight:500;opacity:.7">${fs(dates[di])}</span></div>`).join('')}</div>
       <div class="dps" id="dps-${eid}" style="transform:translateX(-${ad*100}%)">
         ${dates.map((dt,di)=>{const eqs=wk.equipmentEntries[`${eid}:${dt}`]||[];const he=eqs.length>0;
@@ -1896,7 +2295,7 @@ function rEntry(){const wk=S.weeks[S.currentWeek];const dates=wd(S.currentWeek);
           return buildDayPanel(eid,dt,wk,ro,eqs,he);
           }).join('')}
       </div></div>`;});}
-  if(!ro&&wk.employees.length)h+=`<div class="acts"><button class="btn btn-sm" onclick="fmMoveWeek()"><i class="ti ti-calendar"></i> Move week</button><button class="btn btn-sm btn-d" onclick="clearDraft()"><i class="ti ti-trash"></i> Clear</button><button class="btn btn-bl" onclick="saveDraft()"><i class="ti ti-device-floppy"></i> Save</button><button class="btn btn-p btn-bl" onclick="showPage('review')"><i class="ti ti-arrow-right"></i> Review & submit</button></div>`;
+  if(!ro&&wk.employees.length)h+=`<div class="acts"><button class="btn btn-sm" onclick="fmMoveWeek()"><i class="ti ti-calendar"></i> Move week</button><button class="btn btn-sm btn-d" onclick="clearDraft()"><i class="ti ti-trash"></i> Clear</button><button class="btn btn-bl" onclick="saveDraft()"><i class="ti ti-device-floppy"></i> Save</button><button class="btn btn-p btn-bl" onclick="showPage('review')"><i class="ti ti-arrow-right"></i> Review & submit${(()=>{const n=vhCheckWeek(wk).filter(x=>x.sev==='err').length;return n?' ('+n+' to fix)':'';})()}</button></div>`;
   h+=`</div>`;document.getElementById('mc').innerHTML=h;
 }
 // --- Copy previous day: 1-tap repeat of yesterday's jobs/times/equipment for an employee ---
@@ -1962,6 +2361,7 @@ function buildDayPanel(eid,dt,wk,ro,eqs,he){
     s+='<div><span class="fl" style="font-size:10px;margin-bottom:4px;display:block">Phase</span>';
     s+='<input class="di" type="text" inputmode="text" value="'+phVal+'" '+dis+' placeholder="Phase code" style="padding:8px 10px;font-size:15px" data-eid="'+e+'" data-dt="'+d+'" data-ji="'+ji+'" data-f="phase" oninput="setJobLine(this.dataset.eid,this.dataset.dt,+this.dataset.ji,this.dataset.f,this.value)"/></div>';
     s+='</div>';
+    if(!ro&&!ln.job)s+=vhJobChips(e,d,ji);
     // Start / Stop / Lunch row
     s+='<div style="display:grid;grid-template-columns:1fr 1fr 80px;gap:8px;margin-bottom:8px">';
     s+='<div><span class="fl" style="font-size:10px;margin-bottom:4px;display:block">Start</span>';
@@ -2000,6 +2400,8 @@ function buildDayPanel(eid,dt,wk,ro,eqs,he){
     // Remove button
     if(!ro&&jls.length>1){
       s+='<button class="btn btn-sm btn-d" style="align-self:flex-end;min-height:44px" data-eid="'+e+'" data-dt="'+d+'" data-ji="'+ji+'" onclick="removeJobLine(this.dataset.eid,this.dataset.dt,+this.dataset.ji)"><i class="ti ti-trash"></i></button>';
+    } else if(!ro){
+      s+='<button class="btn btn-sm" title="Clear this line" style="align-self:flex-end;min-height:44px" data-eid="'+e+'" data-dt="'+d+'" data-ji="'+ji+'" onclick="clearJobLine(this.dataset.eid,this.dataset.dt,+this.dataset.ji)"><i class="ti ti-eraser"></i></button>';
     } else {
       s+='<div></div>';
     }
@@ -2011,9 +2413,10 @@ function buildDayPanel(eid,dt,wk,ro,eqs,he){
     s+='</div>';
   });
   if(!ro){
-    s+='<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:4px">';
+    s+='<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:8px;margin-top:4px">';
     s+='<button class="btn btn-bl" style="font-size:13px;min-height:40px" data-eid="'+e+'" data-dt="'+d+'" onclick="addJobLine(this.dataset.eid,this.dataset.dt)"><i class="ti ti-plus"></i> Add job line</button>';
     s+='<button class="btn btn-bl" style="font-size:13px;min-height:40px" data-eid="'+e+'" data-dt="'+d+'" onclick="copyPrevDay(this.dataset.eid,this.dataset.dt)"><i class="ti ti-copy"></i> Copy previous day</button>';
+    s+='<button class="btn btn-bl" style="font-size:13px;min-height:40px" data-eid="'+e+'" data-dt="'+d+'" onclick="clearDay(this.dataset.eid,this.dataset.dt)"><i class="ti ti-eraser"></i> Clear day</button>';
     s+='</div>';
   }
   s+='</div>';
@@ -2021,6 +2424,215 @@ function buildDayPanel(eid,dt,wk,ro,eqs,he){
   return s;
 }
 
+// ===== CLEAR / RESET + PRE-SUBMIT CHECK (build .12) ===========================
+// Every clear is undoable for 10 seconds, so a foreman can wipe a mistake without fear.
+function vhSnap(){
+  const wk=S.weeks[S.currentWeek];if(!wk)return;
+  window.__vhUndo={week:S.currentWeek,data:JSON.stringify({employees:wk.employees||[],entries:wk.entries||{},equipmentEntries:wk.equipmentEntries||{}})};
+}
+function vhUndoBar(msg){
+  const old=document.getElementById('vh-undo');if(old)old.remove();
+  const t=document.querySelector('.toast');if(t)t.remove();
+  const b=document.createElement('div');b.id='vh-undo';
+  b.style.cssText='position:fixed;bottom:calc(var(--bottom-nav-h) + 12px);left:16px;right:16px;max-width:460px;margin:0 auto;background:#111827;color:#fff;border-radius:12px;padding:10px 10px 10px 16px;z-index:310;display:flex;align-items:center;gap:12px;font-size:15px;font-weight:500;box-shadow:0 8px 32px rgba(0,0,0,.3)';
+  b.innerHTML='<span style="flex:1"></span><button onclick="vhUndoDo()" style="background:#fff;color:#111827;border:none;border-radius:8px;padding:10px 18px;font-size:15px;font-weight:700;cursor:pointer">Undo</button>';
+  b.firstChild.textContent=msg;
+  document.body.appendChild(b);
+  clearTimeout(window.__vhUndoT);window.__vhUndoT=setTimeout(function(){const x=document.getElementById('vh-undo');if(x)x.remove();},10000);
+}
+function vhUndoDo(){
+  const u=window.__vhUndo;const b=document.getElementById('vh-undo');if(b)b.remove();
+  if(!u||u.week!==S.currentWeek){toast('Nothing to undo.','error');return;}
+  const wk=S.weeks[S.currentWeek];const d=JSON.parse(u.data);
+  wk.employees=d.employees;wk.entries=d.entries;wk.equipmentEntries=d.equipmentEntries;
+  window.__vhUndo=null;saveDraftSilent();render();toast('Restored.','success');
+}
+function vhEmpName(eid){const e=empById(eid);return e&&e.name?e.name:String(eid);}
+function clearJobLine(eid,dt,idx){
+  const wk=S.weeks[S.currentWeek];const k=`${eid}:${dt}`;
+  if(wk.status!=='draft'&&wk.status!=='returned')return;
+  vhSnap();
+  if(!wk.entries[k])wk.entries[k]={};
+  wk.entries[k].jobLines=getJobLines(wk,eid,dt).slice();
+  wk.entries[k].jobLines[idx]={job:'',phase:'',startTime:'',stopTime:'',lunch:'',hours:'',equipment:[]};
+  delete wk.entries[k].job;delete wk.entries[k].phase;
+  const total=wk.entries[k].jobLines.reduce((s,l)=>s+(parseFloat(l.hours)||0),0);
+  wk.entries[k].hours=total>0?String(total):'';
+  if(wk.equipmentEntries&&wk.entries[k].jobLines.length===1)delete wk.equipmentEntries[k];
+  saveDraftSilent();refreshDayPanel(eid,dt);
+  vhUndoBar('Line cleared');
+}
+function clearDay(eid,dt){
+  const wk=S.weeks[S.currentWeek];const k=`${eid}:${dt}`;
+  if(wk.status!=='draft'&&wk.status!=='returned')return;
+  if(!dayHasData(wk,eid,dt)&&!(wk.entries[k]&&wk.entries[k].jobLines)){toast('Nothing entered for this day.','');return;}
+  vhSnap();
+  delete wk.entries[k];if(wk.equipmentEntries)delete wk.equipmentEntries[k];
+  saveDraftSilent();refreshDayPanel(eid,dt);
+  vhUndoBar(vhEmpName(eid)+' \u2014 '+fs(dt)+' cleared');
+}
+function clearEmpWeek(eid){
+  const wk=S.weeks[S.currentWeek];closeM();
+  vhSnap();
+  wd(S.currentWeek).forEach(function(dt){const k=`${eid}:${dt}`;delete wk.entries[k];if(wk.equipmentEntries)delete wk.equipmentEntries[k];});
+  saveDraftSilent();render();
+  vhUndoBar(vhEmpName(eid)+' \u2014 whole week cleared');
+}
+function removeEmp(eid){
+  const wk=S.weeks[S.currentWeek];closeM();
+  vhSnap();
+  wk.employees=(wk.employees||[]).filter(function(x){return String(x)!==String(eid);});
+  Object.keys(wk.entries||{}).forEach(function(k){if(k.split(':')[0]===String(eid))delete wk.entries[k];});
+  Object.keys(wk.equipmentEntries||{}).forEach(function(k){if(k.split(':')[0]===String(eid))delete wk.equipmentEntries[k];});
+  delete adys[eid];
+  saveDraftSilent();render();
+  vhUndoBar(vhEmpName(eid)+' removed from crew');
+}
+function empMenu(eid){
+  const wk=S.weeks[S.currentWeek];const dates=wd(S.currentWeek);const dt=dates[adys[eid]||0];
+  const nm=vhEmpName(eid).replace(/</g,'&lt;');
+  const {c}=ct(wk,eid);
+  const row=function(icon,label,sub,fn,danger){return '<button class="btn btn-bl" style="justify-content:flex-start;gap:14px;min-height:58px;margin-bottom:10px;text-align:left;'+(danger?'color:#dc2626;':'')+'" onclick="'+fn+'"><i class="ti '+icon+'" style="font-size:22px"></i><span><strong style="font-size:15px;display:block">'+label+'</strong><span style="font-size:12.5px;color:var(--text2);font-weight:400">'+sub+'</span></span></button>';};
+  showM('<div class="mh"></div><h2>'+nm+'</h2><p>'+c.toFixed(1)+' hours this week. Anything you clear can be undone for 10 seconds.</p>'+
+    row('ti-eraser','Clear '+DAYS[adys[eid]||0]+' '+fs(dt),'Wipes this one day so you can re-enter it',"closeM();clearDay('"+eid+"','"+dt+"')")+
+    row('ti-calendar-off','Clear the whole week','Keeps '+nm+' on the crew with no time',"clearEmpWeek('"+eid+"')")+
+    row('ti-user-minus','Remove from crew','Takes '+nm+' and all their time off this timesheet',"removeEmp('"+eid+"')",true)+
+    '<div class="mf"><button class="btn btn-bl" onclick="closeM()">Cancel</button></div>','empm');
+}
+// Hours for someone unticked in Manage crew used to stay in the timesheet and sync to reporting.
+function vhPruneOrphans(wk){
+  if(!wk||!Array.isArray(wk.employees)||!wk.employees.length)return;
+  const on={};wk.employees.forEach(function(e){on[String(e)]=1;});
+  Object.keys(wk.entries||{}).forEach(function(k){if(!on[k.split(':')[0]])delete wk.entries[k];});
+  Object.keys(wk.equipmentEntries||{}).forEach(function(k){if(!on[k.split(':')[0]])delete wk.equipmentEntries[k];});
+}
+// Active job list (Settings): one job per line, "2610 Mill Brook". When it is filled in, a job
+// number that is not on it blocks the foreman's submit, which is the fix for wrong job numbers.
+function vhActiveJobs(){
+  const out=[];String((S.settings&&S.settings.activeJobs)||'').split(/\r?\n/).forEach(function(l){
+    l=l.trim();if(!l)return;const m=l.match(/^(\S+)\s*[-\u2013:]?\s*(.*)$/);if(m)out.push({num:m[1].toUpperCase(),name:m[2]||''});});
+  return out;
+}
+function vhJobChips(eid,dt,ji){
+  const wk=S.weeks[S.currentWeek];const cnt={};
+  Object.keys(wk.entries||{}).forEach(function(k){((wk.entries[k]||{}).jobLines||[]).forEach(function(l){const j=String(l.job||'').trim();if(j)cnt[j]=(cnt[j]||0)+1;});});
+  const act=vhActiveJobs();const names={};act.forEach(function(a){names[a.num]=a.name;});
+  let list=Object.keys(cnt).sort(function(x,y){return cnt[y]-cnt[x];});
+  act.forEach(function(a){if(list.indexOf(a.num)<0)list.push(a.num);});
+  list=list.slice(0,8);if(!list.length)return '';
+  return '<div style="display:flex;flex-wrap:wrap;gap:6px;margin:-2px 0 8px">'+list.map(function(j){
+    const lab=j+(names[j.toUpperCase()]?' '+names[j.toUpperCase()]:'');
+    return '<button class="btn btn-sm" style="min-height:36px;font-size:13px" data-eid="'+eid+'" data-dt="'+dt+'" data-ji="'+ji+'" data-j="'+j.replace(/"/g,'&quot;')+'" onclick="setJobLine(this.dataset.eid,this.dataset.dt,+this.dataset.ji,\'job\',this.dataset.j);refreshDayPanel(this.dataset.eid,this.dataset.dt)">'+lab.replace(/</g,'&lt;')+'</button>';
+  }).join('')+'</div>';
+}
+// Returns [{sev:'err'|'warn',eid,di,who,day,msg}]. 'err' blocks the foreman's submit, 'warn' is a double-check.
+// mgr=true adds the reviewer-only checks (crew comparison, overtime, double booking, production cross-check).
+function vhCheckWeek(wk,iso,mgr,key){
+  const out=[];if(!wk||!Array.isArray(wk.employees))return out;
+  iso=iso||S.currentWeek;const dates=wd(iso);
+  const PTO=['PTO','PTE','VAC','HOLIDAY','PAID TIME OFF','SICK','TIME OFF'];
+  const isPTO=function(n){const u=String(n||'').toUpperCase();return PTO.some(function(kw){return u.indexOf(kw)>=0;});};
+  const toMin=function(x){const p=String(x).split(':').map(Number);return p[0]*60+(p[1]||0);};
+  const act=vhActiveJobs();const actSet={};act.forEach(function(a){actSet[a.num]=1;});
+  const dayTot={};const dayJobs={};const weekTot={};
+  wk.employees.forEach(function(eid){
+    const who=vhEmpName(eid);let weekHrs=0;
+    dates.forEach(function(dt,di){
+      const e=wk.entries&&wk.entries[`${eid}:${dt}`];if(!e)return;
+      const day=DAYS[di]+' '+fs(dt);
+      const add=function(sev,msg){out.push({sev:sev,eid:String(eid),di:di,who:who,day:day,msg:msg});};
+      const lines=getJobLines(wk,eid,dt);let dayHrs=0;const spans=[];
+      lines.forEach(function(ln,i){
+        const eq=(ln.equipment||[]);
+        const blank=!ln.job&&!ln.phase&&!ln.startTime&&!ln.stopTime&&!(parseFloat(ln.hours)>0)&&!eq.length;
+        if(blank)return;
+        const tag=lines.length>1?('Line '+(i+1)+': '):'';
+        const c=calcJobHours(ln);const pto=isPTO(ln.notes);
+        const oneTime=(!!ln.startTime)!==(!!ln.stopTime);
+        if(oneTime){add('err',tag+(ln.startTime?'Stop time is missing.':'Start time is missing.'));return;}
+        if(ln.startTime&&ln.stopTime&&ln.startTime===ln.stopTime){add('err',tag+'Start and stop are the same time.');return;}
+        if(!(c.total>0)){add('err',tag+(ln.job?'Job '+ln.job+' has no hours. Enter start and stop, or clear the line.':'Line has no hours. Enter start and stop, or clear the line.'));return;}
+        dayHrs+=c.total;
+        const job=String(ln.job||'').trim();
+        if(!pto&&!job)add('err',tag+c.total+' hours with no job number.');
+        else if(!pto&&!String(ln.phase||'').trim())add('err',tag+'Job '+job+' has no phase code.');
+        if(job&&act.length&&!actSet[job.toUpperCase()])add('err',tag+'Job '+job+' is not on the active job list. Check the number.');
+        if(job){const dk=di+'|'+job;dayJobs[dk]=dayJobs[dk]||{};dayJobs[dk][eid]=(dayJobs[dk][eid]||0)+c.total;}
+        if(c.equip>c.total+0.001)add('err',tag+'Equipment hours ('+c.equip+') are more than the hours worked ('+c.total+').');
+        if(ln.startTime&&ln.stopTime){
+          let a=toMin(ln.startTime),b=toMin(ln.stopTime);
+          if(b<a){add('warn',tag+'Stop is earlier than start, so it is counted as overnight ('+c.total+' h). Check AM/PM.');b+=1440;}
+          spans.push([a,b,i]);
+          if((ln.lunch===''||ln.lunch==null)&&c.total>=6)add('err',tag+'Lunch not picked on a '+c.total+' hour line. Choose 0 if none was taken.');
+        }
+      });
+      for(let i=0;i<spans.length;i++)for(let j=i+1;j<spans.length;j++){
+        if(spans[i][0]<spans[j][1]&&spans[j][0]<spans[i][1]){add('warn','Lines '+(spans[i][2]+1)+' and '+(spans[j][2]+1)+' overlap in time, so those hours are counted twice.');}
+      }
+      if(dayHrs>(mgr?12:14))add('warn',dayHrs+' hours in one day. Confirm that is right.');
+      if(dayHrs>0){dayTot[di]=dayTot[di]||{};dayTot[di][eid]=dayHrs;}
+      weekHrs+=dayHrs;
+    });
+    weekTot[eid]=weekHrs;
+    if(!(weekHrs>0)&&!out.some(function(x){return x.eid===String(eid);}))out.push({sev:'warn',eid:String(eid),di:adys[eid]||0,who:who,day:'',msg:'On the crew with no time this week. Remove them if they did not work.'});
+  });
+  if(!mgr)return out;
+  // ---- reviewer-only checks ----
+  const W=function(eid,di,msg){out.push({sev:'warn',eid:String(eid),di:di,who:eid===''?'Crew':vhEmpName(eid),day:di<0?'':DAYS[di]+' '+fs(dates[di]),msg:msg});};
+  // hours that differ from the rest of the crew
+  Object.keys(dayTot).forEach(function(di){
+    const m=dayTot[di];const ids=Object.keys(m);if(ids.length<3)return;
+    const freq={};ids.forEach(function(id){freq[m[id]]=(freq[m[id]]||0)+1;});
+    const mode=+Object.keys(freq).sort(function(a,b){return freq[b]-freq[a];})[0];
+    if(freq[mode]<Math.ceil(ids.length/2))return;
+    ids.forEach(function(id){if(Math.abs(m[id]-mode)>=1)W(id,+di,m[id]+' hours; the rest of the crew has '+mode+'.');});
+  });
+  // a job only one person is on while the crew is elsewhere (classic wrong job number)
+  const crewOn={};Object.keys(dayJobs).forEach(function(dk){const di=dk.split('|')[0];crewOn[di]=crewOn[di]||{};Object.keys(dayJobs[dk]).forEach(function(id){crewOn[di][id]=1;});});
+  Object.keys(dayJobs).forEach(function(dk){
+    const p=dk.split('|');const di=p[0],job=p[1];const ids=Object.keys(dayJobs[dk]);const crew=Object.keys(crewOn[di]||{}).length;
+    if(ids.length===1&&crew>=3)W(ids[0],+di,'Only person coded to job '+job+' this day. Check the job number.');
+  });
+  // job numbers never used on any other timesheet (when no active list is set)
+  if(!act.length){
+    const seen={};let nOther=0;Object.keys(S.weeks).forEach(function(k){if(k===key||k.indexOf(':')<0)return;nOther++;const w=S.weeks[k];Object.keys((w&&w.entries)||{}).forEach(function(ek){((w.entries[ek]||{}).jobLines||[]).forEach(function(l){if(l.job)seen[String(l.job).trim().toUpperCase()]=1;});});});
+    if(nOther>=5&&Object.keys(seen).length){const told={};Object.keys(dayJobs).forEach(function(dk){const job=dk.split('|')[1];if(!seen[job.toUpperCase()]&&!told[job]){told[job]=1;W('',-1,'Job '+job+' has not appeared on any other timesheet. Confirm it is a real job number.');}});}
+  }
+  // overtime
+  Object.keys(weekTot).forEach(function(id){if(weekTot[id]>40)W(id,-1,weekTot[id]+' hours this week, '+(weekTot[id]-40).toFixed(2).replace(/\.?0+$/,'')+' overtime.');});
+  // same person, same day, on another foreman's sheet
+  Object.keys(S.weeks).forEach(function(k){
+    if(k===key||k.indexOf(':')<0||k.split(':')[0]!==iso)return;const w=S.weeks[k];if(!w||!w.entries)return;
+    wk.employees.forEach(function(eid){dates.forEach(function(dt,di){
+      if(!(dayTot[di]&&dayTot[di][eid]))return;
+      const other=getJobLines(w,eid,dt).reduce(function(s2,l){return s2+calcJobHours(l).total;},0);
+      if(other>0)W(eid,di,'Also has '+other+' hours on '+(w.submittedBy||'another foreman')+"'s timesheet this day.");
+    });});
+  });
+  // labor with no production report that day (production phases only)
+  const PP=(typeof PROD_PHASES!=='undefined'?PROD_PHASES:[]);let pe=[];try{pe=prodEntries(wk);}catch(e){}
+  const told2={};const miss={};
+  wk.employees.forEach(function(eid){dates.forEach(function(dt,di){getJobLines(wk,eid,dt).forEach(function(l){
+    const job=String(l.job||'').trim(),ph=String(l.phase||'').trim();if(!job||PP.indexOf(ph)<0||!(calcJobHours(l).total>0))return;
+    const k2=di+'|'+job+'|'+ph;if(told2[k2])return;told2[k2]=1;
+    if(!pe.some(function(p){return p.date===dt&&String(p.job||'').trim()===job&&String(p.phase||'')===ph;})){(miss[job+'|'+ph]=miss[job+'|'+ph]||[]).push(di);}
+  });});});
+  Object.keys(miss).forEach(function(k3){const p=k3.split('|');const ds=miss[k3].sort(function(a,b){return a-b;}).map(function(d){return DAYS[d];}).join(', ');
+    W('',-1,'Labor on job '+p[0]+' phase '+p[1]+' with no production report on '+ds+'.');});
+  return out;
+}
+function vhGoIssue(eid,di){
+  adys[eid]=di;entryMode='timecards';cp='entry';
+  document.querySelectorAll('.nb[id^=nav-]').forEach(function(b){b.classList.remove('active');});
+  const nb=document.getElementById('nav-entry');if(nb)nb.classList.add('active');
+  render();
+  setTimeout(function(){
+    const p=document.getElementById('dps-'+eid);const card=p&&p.closest('.eb');if(!card)return;
+    card.scrollIntoView({behavior:'smooth',block:'start'});
+    card.style.transition='box-shadow .3s';card.style.boxShadow='0 0 0 3px #f59e0b';
+    setTimeout(function(){card.style.boxShadow='';},2200);
+  },60);
+}
 function swDay(eid,di){adys[eid]=di;document.querySelectorAll(`#dts-${eid} .dt`).forEach((t,i)=>t.classList.toggle('active',i===di));const p=document.getElementById(`dps-${eid}`);if(p)p.style.transform=`translateX(-${di*100}%)`;}
 function rTot(eid){const wk=S.weeks[S.currentWeek];const{l,e,c}=ct(wk,eid);const bl=document.getElementById(`dps-${eid}`)?.closest('.eb');if(!bl)return;const cm=bl.querySelector('.cm');const br=bl.querySelector('.br');if(cm)cm.textContent=c.toFixed(1)+'h';if(br)br.textContent=`L:${l.toFixed(1)} E:${e.toFixed(1)}`;}
 function showEQLine(eid,dt,ji){
@@ -2081,22 +2693,38 @@ function rReview(){const wk=S.weeks[S.currentWeek];const dates=wd(S.currentWeek)
   h+=`<div class="card" style="padding:0;overflow:hidden">`;
   wk.employees.forEach((eid,idx)=>{const emp=empById(eid);const{l,e,c}=ct(wk,eid);h+=`<div style="padding:13px 16px;${idx>0?'border-top:0.5px solid var(--border)':''}display:flex;align-items:center;justify-content:space-between"><div><strong style="font-size:14px">${emp.name}</strong><br><span style="font-size:12px;color:var(--text2)">${emp.title}</span></div><div style="text-align:right"><strong style="font-size:16px;font-weight:700;letter-spacing:-.3px">${c.toFixed(1)}h</strong><br><span style="font-size:11px;color:var(--text3)">L:${l.toFixed(1)} E:${e.toFixed(1)}</span></div></div>`;});
   h+=`</div>`;
+  const editable=(wk.status==='draft'||wk.status==='returned');
+  const iss=editable?vhCheckWeek(wk):[];
+  const errs=iss.filter(x=>x.sev==='err'),warns=iss.filter(x=>x.sev==='warn');
+  if(editable){
+    if(!iss.length){h+=`<div class="ib" style="border-color:#16a34a"><i class="ti ti-circle-check" style="color:#16a34a"></i><span>No problems found. Ready to submit.</span></div>`;}
+    else{
+      h+=`<div class="card" style="padding:0;overflow:hidden"><div style="padding:13px 16px"><strong style="font-size:16px">${errs.length?errs.length+' to fix before you can submit':'Check these before you submit'}</strong>${warns.length&&errs.length?`<span style="font-size:13px;color:var(--text2)"> · ${warns.length} to double-check</span>`:''}<div style="font-size:13px;color:var(--text2);margin-top:3px">Tap a line to go straight to it.</div></div>`;
+      errs.concat(warns).forEach(x=>{
+        const isE=x.sev==='err';
+        h+=`<div onclick="vhGoIssue('${x.eid}',${x.di})" style="padding:12px 16px;border-top:0.5px solid var(--border);display:flex;gap:12px;align-items:center;cursor:pointer"><i class="ti ${isE?'ti-alert-circle':'ti-alert-triangle'}" style="font-size:20px;flex-shrink:0;color:${isE?'#dc2626':'#d97706'}"></i><div style="flex:1;min-width:0"><strong style="font-size:14px">${x.who}${x.day?' · '+x.day:''}</strong><br><span style="font-size:13px;color:var(--text2)">${String(x.msg).replace(/</g,'&lt;')}</span></div><i class="ti ti-chevron-right" style="color:var(--text3)"></i></div>`;
+      });
+      h+=`</div>`;
+    }
+  }
   if(wk.status==='draft'||wk.status==='returned'){h+=`<div class="card"><strong style="font-size:17px;font-weight:700;display:block;margin-bottom:6px;letter-spacing:-.3px">Submit for approval</strong><p style="font-size:14px;color:var(--text2);margin-bottom:16px">The selected manager will see this on their Approvals tab. Timesheet locks until approved.</p>
     <div class="fr"><label>Submitted by</label><input type="text" id="sb" placeholder="Your name" value="${auth.user?auth.user.name:''}"/></div>
     <div class="fr"><label>Notes (optional)</label><textarea id="sn" placeholder="Job numbers, special instructions..."></textarea></div>
     <div class="fr"><label>Send approval to</label>${S.managers.map((m,i)=>`<label style="display:flex;align-items:center;gap:12px;font-size:15px;margin-top:12px;cursor:pointer"><input type="radio" name="mgr" id="mg-${i}" value="${i}" ${i===0?'checked':''} style="width:22px;height:22px;accent-color:var(--accent)"/> <div>${m.name}<br><span style="font-size:13px;color:var(--text2)">${m.email}</span></div></label>`).join('')}</div>
-    <button class="btn btn-p btn-bl" style="margin-top:8px" id="sub-btn" onclick="this.disabled=true;this.textContent='Submitting...';subTS()"><i class="ti ti-send"></i> Submit for approval</button></div>`;}
+    <button class="btn btn-p btn-bl" style="margin-top:8px" id="sub-btn" ${errs.length?'disabled':''} onclick="this.disabled=true;this.textContent='Submitting...';subTS()"><i class="ti ti-send"></i> ${errs.length?'Fix '+errs.length+' item'+(errs.length>1?'s':'')+' above to submit':'Submit for approval'}</button></div>`;}
   else{h+=`<div class="ib"><i class="ti ti-info-circle"></i><div>Status: <strong>${wk.status}</strong>${wk.submittedBy?' · '+wk.submittedBy:''}${wk.approvedBy?' · Approved by '+wk.approvedBy:''}<br><button class="btn btn-sm" style="margin-top:10px" onclick="rToDraft()"><i class="ti ti-arrow-back"></i> Return to draft</button> <button class=\"btn btn-sm btn-d\" onclick=\"deleteSubmission()\"><i class=\"ti ti-trash\"></i> Delete</button></div></div>`;}
   h+=`</div>`;document.getElementById('mc').innerHTML=h;
 }
 async function subTS(){
   if(!vhBuildOK()){toast('App update required before submitting — fully close and reopen the app, then try again.','error');return;}
   const wk=S.weeks[S.currentWeek];
-  const by=document.getElementById('sb').value.trim();if(!by){toast('Enter your name.','error');return;}
+  if(vhCheckWeek(wk).some(x=>x.sev==='err')){toast('Fix the flagged items first.','error');render();return;}
+  const by=document.getElementById('sb').value.trim();if(!by){toast('Enter your name.','error');render();return;}
   const sel=document.querySelector('input[name=mgr]:checked');if(!sel){toast('Select a manager.','error');return;}
   const mgrs=[S.managers[parseInt(sel.value)]];if(!mgrs[0]){toast('Invalid manager selection.','error');return;}
   const btn=document.querySelector('button[onclick*="subTS"]');
   if(btn){btn.disabled=true;btn.dataset.prevText=btn.textContent;btn.textContent='Submitting...';}
+  vhPruneOrphans(wk);
   const prev={status:wk.status,submittedBy:wk.submittedBy,submittedAt:wk.submittedAt,returnedAt:wk.returnedAt,assignedManager:wk.assignedManager};
   wk.status='submitted';wk.submittedBy=by;wk.submittedAt=new Date().toISOString();wk.comments=document.getElementById('sn').value;wk.returnedAt='';
   wk.assignedManager=mgrs[0].email; // Store which manager this is assigned to
@@ -2142,7 +2770,7 @@ function rApproval(){
         const tot=Object.values(wk.entries).reduce((s,v)=>s+(parseFloat(v.hours)||0),0);
         const canAct=wk.status==='submitted';
         h+=`<div class="card"><div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:12px"><div><strong style="font-size:16px;font-weight:700;letter-spacing:-.3px">${fw(iso)}</strong><br><span style="font-size:13px;color:var(--text2)">${wk.submittedBy||'—'} · ${wk.employees.length} employees · ${tot.toFixed(1)}h</span></div><span class="sb sb-${wk.status.slice(0,2)}">${wk.status}</span></div>`;
-        h+=`<div style="display:flex;gap:6px;flex-wrap:wrap"><button class="btn btn-bl btn-sm" style="flex:1;min-width:80px" onclick="vwWkK('${key}')"><i class="ti ti-eye"></i> View</button>`;
+        h+=`<div style="display:flex;gap:6px;flex-wrap:wrap"><button class="btn btn-bl btn-sm" style="flex:1;min-width:80px" onclick="vwWkK('${key}')"><i class="ti ti-eye"></i> View${(()=>{try{const n=vhCheckWeek(S.weeks[key],key.split(':')[0],true,key).length;return n?' \u00b7 '+n+' flag'+(n>1?'s':''):' \u00b7 clean';}catch(e){return '';}})()}</button>`;
         if(canAct){
           h+=`<button class="btn btn-s btn-sm" style="flex:1;min-width:80px" onclick="appWkK('${key}')"><i class="ti ti-check"></i> Approve</button><button class="btn btn-d btn-sm" style="flex:1;min-width:80px" onclick="retWkK('${key}')"><i class="ti ti-x"></i> Return</button>`;
           if(auth.isAdmin)h+=`<button class="btn btn-sm" style="flex:1;min-width:120px;margin-top:6px" onclick="adminMoveSubmissionK('${key}')"><i class="ti ti-calendar"></i> Move week</button><button class="btn btn-sm btn-d" style="flex:1;min-width:120px;margin-top:6px" onclick="adminDeleteSubmissionK('${key}')"><i class="ti ti-trash"></i> Delete</button>`;
@@ -2190,11 +2818,36 @@ function vwWkK(key){
   h+=`<p style="font-size:13px;color:var(--text2);margin-bottom:12px"><strong>Submitted by:</strong> ${wk.submittedBy||'—'}${wk.submittedAt?' · '+new Date(wk.submittedAt).toLocaleString():''}</p>`;
   if(wk.comments){h+=`<div class="ib" style="margin-bottom:12px"><i class="ti ti-info-circle"></i><div><strong>Notes:</strong> ${wk.comments}</div></div>`;}
   h+=`<div class="sg" style="margin-bottom:14px"><div class="sc"><div class="lbl">Employees</div><div class="val">${wk.employees.length}</div></div><div class="sc"><div class="lbl">Labor hrs</div><div class="val">${tH.toFixed(1)}</div></div><div class="sc"><div class="lbl">Equip hrs</div><div class="val">${tE.toFixed(1)}</div></div><div class="sc"><div class="lbl">Total</div><div class="val">${(tH+tE).toFixed(1)}</div></div></div>`;
+  // Reviewer flags + one-screen crew grid
+  const flags=vhCheckWeek(wk,iso,true,key);
+  const fmap={};flags.forEach(f=>{const k2=f.eid+'|'+f.di;if(!fmap[k2]||f.sev==='err')fmap[k2]=f.sev;});
+  if(!flags.length){h+=`<div class="ib" style="border-color:#16a34a;margin-bottom:12px"><i class="ti ti-circle-check" style="color:#16a34a"></i><span><strong>No flags.</strong> Nothing unusual found on this timesheet.</span></div>`;}
+  else{
+    h+=`<div class="card" style="padding:0;overflow:hidden;margin-bottom:12px"><div style="padding:11px 14px;font-weight:700;font-size:15px">${flags.length} thing${flags.length>1?'s':''} to look at</div>`;
+    flags.slice().sort((x,y)=>(x.sev===y.sev?0:(x.sev==='err'?-1:1))).forEach(f=>{
+      h+=`<div ${f.eid?`onclick="vhRvJump('${f.eid}')"`:''} style="padding:9px 14px;border-top:0.5px solid var(--border);display:flex;gap:10px;align-items:flex-start;font-size:13px;cursor:pointer"><i class="ti ${f.sev==='err'?'ti-alert-circle':'ti-alert-triangle'}" style="font-size:18px;flex-shrink:0;color:${f.sev==='err'?'#dc2626':'#d97706'}"></i><div><strong>${f.who}${f.day?' · '+f.day:''}</strong><br><span style="color:var(--text2)">${String(f.msg).replace(/</g,'&lt;')}</span></div></div>`;
+    });
+    h+=`</div>`;
+  }
+  h+=`<div style="overflow-x:auto;margin-bottom:14px"><table style="width:100%;border-collapse:collapse;font-size:13px"><tr><th style="text-align:left;padding:6px 8px;font-size:11px;color:var(--text2)">Crew</th>${dates.map((dt,di)=>`<th style="padding:6px 4px;font-size:11px;color:var(--text2);text-align:center">${DAYS[di]}<br><span style="font-weight:500">${fs(dt)}</span></th>`).join('')}<th style="padding:6px 8px;font-size:11px;color:var(--text2);text-align:right">Week</th></tr>`;
+  wk.employees.forEach(eid=>{
+    let wt=0;
+    const cells=dates.map((dt,di)=>{
+      const lines=getJobLines(wk,eid,dt);let dh=0;const jobs=[];
+      lines.forEach(ln=>{const c=calcJobHours(ln);dh+=c.total;if(c.total>0&&ln.job&&jobs.indexOf(ln.job)<0)jobs.push(ln.job);});
+      wt+=dh;const sv=fmap[eid+'|'+di];
+      const bg=sv==='err'?'#fee2e2':(sv==='warn'?'#fef3c7':'transparent');
+      return `<td onclick="vhRvJump('${eid}')" style="text-align:center;padding:6px 4px;border-top:0.5px solid var(--border);background:${bg};${sv?'color:#111;':''}cursor:pointer">${dh>0?`<strong>${dh}</strong><br><span style="font-size:10px;opacity:.7">${jobs.join(', ').replace(/</g,'&lt;')}</span>`:'<span style="opacity:.3">-</span>'}</td>`;
+    }).join('');
+    const ot=wt>40;
+    h+=`<tr><td onclick="vhRvJump('${eid}')" style="padding:6px 8px;border-top:0.5px solid var(--border);font-weight:600;white-space:nowrap;cursor:pointer">${empById(eid).name}</td>${cells}<td style="padding:6px 8px;border-top:0.5px solid var(--border);text-align:right;font-weight:700;${ot?'color:#d97706':''}">${wt}${ot?'<br><span style="font-size:10px">'+(wt-40)+' OT</span>':''}</td></tr>`;
+  });
+  h+=`</table></div>`;
   // Per-employee with daily breakdown
   wk.employees.forEach(eid=>{
     const emp=empById(eid);
     const tot=empTotals(eid);
-    h+=`<div class="card" style="margin-bottom:8px;padding:10px 12px"><div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px"><div><strong style="font-size:14px">${emp.name}</strong><br><span style="font-size:11px;color:var(--text2)">${emp.title}</span></div><div style="text-align:right"><strong style="font-size:15px">${tot.c.toFixed(1)}h</strong><br><span style="font-size:10px;color:var(--text3)">L:${tot.l.toFixed(1)} E:${tot.e.toFixed(1)}</span></div></div>`;
+    h+=`<div class="card" id="rv-${eid}" style="margin-bottom:8px;padding:10px 12px"><div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px"><div><strong style="font-size:14px">${emp.name}</strong><br><span style="font-size:11px;color:var(--text2)">${emp.title}</span></div><div style="text-align:right"><strong style="font-size:15px">${tot.c.toFixed(1)}h</strong><br><span style="font-size:10px;color:var(--text3)">L:${tot.l.toFixed(1)} E:${tot.e.toFixed(1)}</span></div></div>`;
     let hasDays=false;
     dates.forEach(dt=>{
       const jls=getJobLines(wk,eid,dt);
@@ -2209,7 +2862,7 @@ function vwWkK(key){
         jls.forEach(ln=>{
           const c=calcJobHours(ln);
           h+=`<br><span style="color:var(--text2);margin-left:8px">${ln.job||'?'} P${ln.phase||'?'}: ${c.labor.toFixed(2)}h labor`;
-          if(ln.startTime||ln.stopTime){h+=` <span style="color:var(--text3)">(${ln.startTime||'?'}–${ln.stopTime||'?'}${ln.lunch?', lunch '+ln.lunch+'h':''})</span>`;}
+          if(ln.startTime||ln.stopTime){h+=` <span style="color:var(--text3)">(${ln.startTime||'?'}–${ln.stopTime||'?'}${(ln.lunch===''||ln.lunch==null)?(c.total>=6?', <strong style="color:#dc2626">NO LUNCH</strong>':''):', lunch '+ln.lunch+'h'})</span>`;}
           h+=`</span>`;
           if(ln.equipment&&ln.equipment.length){
             ln.equipment.forEach(eqi=>{if(eqi&&eqi.number&&parseFloat(eqi.hours)>0)h+=`<br><span style="color:var(--text3);margin-left:18px">↳ Equip ${eqi.number}: ${parseFloat(eqi.hours).toFixed(2)}h</span>`;});
@@ -2226,7 +2879,7 @@ function vwWkK(key){
   // Footer actions
   h+=`<div class="mf">`;
   if(wk.status==='submitted'){
-    h+=`<button class="btn btn-s" onclick="closeM();appWkK('${key}')"><i class="ti ti-check"></i> Approve</button> <button class="btn btn-d" onclick="closeM();retWkK('${key}')"><i class="ti ti-x"></i> Return</button> <button class="btn" onclick="closeM()">Close</button>`;
+    h+=`<button class="btn btn-s" onclick="closeM();appWkK('${key}')"><i class="ti ti-check"></i> Approve</button> <button class="btn btn-d" onclick="closeM();retWkK('${key}',true)"><i class="ti ti-x"></i> Return</button> <button class="btn" onclick="closeM()">Close</button>`;
   } else {
     h+=`<button class="btn" onclick="closeM()">Close</button>`;
   }
@@ -2236,7 +2889,10 @@ function vwWkK(key){
 function appWkK(key){const wk=S.weeks[key];if(!wk)return;const n=auth.user?auth.user.name:prompt('Your name:');if(!n)return;
   wk.status='approved';wk.approvedBy=n;wk.approvedAt=new Date().toISOString();
   saveAllSubmittedSP();updBadge();render();toast('Approved!','success');}
-function retWkK(key){const wk=S.weeks[key];if(!wk)return;const r=prompt('Reason for returning:');if(r===null)return;
+function vhRvJump(eid){const c=document.getElementById('rv-'+eid);if(!c)return;c.scrollIntoView({behavior:'smooth',block:'start'});c.style.transition='box-shadow .3s';c.style.boxShadow='0 0 0 3px #f59e0b';setTimeout(function(){c.style.boxShadow='';},2000);}
+function retWkK(key,pre){const wk=S.weeks[key];if(!wk)return;
+  let seed='';if(pre){try{seed=vhCheckWeek(wk,key.split(':')[0],true,key).slice(0,6).map(function(f){return f.who+(f.day?' '+f.day:'')+': '+f.msg;}).join(' | ');}catch(e){}}
+  const r=prompt('Reason for returning (edit as needed):',seed);if(r===null)return;
   wk.status='returned';wk.returnedAt=new Date().toISOString();if(r)wk.comments=(wk.comments||'')+'\nReturned: '+r;
   saveAllSubmittedSP();updBadge();render();toast('Returned to foreman — they\'ll land on it next time they open the app.','success');}
 function adminDeleteSubmissionK(key){
@@ -2408,6 +3064,7 @@ function rSettings(){let h=`<div class="pg"><div class="ph"><h1>Settings</h1></d
       <button class="btn btn-p btn-bl" style="margin-top:10px" onclick="addMgr()"><i class="ti ti-plus"></i> Add manager</button></div>`;
     h+=`<div class="card"><strong style="font-size:16px;font-weight:700;display:block;margin-bottom:14px;letter-spacing:-.2px">Spectrum settings</strong><div class="fr"><label>Company code</label><input type="text" value="${S.settings.companyCode}" oninput="S.settings.companyCode=this.value"/></div><div class="fr"><label>Batch year prefix</label><input type="text" value="${S.settings.batchPrefix}" oninput="S.settings.batchPrefix=this.value"/></div><div class="fr" style="margin:0"><label>Minimum app build to submit</label><input type="text" value="${S.settings.minBuild||''}" placeholder="e.g. ${VH_BUILD}" oninput="S.settings.minBuild=this.value.trim()"/></div><p style="font-size:12.5px;color:var(--text2);margin-top:8px">Phones on an older build are blocked from submitting and told to update. This app is <strong>${VH_BUILD}</strong>. Bump this after every safety fix.</p></div>`;
     h+=buildPhaseSettingsSection();
+    h+=`<div class="card"><strong style="font-size:16px;font-weight:700;display:block;margin-bottom:6px;letter-spacing:-.2px">Active jobs</strong><p style="font-size:14px;color:var(--text2);margin-bottom:12px">One per line, number first, for example <strong>2610 Mill Brook</strong>. Once this has entries, a foreman cannot submit time to a job number that is not listed, and these show as tap buttons under Job #.</p><textarea style="width:100%;min-height:140px;font-size:15px;padding:10px;border-radius:10px;border:1px solid var(--border);background:var(--bg);color:inherit;box-sizing:border-box" oninput="S.settings.activeJobs=this.value">${String(S.settings.activeJobs||'').replace(/</g,'&lt;')}</textarea><p style="font-size:12.5px;color:var(--text2);margin-top:8px">Saved with the Save settings button.</p></div>`;
     h+=buildPhotoRecipientsSection();
     h+=buildEmpSection();
   h+='<button class="btn btn-p btn-bl" onclick="saveAllSubmittedSP().then(()=>toast(\'Settings saved.\',\'success\'))" style="margin-bottom:24px"><i class="ti ti-cloud-upload"></i> Save all settings to SharePoint</button>';
@@ -2439,10 +3096,11 @@ function clearAllExports(){
 function clearDraft(){
   if(!confirm('Clear all entries for this week? This cannot be undone.'))return;
   const wk=S.weeks[S.currentWeek];
+  vhSnap();
   wk.employees=[];wk.entries={};wk.equipmentEntries={};
   // Remove from localStorage
   try{const d=JSON.parse(localStorage.getItem('vhts_drafts')||'{}');delete d[S.currentWeek];localStorage.setItem('vhts_drafts',JSON.stringify(d));}catch(e){}
-  render();toast('Timesheet cleared.','success');
+  render();vhUndoBar('Whole week cleared');
 }
 
 function deleteSubmission(){

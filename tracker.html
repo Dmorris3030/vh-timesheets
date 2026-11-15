@@ -139,7 +139,7 @@ const FALLBACK_ADMINS=['dmorris@valentiheld.com','abewley@valentiheld.com','jroe
 const SCOPE_LIST_NAME='JobScope';
 const STATUS_LIST_NAME='TrackerStatus';
 const PHASE_LABELS={'300':'Earth — Mass','310':'Earth — Finish','400':'Storm','450':'Storm — Other','500':'Sanitary','600':'Water'};
-const VH_TRK_BUILD='2026-07-01.17';
+const VH_TRK_BUILD='2026-11-15.22';
 console.log('[VH] Job Trackers build',VH_TRK_BUILD);
 
 let mi;
@@ -162,6 +162,7 @@ async function initMsal(){
     await loadRoles();
     await ensureLists();
     if(S.lists){await loadAll();}
+    if(S.lists&&!S.loaded&&!S.loadErr)S.loadErr='Sign-in token not available ('+(S.tokErr||'no token')+').';
     render();
   } else renderAuth();
 }
@@ -171,6 +172,7 @@ let __authToastAt=0;
 async function getToken(interactive){
   try{const r=await mi.acquireTokenSilent({scopes:SCOPES,account:auth.account});return r.accessToken;}
   catch(e){
+    S.tokErr=(e&&(e.errorCode||e.message))||'unknown';
     if(e instanceof msal.InteractionRequiredAuthError){
       if(interactive){await mi.acquireTokenRedirect({scopes:SCOPES,account:auth.account});}
       else if(Date.now()-__authToastAt>60000){__authToastAt=Date.now();toast('Session expired — sign in again to refresh.','err');}
@@ -298,9 +300,11 @@ async function loadAll(){
     S.prod=fdItems.map(it=>it.fields).filter(f=>f&&(f.Jobnumber||f['STR_x0020_ID']));
     S._aq={}; // reported-qty cache follows Field Data
     S.loaded=true;
-  }catch(e){console.warn('loadAll:',e);toast('Load failed: '+e.message,'err');}
+    setTimeout(()=>saveOfficeTracker(true),4000); // keep the office copy fresh (at most every 30 min per device)
+    setTimeout(()=>pkAuto(),1500); // pick up new job folders / new field packets
+  }catch(e){console.warn('loadAll:',e);S.loadErr='Load failed: '+e.message;toast('Load failed: '+e.message,'err');}
 }
-async function refresh(){toast('Refreshing…');await loadAll();render();toast('Up to date');}
+async function refresh(){toast('Refreshing…');await loadAll();if(S.view==='earth'){S.earth=null;await loadEarth();}render();toast('Up to date');}
 
 // === STATUS UPSERT (PATCH-if-exists-else-POST, optimistic UI) ===
 const __pending={};
@@ -400,17 +404,31 @@ function toast(msg,cls){
   document.getElementById('toasts').appendChild(t);setTimeout(()=>t.remove(),2600);
 }
 function hdr(){
-  return `<div class="hdr"><div class="hdr-in">
-    <div class="brand" onclick="S.view='portfolio';S.job='';render()"><div class="logo">VH</div>Job Trackers</div>
+  const jobsOn=S.view==='portfolio'||S.view==='job';
+  const tab=(on,click,icon,label)=>`<button class="btn${on?' btn-p':''}" onclick="S.menu=false;${click}"><i class="ti ${icon}"></i> ${label}</button>`;
+  const item=(click,icon,label)=>`<button class="btn" style="width:100%;justify-content:flex-start;border:none;border-radius:0;padding:12px 14px;font-size:14px" onclick="S.menu=false;${click}"><i class="ti ${icon}"></i> ${label}</button>`;
+  const att=auth.isAdmin&&S.pk&&S.pk.attention?S.pk.attention:0;
+  return `<div class="hdr"><div class="hdr-in" style="position:relative">
+    <div style="display:flex;align-items:center;gap:12px">
+      <button class="btn" style="font-weight:700" onclick="location.href='index.html'"><i class="ti ti-arrow-left"></i> Home</button>
+      <div class="brand" onclick="S.menu=false;S.view='portfolio';S.job='';render()">Job Tracker</div>
+    </div>
     <div class="hbtns">
-      ${auth.isAdmin?`<button class="btn btn-sm" onclick="S.view='import';render()"><i class="ti ti-file-import"></i> Import scope</button>`:''}
-      ${S.loaded&&S.scope.length?`<button class="btn btn-sm" onclick="exportXlsx(S.view==='job'?S.job:'')"><i class="ti ti-file-spreadsheet"></i> Export</button>`:''}
-      ${S.view==='job'&&S.job&&S.loaded?`<button class="btn btn-sm" onclick="openProgress()"><i class="ti ti-highlight"></i> What's done</button>`:''}
-      <button class="btn btn-sm" onclick="location.href='production.html'"><i class="ti ti-chart-bar"></i> Dashboard</button>
-      <button class="btn btn-sm" onclick="location.href='index.html'"><i class="ti ti-clock"></i> Timesheets</button>
-      <button class="btn btn-sm" onclick="refresh()"><i class="ti ti-refresh"></i></button>
-      <button class="btn btn-sm" onclick="signOut()"><i class="ti ti-logout"></i></button>
-    </div></div></div>`;
+      ${tab(jobsOn,"S.view='portfolio';S.job='';render()",'ti-list-check','Utilities')}
+      ${tab(S.view==='earth',"S.view='earth';S.ejob='';render()",'ti-bulldozer','Earthwork')}
+      ${S.view==='job'&&S.job&&S.loaded?`<button class="btn" onclick="S.menu=false;openProgress()"><i class="ti ti-highlight"></i> What's done</button>`:''}
+      <button class="btn" title="More" onclick="S.menu=!S.menu;render()"><i class="ti ti-dots"></i>${att?` <b style="color:var(--red)">${att}</b>`:''}</button>
+    </div>
+    ${S.menu?`<div style="position:absolute;right:0;top:calc(100% + 10px);background:var(--card);border:1px solid var(--border);border-radius:10px;box-shadow:0 10px 30px rgba(0,0,0,.28);overflow:hidden;min-width:240px;z-index:30">
+      ${item('refresh()','ti-refresh','Refresh')}
+      ${auth.isAdmin?item("S.view='packets';render()",'ti-folders','Field packets'+(att?' ('+att+' need a look)':'')):''}
+      ${auth.isAdmin&&S.loaded?item('render();saveOfficeTracker(false)','ti-cloud-upload','Save office copy'):''}
+      ${auth.isAdmin&&S.loaded&&S.scope.length?item("render();exportXlsx(S.view==='job'?S.job:'')",'ti-file-spreadsheet','Download Excel'):''}
+      ${auth.isAdmin?item("S.view='import';render()",'ti-file-import','Import scope by hand'):''}
+      ${auth.isAdmin?item("location.href='production.html'",'ti-chart-bar','Production dashboard'):''}
+      ${item('signOut()','ti-logout','Sign out')}
+    </div>`:''}
+  </div></div>`;
 }
 function renderAuth(){
   document.getElementById('app').innerHTML=`<div class="auth"><div class="card">
@@ -547,9 +565,59 @@ function editInstalled(job,itemId){
 function r1(n){return Math.round(n*10)/10;}
 function exportXlsx(job){
   if(typeof XLSX==='undefined'){toast('Excel library not loaded — check connection','err');return;}
+  const wb=buildTrackerWb(job);
+  if(!wb){toast('Nothing to export','err');return;}
+  const stamp=new Date().toISOString().slice(0,10);
+  XLSX.writeFile(wb,'VH-Tracker-'+(job||'All-Jobs')+'-'+stamp+'.xlsx');
+  toast('Workbook downloaded');
+}
+// Earthwork sheets (only when the earthwork data has been loaded)
+function ewSheets(wb){
+  if(!S.earth||!S.earth.rows)return;
+  const sum=[],daily=[];
+  ewJobs().forEach(j=>{
+    const d=ewData(j);const cfg=(S.earth.setup.jobs||{})[j]||{};
+    ['300','310'].forEach(ph=>{
+      const s=ewSummary(j,ph,d),P=EW_PH[ph];if(!s.bidQ&&!s.cost&&!s.qty)return;
+      const v=isFinite(s.earned)?s.earned-s.cost:'';
+      sum.push({'Job':j,'Name':cfg.name||'','Phase':ph,'Work':P.label,'Unit':P.unit,'Bid Qty':s.bidQ||'','Actual Qty':Math.round(s.qty),'% Complete':s.bidQ?r1(s.pct):'','Qty Left':s.bidQ?Math.round(s.left):'',
+        'Bid Cost':s.bidC?Math.round(s.bidC):'','Cost To Date':Math.round(s.cost),'Bid $/Unit':isFinite(s.bidU)?Math.round(s.bidU*100)/100:'','Actual $/Unit':isFinite(s.actU)?Math.round(s.actU*100)/100:'',
+        'Over(-)/Under(+)':v===''||!s.qty?'':Math.round(v),'Projected Final Cost':isFinite(s.proj)?Math.round(s.proj):'','Machines Without A Rate':Object.values(d.equip).filter(x=>x.cat===null).length||''});
+      Object.keys(d.ph[ph].days).sort().forEach(dt=>{const x=d.ph[ph].days[dt];
+        daily.push({'Job':j,'Phase':ph,'Date':dt,'Qty':x.qty?Math.round(x.qty):'','Unit':P.unit,'Machine Hrs':r1(x.mach),'Labor Hrs':r1(x.lab),'Cost':Math.round(x.cost),'$/Unit':x.qty?Math.round(x.cost/x.qty*100)/100:''});});
+    });
+  });
+  if(sum.length){const ws=XLSX.utils.json_to_sheet(sum);ws['!cols']=Object.keys(sum[0]).map(k=>({wch:Math.max(10,k.length+2)}));XLSX.utils.book_append_sheet(wb,ws,'Earthwork');}
+  if(daily.length){const ws=XLSX.utils.json_to_sheet(daily);ws['!cols']=Object.keys(daily[0]).map(k=>({wch:Math.max(10,k.length+2)}));XLSX.utils.book_append_sheet(wb,ws,'Earthwork Daily');}
+}
+// The office copy: the same workbook saved into the Field folder so anyone can open it without the app.
+const OFFICE_FILE='Field/VH Job Tracker.xlsx';
+async function saveOfficeTracker(auto){
+  try{
+    if(typeof XLSX==='undefined'||!S.loaded)return;
+    if(auto){const last=+localStorage.getItem('vhtrk_office_saved')||0;if(Date.now()-last<30*60000)return;}
+    const tok=await getToken(!auto);if(!tok)return;
+    if(!S.earth&&!S.earthLoading)await loadEarth(true); // quiet: no re-render under someone typing
+    const wb=buildTrackerWb('',true);if(!wb){if(!auto)toast('Nothing to save yet','err');return;}
+    const who=(auth.user&&auth.user.name)||'';
+    const info=XLSX.utils.aoa_to_sheet([['VH Job Tracker'],['Updated',new Date().toLocaleString()],['Updated by',who],[],['This file is written by the tracker app. Do not edit it here: changes are overwritten the next time it updates.'],['Open the tracker app to change progress or earthwork setup.']]);
+    info['!cols']=[{wch:14},{wch:60}];
+    XLSX.utils.book_append_sheet(wb,info,'About');
+    wb.SheetNames.unshift(wb.SheetNames.pop()); // About first
+    const buf=XLSX.write(wb,{type:'array',bookType:'xlsx'});
+    const url='https://graph.microsoft.com/v1.0/drives/'+EW_DRIVE+'/root:/'+OFFICE_FILE.split('/').map(encodeURIComponent).join('/')+':/content';
+    const r=await fetch(url,{method:'PUT',headers:{Authorization:'Bearer '+tok,'Content-Type':'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'},body:buf});
+    if(r.status===423||r.status===409){if(!auto)toast('The office copy is open in Excel and locked. Close it and try again.','err');return;}
+    if(!r.ok)throw new Error('save '+r.status);
+    localStorage.setItem('vhtrk_office_saved',String(Date.now()));
+    if(!auto)toast('Office copy saved to the Field folder');
+  }catch(e){console.warn('office copy',e);if(!auto)toast('Office copy failed: '+e.message,'err');}
+}
+function buildTrackerWb(job,withEarth){
   const rows=S.scope.filter(r=>!job||r.JobNum===job);
-  if(!rows.length){toast('Nothing to export','err');return;}
   const wb=XLSX.utils.book_new();
+  if(withEarth)ewSheets(wb);
+  if(!rows.length)return wb.SheetNames.length?wb:null;
   // Summary: one row per job+phase — the remaining-hours numbers the schedule runs on
   const sum={};
   rows.forEach(r=>{
@@ -582,9 +650,8 @@ function exportXlsx(job){
   const ws2=XLSX.utils.json_to_sheet(detRows);
   ws2['!cols']=Object.keys(detRows[0]).map(k=>({wch:k==='Description'?32:Math.max(9,k.length+2)}));
   XLSX.utils.book_append_sheet(wb,ws2,'Runs');
-  const stamp=new Date().toISOString().slice(0,10);
-  XLSX.writeFile(wb,'VH-Tracker-'+(job||'All-Jobs')+'-'+stamp+'.xlsx');
-  toast('Workbook downloaded');
+  if(withEarth){const n=wb.SheetNames;['Runs','Summary'].forEach(s=>{const i=n.indexOf(s);if(i>0){n.splice(i,1);n.unshift(s);}});} // Summary, Runs, then Earthwork
+  return wb;
 }
 // === IMPORT ===
 const IMP_FIELDS=[['ItemID','ID / Run'],['Descr','Description'],['BidHrs','Bid hrs'],['BidQty','Qty'],['Unit','Unit'],['Area','Area'],['Phase','Phase'],['ItemType','Type'],['PctDone','% done / X / date']];
@@ -756,12 +823,431 @@ function render(){
   if(!auth.user){renderAuth();return;}
   let body;
   if(!S.lists)body=renderSetup();
-  else if(!S.loaded)body=`<div class="loading"><div class="spinner"></div><div>Loading scope…</div></div>`;
+  else if(!S.loaded)body=S.loadErr?`<div class="sec"><b>The tracker could not load.</b><p class="note" style="margin:6px 0 10px">${esc(S.loadErr)}</p><p class="note" style="margin-bottom:10px">If this is the test address: open the live tracker in this same browser, sign in there, then come back here and press Try again.</p><button class="btn" onclick="location.reload()">Try again</button> <button class="btn" onclick="signIn()">Sign in</button></div>`:`<div class="loading"><div class="spinner"></div><div>Loading scope…</div></div>`;
   else if(S.view==='import')body=renderImport();
+  else if(S.view==='earth')body=renderEarth();
+  else if(S.view==='packets')body=renderPackets();
   else if(S.view==='job'&&S.job)body=renderJob();
   else body=renderPortfolio();
   document.getElementById('app').innerHTML=hdr()+`<div class="container">${body}</div>
     <div style="text-align:center;font-size:11px;color:var(--text3);opacity:.7;padding-bottom:14px">Build ${VH_TRK_BUILD}</div>`;
+}
+// ===== FIELD PACKET SYNC =======================================================
+// No more pasting run tables. The tracker reads each job's field packet straight from
+// Field/Jobs/{year}/{job folder}/ and builds the scope from the takeoff tabs:
+//   STORM T-OFF -> phase 400 runs, SAN T-OFF -> phase 500 runs, SAN LAT T-OFF -> phase 500 laterals.
+// New year folders and new job folders are found automatically. A job with NO scope yet is
+// imported on its own; a job that already has scope is only re-synced when an admin approves it,
+// because re-syncing replaces rows and progress is tied to run IDs.
+const PK_ROOT='Field/Jobs';const PK_STATE=PK_ROOT+'/scope-sync.json';
+function pkUrl(p){return 'https://graph.microsoft.com/v1.0/drives/'+EW_DRIVE+'/root:/'+p.split('/').map(encodeURIComponent).join('/');}
+function pkNum(v){if(typeof v==='number')return isFinite(v)?v:NaN;if(typeof v==='string'&&v.trim()!==''){const n=Number(v.replace(/,/g,''));return isFinite(n)?n:NaN;}return NaN;}
+function pkParseRuns(rows,job,phase){
+  const isId=v=>typeof v==='string'&&/^[A-Za-z0-9.()' ]{1,16}\s?-\s?[A-Za-z0-9.()' ]{1,16}$/.test(v.trim())&&!/total/i.test(v);
+  // ID column = whichever of the first 4 columns holds the most run IDs followed by a length
+  let idc=-1,best=0;
+  for(let c=0;c<4;c++){let n=0;rows.forEach(r=>{if(r&&isId(r[c])&&pkNum(r[c+1])>0)n++;});if(n>best){best=n;idc=c;}}
+  if(idc<0)return [];
+  const lc=idc+1;
+  // Hours column: the column k where length / (some rate column j) = k on most rows. Layout-independent,
+  // so it does not matter that storm calls it "Bid Hours" and sanitary calls it "prod".
+  const votes={};
+  rows.forEach(r=>{if(!r||!isId(r[idc]))return;const L=pkNum(r[lc]);if(!(L>0))return;
+    // length / rate = hours holds both ways round, so the pair alone cannot say which is which.
+    // In every packet the rate column sits to the LEFT of the hours column, so only j<k counts.
+    for(let j=lc+1;j<=lc+14;j++){const rate=pkNum(r[j]);if(!(rate>0))continue;
+      for(let k=j+1;k<=lc+14;k++){const h=pkNum(r[k]);if(!(h>0))continue;
+        if(Math.abs(L/rate-h)<=0.011*Math.max(1,h))votes[k]=(votes[k]||0)+1;}}});
+  const hc=Object.keys(votes).sort((a,b)=>votes[b]-votes[a])[0];
+  const out=[];const seen={};let area='';
+  rows.forEach(r=>{if(!r)return;const v=r[idc];
+    if(typeof v==='string'&&/^[A-Za-z]{0,3}\d+\.\d+[A-Za-z]?$/.test(v.trim())&&!(pkNum(r[lc])>0)){area=v.trim();return;} // plan sheet marker, e.g. C6.15
+    if(!isId(v))return;const L=pkNum(r[lc]);if(!(L>0))return;
+    let id=v.trim().replace(/\s*-\s*/,'-').toUpperCase();
+    seen[id]=(seen[id]||0)+1;if(seen[id]>1)id+=' ('+seen[id]+')'; // twin runs keep their own row
+    const size=pkNum(r[lc+1]),depth=pkNum(r[lc+2]);
+    const h=hc!=null?pkNum(r[+hc]):NaN;
+    out.push({Title:id,JobNum:job,Phase:phase,ItemType:'run',Descr:(size>0?size+'" pipe':'')+(depth>0?(size>0?', ':'')+depth+' ft deep':''),
+      BidHrs:h>0?Math.round(h*100)/100:0,BidQty:Math.round(L*10)/10,Unit:'LF',Area:area});});
+  return out;
+}
+function pkParseLats(rows,job){
+  let hr=-1,cols=[];
+  for(let i=0;i<Math.min(rows.length,40);i++){const r=rows[i]||[];const c=[];r.forEach((v,ci)=>{if(typeof v==='string'&&/^lot\s*#?$/i.test(v.trim()))c.push(ci);});if(c.length){hr=i;cols=c;break;}}
+  if(hr<0)return [];
+  let rate=NaN;
+  rows.forEach(r=>{if(!r||isFinite(rate))return;r.forEach((v,ci)=>{if(isFinite(rate))return;if(typeof v==='string'&&/bid\s*prod/i.test(v)){for(let k=ci+1;k<ci+6;k++){const n=pkNum(r[k]);if(n>0){rate=n;break;}}}});});
+  const out=[];const seen={};
+  cols.forEach(c=>{
+    const h=rows[hr]||[];let rc=c+1;for(let k=c+1;k<=c+3;k++){if(typeof h[k]==='string'&&/pipe\s*run/i.test(h[k])){rc=k;break;}}
+    for(let i=hr+1;i<rows.length;i++){const r=rows[i]||[];const lot=r[c];
+      const ls=(typeof lot==='number')?String(lot):(typeof lot==='string'?lot.trim():'');
+      if(!/^\d+[A-Za-z]?$/.test(ls))continue;const L=pkNum(r[rc]);if(!(L>0))continue;
+      if(seen[ls])continue;seen[ls]=1;
+      out.push({Title:ls,JobNum:job,Phase:'500',ItemType:'lateral',Descr:'Lateral, lot '+ls,BidHrs:rate>0?Math.round(L/rate*100)/100:0,BidQty:L,Unit:'LF',Area:''});}
+  });
+  return out;
+}
+// Earthwork bid numbers and the rate sheet, read from the same packet
+function pkParseEarth(wb){
+  const sheet=re=>{const n=wb.SheetNames.find(x=>re.test(x));return n?XLSX.utils.sheet_to_json(wb.Sheets[n],{header:1,raw:true,defval:null}):null;};
+  const out={};const m=sheet(/mass\s*earthwork\s*tracker/i);
+  if(m){const costs=[];
+    m.forEach(r=>{if(!r)return;r.forEach((v,ci)=>{if(typeof v!=='string')return;const s=v.toUpperCase();
+      const left=()=>{for(let k=ci-1;k>=0&&k>=ci-3;k--){const n=pkNum(r[k]);if(n>0)return n;}return 0;};
+      const right=()=>{for(let k=ci+1;k<=ci+3;k++){const n=pkNum(r[k]);if(n>0)return n;}return 0;};
+      if(/^BID YARDAGE/.test(s))out.bidCY=Math.round(left());
+      else if(/^BID SY/.test(s))out.bidSY=Math.round(left());
+      else if(/^BID COST:?$/.test(s.trim()))costs.push(right());});});
+    if(costs[0])out.bidCost=Math.round(costs[0]);if(costs[1])out.bidCostFG=Math.round(costs[1]);}
+  const rs=sheet(/rate\s*sheet/i);
+  if(rs){const rates={};const norm=x=>String(x||'').toUpperCase().replace(/\s+/g,' ').trim();
+    const all=EW_MACH.concat(EW_LAB);
+    rs.forEach(r=>{if(!r)return;const n=norm(r[0]),v=pkNum(r[1]);if(!n||!(v>0))return;const hit=all.find(c=>norm(c)===n);if(hit)rates[hit]=Math.round(v*100)/100;});
+    if(Object.keys(rates).length)out.rates=rates;}
+  return out;
+}
+function pkParse(wb,job){
+  const sheet=re=>{const n=wb.SheetNames.find(x=>re.test(x.trim()));return n?XLSX.utils.sheet_to_json(wb.Sheets[n],{header:1,raw:true,defval:null}):null;};
+  const st=sheet(/^STORM\s*T-?\s*OFF/i),sa=sheet(/^SAN(ITARY)?\s*T-?\s*OFF/i),sl=sheet(/^SAN(ITARY)?\s*LAT.*T-?\s*OFF/i);
+  let rows=[];
+  if(st)rows=rows.concat(pkParseRuns(st,job,'400'));
+  if(sa)rows=rows.concat(pkParseRuns(sa,job,'500'));
+  if(sl)rows=rows.concat(pkParseLats(sl,job));
+  return {rows,earth:pkParseEarth(wb)};
+}
+function pkTotals(rows){const o={};rows.forEach(r=>{const k=r.Phase+'|'+r.ItemType;const x=o[k]=o[k]||{phase:r.Phase,type:r.ItemType,n:0,lf:0,hrs:0};x.n++;x.lf+=r.BidQty;x.hrs+=r.BidHrs;});return Object.values(o);}
+async function pkScan(tok){
+  const H={Authorization:'Bearer '+tok};
+  const kids=async p=>{const r=await fetch(pkUrl(p)+':/children?$select=name,id,folder,file,lastModifiedDateTime&$top=400',{headers:H});if(!r.ok)throw new Error('folder read '+r.status+' ('+p+')');return (await r.json()).value||[];};
+  const years=(await kids(PK_ROOT)).filter(k=>k.folder&&/^\d{4}$/.test(k.name));
+  const jobs=[];
+  for(const y of years){
+    const jf=(await kids(PK_ROOT+'/'+y.name)).filter(k=>k.folder&&/^\d{3,5}[A-Za-z]?(?![0-9A-Za-z])/.test(k.name));
+    const found=await Promise.all(jf.map(async f=>{
+      const files=(await kids(PK_ROOT+'/'+y.name+'/'+f.name)).filter(k=>k.file&&/\.(xlsx|xlsm)$/i.test(k.name)&&/packet/i.test(k.name)&&!/^~\$/.test(k.name));
+      files.sort((a,b)=>(/field\s*packet/i.test(b.name)-/field\s*packet/i.test(a.name))||String(b.lastModifiedDateTime).localeCompare(String(a.lastModifiedDateTime)));
+      const job=f.name.match(/^\d{3,5}[A-Za-z]?/)[0];
+      return {job,year:y.name,folder:f.name,name:f.name.replace(/^\d{3,5}[A-Za-z]?\s*[-_ ]\s*/,''),file:files[0]?{name:files[0].name,id:files[0].id,modified:files[0].lastModifiedDateTime}:null};
+    }));
+    jobs.push(...found);
+  }
+  return jobs.sort((a,b)=>a.job.localeCompare(b.job));
+}
+async function pkState(tok){const r=await fetch(pkUrl(PK_STATE)+':/content',{headers:{Authorization:'Bearer '+tok}});if(r.status===404)return{jobs:{}};if(!r.ok)throw new Error('sync record '+r.status);const d=await r.json();return d&&d.jobs?d:{jobs:{}};}
+async function pkStateSave(tok,job,rec){ // read-merge-write so two admins never erase each other's record
+  for(let a=0;a<3;a++){
+    const H={Authorization:'Bearer '+tok};let etag=null,cur={jobs:{}};
+    const mr=await fetch(pkUrl(PK_STATE),{headers:H});
+    if(mr.status!==404){if(!mr.ok)return;etag=(await mr.json()).eTag;const cr=await fetch(pkUrl(PK_STATE)+':/content',{headers:H});if(!cr.ok)return;const d=await cr.json();if(d&&d.jobs)cur=d;}
+    cur.jobs[job]=rec;const PH={Authorization:'Bearer '+tok,'Content-Type':'application/json'};if(etag)PH['If-Match']=etag;
+    const pr=await fetch(pkUrl(PK_STATE)+':/content',{method:'PUT',headers:PH,body:JSON.stringify(cur)});
+    if(pr.status===412)continue;return;
+  }
+}
+async function pkLoadPacket(tok,j){
+  const r=await fetch('https://graph.microsoft.com/v1.0/drives/'+EW_DRIVE+'/items/'+j.file.id+'/content',{headers:{Authorization:'Bearer '+tok}});
+  if(!r.ok)throw new Error('packet download '+r.status);
+  const wb=XLSX.read(await r.arrayBuffer(),{type:'array'});
+  return pkParse(wb,j.job);
+}
+async function pkWrite(tok,j,parsed){
+  const rows=parsed.rows;
+  const victims=S.scope.filter(r=>r.JobNum===j.job&&rows.some(n=>n.Phase===r.Phase&&n.ItemType===r.ItemType));
+  for(const b of chunk(victims,20))await gBatch(tok,b.map((v,i)=>({id:String(i+1),method:'DELETE',url:`/sites/${FD_SITE}/lists/${S.lists.scope}/items/${v.spId}`,headers:{'If-Match':'*'}})));
+  for(const b of chunk(rows,20)){
+    const resp=await gBatch(tok,b.map((row,i)=>({id:String(i+1),method:'POST',url:`/sites/${FD_SITE}/lists/${S.lists.scope}/items`,headers:{'Content-Type':'application/json'},body:{fields:packFields('scope',row)}})));
+    const bad=resp.filter(r=>r.status>=400);if(bad.length)throw new Error(bad.length+' rows failed (HTTP '+bad[0].status+')');
+  }
+  await pkStateSave(tok,j.job,{file:j.file.name,modified:j.file.modified,syncedAt:new Date().toISOString(),by:(auth.user&&auth.user.name)||'',rows:rows.length});
+  // earthwork setup: fill it in from the packet only if nobody has set this job up by hand
+  try{
+    const e=parsed.earth||{};
+    if(e.bidCY||e.bidSY){
+      const H={Authorization:'Bearer '+tok};let etag=null,cur={rates:{},eqMap:{},jobs:{}};
+      const mr=await fetch(ewUrl(),{headers:H});
+      if(mr.status!==404&&mr.ok){etag=(await mr.json()).eTag;const cr=await fetch(ewUrl()+':/content',{headers:H});if(cr.ok){const d=await cr.json();if(d&&typeof d==='object')cur=Object.assign(cur,d);}}
+      cur.jobs=cur.jobs||{};
+      if(!cur.jobs[j.job]){
+        cur.jobs[j.job]={name:j.name,bidCY:e.bidCY||0,bidCost:e.bidCost||0,bidSY:e.bidSY||0,bidCostFG:e.bidCostFG||0,rates:e.rates||{},fromPacket:true};
+        const PH={Authorization:'Bearer '+tok,'Content-Type':'application/json'};if(etag)PH['If-Match']=etag;
+        await fetch(ewUrl()+':/content',{method:'PUT',headers:PH,body:JSON.stringify(cur)});
+        if(S.earth)S.earth.setup=cur;
+      }
+    }
+  }catch(e){console.warn('earth setup from packet',e);}
+}
+// Runs by itself for admins: finds new jobs and imports any job that has a packet but no scope yet.
+async function pkAuto(force){
+  if(!auth.isAdmin||S.pkBusy||!S.lists||typeof XLSX==='undefined')return;
+  if(!force){const last=+sessionStorage.getItem('vhtrk_pk_scan')||0;if(Date.now()-last<10*60000&&S.pk)return;}
+  S.pkBusy=true;
+  try{
+    const tok=await getToken();if(!tok)return;
+    const [jobs,state]=await Promise.all([pkScan(tok),pkState(tok)]);
+    sessionStorage.setItem('vhtrk_pk_scan',String(Date.now()));
+    const have={};S.scope.forEach(r=>{have[r.JobNum]=(have[r.JobNum]||0)+1;});
+    const imported=[],failed=[];
+    for(const j of jobs){
+      const rec=state.jobs[j.job];
+      j.rows=have[j.job]||0;
+      if(!j.file){j.status='nopacket';continue;}
+      if(!j.rows){
+        if(rec&&rec.modified===j.file.modified&&rec.rows===0){j.status='empty';continue;} // already tried this exact file: nothing usable in it
+        try{
+          const parsed=await pkLoadPacket(tok,j);
+          if(!parsed.rows.length){await pkStateSave(tok,j.job,{file:j.file.name,modified:j.file.modified,syncedAt:new Date().toISOString(),rows:0});j.status='empty';continue;}
+          await pkWrite(tok,j,parsed);imported.push(j.job);j.status='synced';j.rows=parsed.rows.length;
+        }catch(e){console.warn('packet sync',j.job,e);failed.push(j.job);j.status='error';j.err=e.message;}
+      }else if(!rec)j.status='manual';                       // scope was loaded by hand before packet sync existed
+      else if(rec.modified!==j.file.modified)j.status='changed'; // packet edited since the last sync
+      else j.status='synced';
+    }
+    S.pk={jobs,at:Date.now(),attention:jobs.filter(j=>j.status==='changed'||j.status==='error'||j.status==='empty').length};
+    if(imported.length){await loadAll();toast('Scope imported from field packets: '+imported.join(', '));}
+    if(failed.length)toast('Packet import failed for '+failed.join(', ')+'. Open Packets for details.','err');
+    render();
+  }catch(e){console.warn('pkAuto',e);S.pk=S.pk||{jobs:[],err:e.message,attention:0};if(force)toast('Packet scan failed: '+e.message,'err');}
+  finally{S.pkBusy=false;}
+}
+async function pkResync(job){
+  const j=((S.pk&&S.pk.jobs)||[]).find(x=>x.job===job);if(!j||!j.file||S.pkBusy)return;
+  S.pkBusy=true;toast('Reading '+j.file.name+'…');
+  try{
+    const tok=await getToken(true);if(!tok)return;
+    const parsed=await pkLoadPacket(tok,j);
+    if(!parsed.rows.length){toast('No storm, sanitary or lateral takeoff rows found in that packet.','err');return;}
+    const newIds={};parsed.rows.forEach(r=>{newIds[r.Phase+'|'+r.ItemType+'|'+nid(r.Title)]=1;});
+    const old=S.scope.filter(r=>r.JobNum===job&&parsed.rows.some(n=>n.Phase===r.Phase&&n.ItemType===r.ItemType));
+    const gone=old.filter(r=>!newIds[r.Phase+'|'+r.ItemType+'|'+nid(r.ItemID)]);
+    const lost=gone.filter(r=>pctOf(job,r.ItemID)>0);
+    const tot=pkTotals(parsed.rows).map(x=>`${PHASE_LABELS[x.phase]||x.phase} ${x.type}s: ${x.n} items, ${fmt0(x.lf)} LF, ${fmt(x.hrs)} bid hrs`).join('\n');
+    const msg=`Re-sync job ${job} from "${j.file.name}"?\n\n${tot}\n\n`+
+      (old.length?`${old.length} existing rows will be replaced. ${gone.length} of them are not in the packet under the same ID`+(lost.length?`, and ${lost.length} of those have progress recorded that will no longer show (${lost.slice(0,6).map(r=>r.ItemID).join(', ')}${lost.length>6?'…':''}).`:'.'):'No existing rows are affected.');
+    if(!confirm(msg))return;
+    await pkWrite(tok,j,parsed);await loadAll();S.pk=null;sessionStorage.removeItem('vhtrk_pk_scan');
+    toast(parsed.rows.length+' scope rows loaded for '+job);pkAuto(true);
+  }catch(e){toast('Re-sync failed: '+e.message,'err');}
+  finally{S.pkBusy=false;render();}
+}
+function renderPackets(){
+  if(!S.pk){pkAuto(true);return `<div class="loading"><div class="spinner"></div><div>Scanning the Field folder…</div></div>`;}
+  const lab={synced:['In sync','var(--green,#16a34a)'],changed:['Packet changed since last sync','var(--red)'],manual:['Loaded by hand, never synced from packet','#d97706'],
+    nopacket:['No field packet in the folder','#d97706'],empty:['Packet has no takeoff rows the tracker can read','var(--red)'],error:['Import failed','var(--red)']};
+  let h=`<div class="sec"><h2>Field packets <span class="h2-sub">Field / Jobs</span></h2>
+    <p class="note">Every job folder under Field\\Jobs\\{year} is checked for a field packet. A job with no scope yet is imported automatically. A job that already has scope is only replaced when you press Re-sync.</p>
+    <button class="btn btn-sm" onclick="S.pk=null;sessionStorage.removeItem('vhtrk_pk_scan');render()"><i class="ti ti-refresh"></i> Scan again</button></div>`;
+  if(S.pk.err)h+=`<div class="sec" style="border-color:var(--red)">Scan failed: ${esc(S.pk.err)}</div>`;
+  (S.pk.jobs||[]).forEach(j=>{const L=lab[j.status]||[j.status,'inherit'];
+    h+=`<div class="sec" style="display:flex;gap:12px;align-items:center;flex-wrap:wrap"><div style="flex:1;min-width:220px"><b>${esc(j.job)}</b> ${esc(j.name)} <span class="note">${esc(j.year)}</span><br>
+      <span class="note">${j.file?esc(j.file.name)+' \u00b7 edited '+String(j.file.modified).slice(0,10):'no packet file'} \u00b7 ${j.rows} scope rows</span><br>
+      <span style="font-size:12.5px;color:${L[1]}">${L[0]}${j.err?': '+esc(j.err):''}</span></div>
+      ${j.file?`<button class="btn btn-sm" onclick="pkResync('${esc(j.job)}')"><i class="ti ti-refresh-dot"></i> ${j.rows?'Re-sync':'Import'}</button>`:''}</div>`;});
+  if(!(S.pk.jobs||[]).length&&!S.pk.err)h+=`<div class="sec"><div class="empty">No job folders found under Field\\Jobs.</div></div>`;
+  return h;
+}
+// ===== EARTHWORK YARDAGE & COST ==============================================
+// Mirrors the field packet's "Dirt Job Cost Tracker", but nobody types the daily lines:
+//   yardage  = the foreman's daily production report (phase 300 = CY, 310 = SY)
+//   cost     = timesheet hours x the job's rate sheet. Machine rates INCLUDE the operator, so hours
+//              on a machine are charged at the machine rate only; only hours NOT on a machine are
+//              charged at the person's labor rate.
+const EW_DRIVE='b!bx9kGOaza0OourrHa-9_tVTRgr5ON91GmZc4OzbW_xXXtcQafX0iTa2THLVm3FW_';
+const EW_FILE='Field/Jobs/earthwork-setup.json';
+const EW_MACH=['621 - SCRAPER','613 - PW','TS-14','HAUL TRUCK','D5','D6','D7','D8','TRACKHOE','TRACTOR','ROLLER','LOADER','SKID/BACKHOE','MINI-EXCAVATOR','TRACTOR AND PAN'];
+const EW_LAB=['FOREMAN','OPER','LABOR','SUPERVISOR'];
+const EW_DEF_RATES={'621 - SCRAPER':227,'613 - PW':238,'TS-14':170,'HAUL TRUCK':224,'D5':117,'D6':206,'D7':232,'D8':195,'TRACKHOE':214,'TRACTOR':170,'ROLLER':216,'LOADER':155,'SKID/BACKHOE':116,'MINI-EXCAVATOR':126,'TRACTOR AND PAN':306.35,'FOREMAN':45,'OPER':41,'LABOR':39.5,'SUPERVISOR':67};
+const EW_PH={'300':{label:'Mass earthwork',unit:'CY',q:'bidCY',c:'bidCost'},'310':{label:'Finish grade',unit:'SY',q:'bidSY',c:'bidCostFG'}};
+function ewUrl(){return 'https://graph.microsoft.com/v1.0/drives/'+EW_DRIVE+'/root:/'+EW_FILE.split('/').map(encodeURIComponent).join('/');}
+function money(n){return (n<0?'-':'')+'$'+Math.abs(Math.round(n)).toLocaleString();}
+function money2(n){return isFinite(n)?'$'+n.toFixed(2):'\u2014';}
+async function loadEarth(quiet){
+  if(S.earthLoading)return;S.earthLoading=true;
+  try{
+    const tok=await getToken();if(!tok)return;
+    const H={Authorization:'Bearer '+tok};
+    const [tj,sr]=await Promise.all([
+      vhGetAll(tok,`https://graph.microsoft.com/v1.0/sites/${FD_SITE}/lists/${TSJL_LIST}/items?$expand=fields&$top=999`,'TimesheetJobLines'),
+      fetch(ewUrl()+':/content',{headers:H})
+    ]);
+    let setup={rates:{},eqMap:{},jobs:{}};
+    if(sr.ok){try{const d=await sr.json();if(d&&typeof d==='object')setup=Object.assign(setup,d);}catch(e){}}
+    else if(sr.status!==404)throw new Error('setup file '+sr.status);
+    const rows=tj.map(i=>i.fields).filter(f=>f&&EW_PH[String(f.Phase||'').trim()]);
+    S.earth={rows,setup};
+  }catch(e){console.warn('loadEarth',e);toast('Earthwork load failed: '+e.message,'err');S.earth={rows:[],setup:{rates:{},eqMap:{},jobs:{}},err:e.message};}
+  finally{S.earthLoading=false;if(!quiet)render();}
+}
+function ewCat(num,desc,setup){
+  const k=String(num||'').trim();
+  if(setup.eqMap&&setup.eqMap[k])return setup.eqMap[k]==='(ignore)'?'':setup.eqMap[k];
+  const s=(k+' '+String(desc||'')).toUpperCase();
+  if(/PAN\b/.test(s))return 'TRACTOR AND PAN';
+  if(/621/.test(s))return '621 - SCRAPER';
+  if(/613/.test(s))return '613 - PW';
+  if(/TS-?\s?14/.test(s))return 'TS-14';
+  if(/HAUL|ARTIC|OFF.?ROAD|ROCK TRUCK/.test(s))return 'HAUL TRUCK';
+  const d=s.match(/\bD-?\s?([5678])/);if(d)return 'D'+d[1];
+  if(/MINI/.test(s))return 'MINI-EXCAVATOR';
+  if(/EXCAV|TRACK\s?HOE/.test(s))return 'TRACKHOE';
+  if(/ROLLER|COMPACT|SHEEPS|PAD\s?FOOT/.test(s))return 'ROLLER';
+  if(/SKID|BACKHOE/.test(s))return 'SKID/BACKHOE';
+  if(/LOADER/.test(s))return 'LOADER';
+  if(/TRACTOR/.test(s))return 'TRACTOR';
+  return null; // unknown: needs a category picked in setup
+}
+function ewClass(title){const s=String(title||'').toUpperCase();if(/SUPER/.test(s))return 'SUPERVISOR';if(/FOREMAN|CREW\s?LEAD/.test(s))return 'FOREMAN';if(/OPER/.test(s))return 'OPER';return 'LABOR';}
+function ewRates(job){const st=S.earth.setup;return Object.assign({},EW_DEF_RATES,st.rates||{},((st.jobs||{})[job]||{}).rates||{});}
+function ewJobs(){
+  const s=new Set(Object.keys(S.earth.setup.jobs||{}));
+  S.earth.rows.forEach(f=>{const j=String(f.Jobnumber||'').trim();if(j)s.add(j);});
+  S.prod.forEach(f=>{if(EW_PH[String(f.Phase||'').trim()]){const j=String(f.Jobnumber||'').trim();if(j)s.add(j);}});
+  return [...s].sort();
+}
+function ewData(job){
+  const st=S.earth.setup,rates=ewRates(job);
+  const out={ph:{'300':{days:{},cost:0,qty:0},'310':{days:{},cost:0,qty:0}},equip:{},unmapped:0};
+  const day=(ph,dt)=>out.ph[ph].days[dt]||(out.ph[ph].days[dt]={cost:0,qty:0,mach:0,lab:0});
+  S.earth.rows.forEach(f=>{
+    if(String(f.Jobnumber||'').trim()!==job)return;
+    const ph=String(f.Phase||'').trim(),dt=String(f.WorkDate||'').slice(0,10);if(!dt)return;
+    const hrs=+f.Hours||0;let eq=[];try{eq=JSON.parse(f.Equipment||'[]')||[];}catch(e){}
+    let eqH=0,c=0;
+    eq.forEach(x=>{
+      const h=parseFloat(x&&x.hours)||0;if(!(h>0))return;
+      const num=String(x.number||x.id||'').trim(),cat=ewCat(num,x.description,st);
+      const rec=out.equip[num]||(out.equip[num]={desc:x.description||'',cat:cat,hrs:0});rec.hrs+=h;
+      eqH+=h;
+      if(cat===null){out.unmapped++;}
+      else if(cat)c+=h*(rates[cat]||0);
+    });
+    const labH=Math.max(0,hrs-eqH);
+    c+=labH*(rates[ewClass(f.EmployeeTitle)]||0);
+    const d=day(ph,dt);d.cost+=c;d.mach+=eqH;d.lab+=labH;out.ph[ph].cost+=c;
+  });
+  S.prod.forEach(f=>{
+    if(String(f.Jobnumber||'').trim()!==job)return;
+    const ph=String(f.Phase||'').trim();if(!EW_PH[ph])return;
+    const q=parseFloat(String(f['Yardage_x002f_production']||'').replace(/,/g,''));if(!(q>0))return;
+    const dt=String(f.Date||f.Created||'').slice(0,10);if(!dt)return;
+    day(ph,dt).qty+=q;out.ph[ph].qty+=q;
+  });
+  return out;
+}
+function ewSummary(job,ph,d){
+  const cfg=(S.earth.setup.jobs||{})[job]||{};const P=EW_PH[ph];
+  const bidQ=+cfg[P.q]||0,bidC=+cfg[P.c]||0,cost=d.ph[ph].cost,qty=d.ph[ph].qty;
+  const bidU=bidQ?bidC/bidQ:NaN,actU=qty?cost/qty:NaN,left=Math.max(0,bidQ-qty);
+  return {bidQ,bidC,cost,qty,bidU,actU,left,pct:bidQ?qty/bidQ*100:0,
+    earned:isFinite(bidU)?qty*bidU:NaN,           // what the yards moved so far were bid at
+    perLeft:left?(bidC-cost)/left:NaN,            // money left per yard left
+    proj:(qty&&bidQ)?cost+left*actU:NaN};         // final cost if the current rate holds
+}
+function renderEarth(){
+  if(!S.earth){loadEarth();return `<div class="loading"><div class="spinner"></div><div>Loading earthwork…</div></div>`;}
+  if(S.ejob)return renderEarthJob(S.ejob);
+  const jobs=ewJobs();
+  let h=`<div class="sec"><h2>Earthwork <span class="h2-sub">yardage and cost vs bid</span></h2>
+    <p class="note">Yardage comes from daily production reports. Cost is timesheet hours times the job's rate sheet (machine rates include the operator).</p></div>`;
+  if(!jobs.length)h+=`<div class="sec"><div class="empty">No earthwork time or production has been reported yet.</div></div>`;
+  jobs.forEach(j=>{
+    const d=ewData(j);const cfg=(S.earth.setup.jobs||{})[j]||{};
+    const lines=['300','310'].map(ph=>{
+      const s=ewSummary(j,ph,d);if(!s.bidQ&&!s.cost&&!s.qty)return '';
+      const v=isFinite(s.earned)?s.earned-s.cost:NaN;
+      return `<div class="jmeta" style="margin-top:6px"><span style="min-width:108px"><b>${EW_PH[ph].label}</b></span>
+        <span><b class="num">${fmt0(s.qty)}</b> / ${s.bidQ?fmt0(s.bidQ):'?'} ${EW_PH[ph].unit}</span>
+        <span>Cost <b class="num">${money(s.cost)}</b></span>
+        <span>${money2(s.actU)} vs ${money2(s.bidU)} bid</span>
+        ${isFinite(v)&&s.qty?`<span style="color:${v<0?'var(--red)':'var(--green,#16a34a)'}"><b>${v<0?'Over ':'Under '}${money(Math.abs(v))}</b></span>`:''}</div>
+        <div class="pbar"><div class="pbarfill${s.pct>=99.5?' done':''}" style="width:${Math.min(100,s.pct)}%"></div></div>`;
+    }).join('');
+    h+=`<button class="jcard" onclick="S.ejob='${esc(j)}';render()"><div class="jtop"><span class="jname">${esc(j)}${cfg.name?' \u00b7 '+esc(cfg.name):''}</span>
+      ${d.unmapped?`<span style="font-size:12px;color:var(--red)">${Object.values(d.equip).filter(x=>x.cat===null).length} machine(s) need a rate</span>`:''}</div>
+      ${lines||'<div class="jmeta"><span>Not set up yet. Open to enter bid yards and cost.</span></div>'}</button>`;
+  });
+  if(auth.isAdmin)h+=`<div class="sec"><span class="note">Set up a job that has no time yet:</span> <input id="ew-new" placeholder="Job #" style="padding:7px 9px;border-radius:8px;border:1px solid var(--border);background:transparent;color:inherit;width:110px"> <button class="btn btn-sm" onclick="const v=document.getElementById('ew-new').value.trim();if(v){S.ejob=v;S.eset=true;render();}">Set up</button></div>`;
+  return h;
+}
+function renderEarthJob(job){
+  const d=ewData(job);const cfg=(S.earth.setup.jobs||{})[job]||{};
+  let h=`<div style="display:flex;align-items:center;gap:10px;margin-bottom:12px"><button class="btn btn-sm" onclick="S.ejob='';S.eset=false;render()"><i class="ti ti-arrow-left"></i></button>
+    <h2 style="margin:0;flex:1">${esc(job)}${cfg.name?' \u00b7 '+esc(cfg.name):''} <span class="h2-sub">earthwork</span></h2>
+    ${auth.isAdmin?`<button class="btn btn-sm" onclick="S.eset=!S.eset;render()"><i class="ti ti-settings"></i> Setup</button>`:''}</div>`;
+  if(S.eset&&auth.isAdmin)h+=ewSetupForm(job,d);
+  const bad=Object.entries(d.equip).filter(([n,x])=>x.cat===null);
+  if(bad.length)h+=`<div class="sec" style="border-color:var(--red)"><b style="color:var(--red)">${bad.length} machine(s) have no rate, so their hours are not in the cost yet:</b>
+    <div class="note" style="margin-top:4px">${bad.map(([n,x])=>'#'+esc(n)+' '+esc(x.desc)+' ('+fmt(x.hrs)+' h)').join(' \u00b7 ')}. Open Setup to pick a category for each.</div></div>`;
+  ['300','310'].forEach(ph=>{
+    const s=ewSummary(job,ph,d),P=EW_PH[ph];const days=Object.keys(d.ph[ph].days).sort();
+    if(!s.bidQ&&!days.length)return;
+    const v=isFinite(s.earned)?s.earned-s.cost:NaN;
+    h+=`<div class="sec"><h2>${P.label} <span class="h2-sub">phase ${ph}</span></h2>
+      <div class="kg">
+        <div class="k"><div class="lbl">Bid ${P.unit}</div><div class="val">${s.bidQ?fmt0(s.bidQ):'\u2014'}</div><div class="sub">${money2(s.bidU)} / ${P.unit} bid</div></div>
+        <div class="k"><div class="lbl">Actual ${P.unit}</div><div class="val">${fmt0(s.qty)}</div><div class="sub">${fmt0(s.pct)}% \u00b7 ${fmt0(s.left)} left</div></div>
+        <div class="k"><div class="lbl">Bid cost</div><div class="val">${s.bidC?money(s.bidC):'\u2014'}</div></div>
+        <div class="k"><div class="lbl">Cost to date</div><div class="val">${money(s.cost)}</div><div class="sub">${money2(s.actU)} / ${P.unit} actual</div></div>
+        <div class="k"><div class="lbl">Over / under</div><div class="val${v<0?' bad':''}">${isFinite(v)&&s.qty?(v<0?'-':'+')+money(Math.abs(v)).replace('-',''):'\u2014'}</div><div class="sub">vs bid for ${P.unit} moved</div></div>
+        <div class="k"><div class="lbl">Projected final</div><div class="val${isFinite(s.proj)&&s.proj>s.bidC?' bad':''}">${isFinite(s.proj)?money(s.proj):'\u2014'}</div><div class="sub">${money2(s.perLeft)} / ${P.unit} left in budget</div></div>
+      </div>`;
+    if(days.length){
+      h+=`<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:13px;margin-top:8px"><tr style="text-align:right;color:var(--text3);font-size:11px"><th style="text-align:left;padding:5px 6px">Date</th><th style="padding:5px 6px">${P.unit}</th><th style="padding:5px 6px">Machine h</th><th style="padding:5px 6px">Labor h</th><th style="padding:5px 6px">Cost</th><th style="padding:5px 6px">$ / ${P.unit}</th></tr>`;
+      days.slice().reverse().forEach(dt=>{const x=d.ph[ph].days[dt];const u=x.qty?x.cost/x.qty:NaN;
+        const flag=x.cost>0&&!x.qty?'cost with no '+P.unit+' reported':(x.qty>0&&!x.cost?P.unit+' with no time':'');
+        h+=`<tr style="text-align:right;border-top:1px solid var(--border)"><td style="text-align:left;padding:5px 6px">${dt}${flag?` <span style="color:var(--red);font-size:11px">${flag}</span>`:''}</td><td class="num" style="padding:5px 6px">${x.qty?fmt0(x.qty):'\u2014'}</td><td class="num" style="padding:5px 6px">${fmt(x.mach)}</td><td class="num" style="padding:5px 6px">${fmt(x.lab)}</td><td class="num" style="padding:5px 6px">${money(x.cost)}</td><td class="num" style="padding:5px 6px;color:${isFinite(u)&&isFinite(s.bidU)&&u>s.bidU?'var(--red)':'inherit'}">${money2(u)}</td></tr>`;});
+      h+=`</table></div>`;
+    }else h+=`<p class="note">No time or production reported yet.</p>`;
+    h+=`</div>`;
+  });
+  if(!cfg.bidCY&&!cfg.bidSY&&!S.eset)h+=`<div class="sec"><p class="note">This job has no bid numbers yet.${auth.isAdmin?' Open <b>Setup</b> and enter the bid yards and bid cost from the field packet.':''}</p></div>`;
+  return h;
+}
+function ewSetupForm(job,d){
+  const st=S.earth.setup,cfg=(st.jobs||{})[job]||{},rates=ewRates(job);
+  const inp='padding:7px 9px;border-radius:8px;border:1px solid var(--border);background:transparent;color:inherit;width:100%;box-sizing:border-box;font-size:14px';
+  const f=(id,label,val)=>`<div><div class="note">${label}</div><input id="${id}" value="${esc(val==null?'':val)}" style="${inp}"></div>`;
+  let h=`<div class="sec"><h2>Setup <span class="h2-sub">from this job's field packet</span></h2>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px">
+    ${f('ew-name','Job name',cfg.name)}${f('ew-bidCY','Mass: bid CY',cfg.bidCY)}${f('ew-bidCost','Mass: bid cost $',cfg.bidCost)}${f('ew-bidSY','Finish: bid SY',cfg.bidSY)}${f('ew-bidCostFG','Finish: bid cost $',cfg.bidCostFG)}</div>
+    <div class="note" style="margin:12px 0 4px"><b>Rate sheet, $ per hour.</b> Machine rates include the operator.</div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:8px">
+    ${EW_MACH.concat(EW_LAB).map((c,i)=>`<div><div class="note">${esc(c)}</div><input class="ew-rate" data-c="${esc(c)}" value="${rates[c]==null?'':rates[c]}" inputmode="decimal" style="${inp}"></div>`).join('')}</div>`;
+  const eqs=Object.entries(d.equip);
+  if(eqs.length){
+    h+=`<div class="note" style="margin:12px 0 4px"><b>Equipment on this job.</b> Check the category each machine is charged at.</div>`;
+    eqs.sort((a,b)=>a[0].localeCompare(b[0],undefined,{numeric:true})).forEach(([n,x])=>{
+      h+=`<div style="display:flex;gap:8px;align-items:center;margin-bottom:6px;font-size:13px"><span style="flex:1;min-width:0">#${esc(n)} ${esc(x.desc)} <span class="note">${fmt(x.hrs)} h</span></span>
+        <select class="ew-eq" data-n="${esc(n)}" style="${inp};width:190px;${x.cat===null?'border-color:var(--red)':''}"><option value="">${x.cat===null?'Pick a category':'(auto)'}</option>${EW_MACH.concat(['(ignore)']).map(c=>`<option${(st.eqMap||{})[n]===c||(!(st.eqMap||{})[n]&&x.cat===c)?' selected':''}>${esc(c)}</option>`).join('')}</select></div>`;});
+  }
+  h+=`<div style="margin-top:12px"><button class="btn" style="background:#2563eb;color:#fff;border-color:#2563eb" onclick="ewSave('${esc(job)}')"><i class="ti ti-device-floppy"></i> Save setup</button></div></div>`;
+  return h;
+}
+async function ewSave(job){
+  const num=id=>{const v=parseFloat(String(document.getElementById(id).value).replace(/[$,]/g,''));return isFinite(v)?v:0;};
+  const cfg={name:document.getElementById('ew-name').value.trim(),bidCY:num('ew-bidCY'),bidCost:num('ew-bidCost'),bidSY:num('ew-bidSY'),bidCostFG:num('ew-bidCostFG'),rates:{}};
+  document.querySelectorAll('.ew-rate').forEach(i=>{const v=parseFloat(String(i.value).replace(/[$,]/g,''));if(isFinite(v))cfg.rates[i.dataset.c]=v;});
+  const eqm={};document.querySelectorAll('.ew-eq').forEach(s=>{if(s.value)eqm[s.dataset.n]=s.value;});
+  const tok=await getToken(true);if(!tok)return;
+  for(let a=0;a<3;a++){
+    try{
+      const H={Authorization:'Bearer '+tok};let etag=null,cur={rates:{},eqMap:{},jobs:{}};
+      const mr=await fetch(ewUrl(),{headers:H});
+      if(mr.status!==404){
+        if(!mr.ok)throw new Error('read '+mr.status);
+        etag=(await mr.json()).eTag;
+        const cr=await fetch(ewUrl()+':/content',{headers:H});if(!cr.ok)throw new Error('read '+cr.status);
+        const dd=await cr.json();if(!dd||typeof dd!=='object')throw new Error('setup file unreadable');cur=Object.assign(cur,dd);
+      }
+      cur.jobs=cur.jobs||{};cur.eqMap=Object.assign({},cur.eqMap||{},eqm);cur.jobs[job]=cfg;
+      const PH={Authorization:'Bearer '+tok,'Content-Type':'application/json'};if(etag)PH['If-Match']=etag;
+      const pr=await fetch(ewUrl()+':/content',{method:'PUT',headers:PH,body:JSON.stringify(cur)});
+      if(pr.status===412)continue;
+      if(!pr.ok)throw new Error('save '+pr.status);
+      S.earth.setup=cur;S.eset=false;toast('Earthwork setup saved');render();return;
+    }catch(e){toast('Save failed: '+e.message,'err');return;}
+  }
+  toast('Save failed: someone else was saving. Try again.','err');
 }
 // ===== WHAT'S-DONE PDF ======================================================
 // Composites every saved daily plan markup (JobPlans/{job}/Marks/*.json from the
