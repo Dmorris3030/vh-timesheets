@@ -139,7 +139,8 @@ const FALLBACK_ADMINS=['dmorris@valentiheld.com','abewley@valentiheld.com','jroe
 const SCOPE_LIST_NAME='JobScope';
 const STATUS_LIST_NAME='TrackerStatus';
 const PHASE_LABELS={'300':'Earth — Mass','310':'Earth — Finish','400':'Storm','450':'Storm — Other','500':'Sanitary','600':'Water'};
-const VH_TRK_BUILD='2026-11-15.26';
+const VH_TRK_BUILD='2026-11-15.27';
+const VH_BG=/[?&]autosave=1/.test(location.search); // loaded hidden by the time app, only to refresh the Excel trackers
 console.log('[VH] Job Trackers build',VH_TRK_BUILD);
 
 let mi;
@@ -688,7 +689,7 @@ function xlModel(job){
       if(done){o.inst++;if(s.pass===s.req.length)o.ok++;else if(!s.fail.length)o.wait++;}
       if((done||s.any)&&s.pass<s.req.length)closeout.push({job:r.JobNum,id:r.ItemID,label:PHASE_LABELS[r.Phase]||r.Phase,area:r.Area,pct:p/100,passed:s.pass+' of '+s.req.length,failed:s.fail.join(', '),need:s.miss.join(', ')});});
   }
-  return {job:job||'',util:util,runs:runs,earth:earth,edaily:edaily,daily:daily,tests:tests,closeout:closeout,tsum:Object.values(tsum).filter(function(o){return o.inst||o.fail;})};
+  return {job:job||'',util:util,runs:runs,earth:earth,edaily:edaily,daily:daily,tests:tests,closeout:closeout,tsum:Object.values(tsum).filter(function(o){return o.inst||o.fail;}),check:pkCheckRows(job)};
 }
 async function xlBuild(X,m){
   const NAVY='FF0F2A47',BLUE='FF185FA5',BAND='FFF3F6FA',GREEN='FF15803D',RED='FFC62828',INK='FF111827',MUTE='FF6B7280',LINE='FFD9DEE5',WHITE='FFFFFFFF';
@@ -757,16 +758,18 @@ async function xlBuild(X,m){
   sheet('Test Closeout',cClose,m.closeout||[],'Nothing open: every installed run has passed its tests, or no runs are installed yet.');
   sheet('Daily Reports',cDaily,m.daily,'No daily production reports yet.');
   sheet('Earthwork Daily',cEDaily,m.edaily,'No earthwork days yet.');
+  if(all&&m.check&&m.check.length)sheet('Bid Pack Check',[{h:'Job',key:'job',w:10},{h:'Status',key:'status',w:18,color:function(v){return v==='Match'?GREEN:RED;}},{h:'Takeoff',key:'label',w:22},{h:'Packet Items',key:'pkN',w:10,fmt:'#,##0'},{h:'Tracker Items',key:'trN',w:10,fmt:'#,##0'},{h:'Packet LF',key:'pkLF',w:11,fmt:'#,##0'},{h:'Tracker LF',key:'trLF',w:11,fmt:'#,##0'},{h:'Packet Hrs',key:'pkHrs',w:11,fmt:'#,##0.0'},{h:'Tracker Hrs',key:'trHrs',w:11,fmt:'#,##0.0'},{h:'Checked',key:'checked',w:12,align:'center'},{h:'Differences',key:'detail',w:70,wrap:true}],m.check,'');
   wb.eachSheet(function(w){w.eachRow(function(row){row.eachCell(function(c){c.font=Object.assign({name:'Calibri'},c.font||{});});});});
   return wb;
 }
 async function saveOfficeTracker(auto){
   try{
     if(typeof XLSX==='undefined'||!S.loaded)return;
-    if(auto){const last=+localStorage.getItem('vhtrk_office_saved')||0;if(Date.now()-last<30*60000)return;}
+    if(auto){const last=+localStorage.getItem('vhtrk_office_saved')||0;if(Date.now()-last<(VH_BG?5:30)*60000)return;}
     const tok=await getToken(!auto);if(!tok)return;
     if(!S.earth&&!S.earthLoading)await loadEarth(true); // quiet: no re-render under someone typing
     if(!S.tests&&!S.testsLoading)await loadTests();
+    if(!S.pkCheck)await pkCheckLoad(tok);
     let styled=true;try{await xlLib();}catch(e){styled=false;console.warn('styled workbook unavailable',e);}
     const who=(auth.user&&auth.user.name)||'';
     const stamp='Updated '+new Date().toLocaleString()+(who?' by '+who:'')+'  \u00b7  written by the tracker app, so edits made here are overwritten';
@@ -1184,7 +1187,10 @@ async function pkAuto(force){
       else if(rec.modified!==j.file.modified)j.status='changed'; // packet edited since the last sync
       else j.status='synced';
     }
-    S.pk={jobs,at:Date.now(),attention:jobs.filter(j=>j.status==='changed'||j.status==='error'||j.status==='empty').length};
+    S.pk={jobs,at:Date.now(),attention:0};
+    await pkCheckLoad(tok);pkAttn();
+    // weekly bid pack check: runs by itself when the last one is more than 7 days old
+    if(!S.pkCheck||Date.now()-Date.parse(S.pkCheck.at)>7*86400000)setTimeout(function(){pkVerify(false);},8000);
     if(imported.length){await loadAll();toast('Scope imported from field packets: '+imported.join(', '));}
     if(failed.length)toast('Packet import failed for '+failed.join(', ')+'. Open Packets for details.','err');
     render();
@@ -1211,18 +1217,85 @@ async function pkResync(job){
   }catch(e){toast('Re-sync failed: '+e.message,'err');}
   finally{S.pkBusy=false;render();}
 }
+// ===== BID PACK CHECK ==========================================================
+// Once a week (or on demand) every field packet is re-read and compared with the scope the
+// tracker is using: item counts, total footage, total bid hours and run-by-run IDs.
+// The result is saved to Field/Jobs/scope-check.json and shown on the Packets page and in the
+// all-jobs workbook, so a packet that was revised after import cannot go unnoticed.
+const PK_CHECK=PK_ROOT+'/scope-check.json';
+function pkCompare(job,parsed){
+  const key=function(p,ty,id){return p+'|'+ty+'|'+nid(id);};
+  const combos={};parsed.rows.forEach(function(r){combos[r.Phase+'|'+r.ItemType]=1;});
+  const mine=S.scope.filter(function(r){return r.JobNum===job&&combos[r.Phase+'|'+r.ItemType];});
+  const pk={},tr={};
+  parsed.rows.forEach(function(r){pk[key(r.Phase,r.ItemType,r.Title)]=r;});
+  mine.forEach(function(r){tr[key(r.Phase,r.ItemType,r.ItemID)]=r;});
+  const groups={};
+  const g=function(p,ty){const k=p+'|'+ty;return groups[k]||(groups[k]={phase:p,type:ty,pkN:0,trN:0,pkLF:0,trLF:0,pkHrs:0,trHrs:0,missing:[],extra:[],changed:[]});};
+  Object.keys(pk).forEach(function(k){const r=pk[k],x=g(r.Phase,r.ItemType);x.pkN++;x.pkLF+=r.BidQty;x.pkHrs+=r.BidHrs;
+    const m=tr[k];if(!m)x.missing.push(r.Title);else if(Math.abs((m.BidQty||0)-r.BidQty)>0.5||Math.abs((m.BidHrs||0)-r.BidHrs)>0.06)x.changed.push(r.Title);});
+  Object.keys(tr).forEach(function(k){const r=tr[k],x=g(r.Phase,r.ItemType);x.trN++;x.trLF+=r.BidQty||0;x.trHrs+=r.BidHrs||0;if(!pk[k])x.extra.push(r.ItemID);});
+  return Object.values(groups).map(function(x){
+    x.pkLF=Math.round(x.pkLF);x.trLF=Math.round(x.trLF);x.pkHrs=r1(x.pkHrs);x.trHrs=r1(x.trHrs);
+    x.nM=x.missing.length;x.nE=x.extra.length;x.nC=x.changed.length;x.diff=x.nM+x.nE+x.nC;
+    x.missing=x.missing.slice(0,15);x.extra=x.extra.slice(0,15);x.changed=x.changed.slice(0,15);return x;});
+}
+function pkCheckBad(){const c=S.pkCheck;if(!c)return 0;return Object.keys(c.jobs).filter(function(j){const x=c.jobs[j];return x.err||x.diff>0;}).length;}
+function pkAttn(){if(!S.pk)return;S.pk.attention=(S.pk.jobs||[]).filter(function(j){return j.status==='changed'||j.status==='error'||j.status==='empty';}).length+pkCheckBad();}
+async function pkCheckLoad(tok){
+  try{const r=await fetch(pkUrl(PK_CHECK)+':/content',{headers:{Authorization:'Bearer '+tok}});if(r.ok){const d=await r.json();if(d&&d.jobs)S.pkCheck=d;}}catch(e){}
+}
+async function pkVerify(manual){
+  if(!auth.isAdmin||S.pkChecking||!S.pk||!S.pk.jobs)return;
+  S.pkChecking=true;if(manual)toast('Checking every field packet against the tracker. This takes a minute.');
+  try{
+    const tok=await getToken(manual);if(!tok)return;
+    const out={at:new Date().toISOString(),by:(auth.user&&auth.user.name)||'',jobs:{}};
+    for(const j of S.pk.jobs){
+      if(!j.file)continue;
+      try{
+        const parsed=await pkLoadPacket(tok,j);
+        if(!parsed.rows.length){out.jobs[j.job]={name:j.name,file:j.file.name,err:'No takeoff rows the tracker can read'};continue;}
+        const groups=pkCompare(j.job,parsed);
+        out.jobs[j.job]={name:j.name,file:j.file.name,modified:j.file.modified,groups:groups,diff:groups.reduce(function(a,x){return a+x.diff;},0)};
+      }catch(e){out.jobs[j.job]={name:j.name,file:j.file.name,err:e.message};}
+    }
+    await fetch(pkUrl(PK_CHECK)+':/content',{method:'PUT',headers:{Authorization:'Bearer '+tok,'Content-Type':'application/json'},body:JSON.stringify(out)});
+    S.pkCheck=out;pkAttn();
+    if(manual)toast('Bid pack check finished: '+pkCheckBad()+' job(s) with differences');
+  }catch(e){console.warn('pkVerify',e);if(manual)toast('Bid pack check failed: '+e.message,'err');}
+  finally{S.pkChecking=false;if(manual||S.view==='packets'||S.view==='portfolio')render();}
+}
+function pkCheckLine(job){
+  const c=S.pkCheck;if(!c)return '';const x=c.jobs[job];if(!x)return '';
+  const when=String(c.at).slice(0,10);
+  if(x.err)return '<br><span style="font-size:12.5px;color:var(--red)">Bid pack check ('+when+'): '+esc(x.err)+'</span>';
+  if(!x.diff)return '<br><span style="font-size:12.5px;color:var(--green,#16a34a)">Bid pack check ('+when+'): tracker matches the packet</span>';
+  const parts=x.groups.filter(function(q){return q.diff;}).map(function(q){
+    return (PHASE_LABELS[q.phase]||q.phase)+' '+q.type+'s: '+(q.nM?q.nM+' in packet but not tracker'+(q.missing.length?' ('+q.missing.slice(0,5).join(', ')+')':'')+'; ':'')+(q.nE?q.nE+' in tracker but not packet; ':'')+(q.nC?q.nC+' with different length or hours':'');});
+  return '<br><span style="font-size:12.5px;color:var(--red)">Bid pack check ('+when+'): '+x.diff+' differences. '+esc(parts.join(' | '))+'</span>';
+}
+function pkCheckRows(job){
+  const c=S.pkCheck,o=[];if(!c||job)return o;const when=String(c.at).slice(0,10);
+  Object.keys(c.jobs).sort().forEach(function(j){const x=c.jobs[j];
+    if(x.err){o.push({job:j,label:x.err,status:'Could not check',checked:when});return;}
+    (x.groups||[]).forEach(function(q){o.push({job:j,label:(PHASE_LABELS[q.phase]||q.phase)+' '+q.type+'s',pkN:q.pkN,trN:q.trN,pkLF:q.pkLF,trLF:q.trLF,pkHrs:q.pkHrs,trHrs:q.trHrs,status:q.diff?q.diff+' differences':'Match',checked:when,
+      detail:(q.nM?'In packet, not tracker: '+q.missing.join(', ')+(q.nM>q.missing.length?' and more':'')+'. ':'')+(q.nE?'In tracker, not packet: '+q.extra.join(', ')+(q.nE>q.extra.length?' and more':'')+'. ':'')+(q.nC?'Different length or hours: '+q.changed.join(', ')+(q.nC>q.changed.length?' and more':''):'')});});});
+  return o;
+}
 function renderPackets(){
   if(!S.pk){pkAuto(true);return `<div class="loading"><div class="spinner"></div><div>Scanning the Field folder…</div></div>`;}
   const lab={synced:['In sync','var(--green,#16a34a)'],changed:['Packet changed since last sync','var(--red)'],manual:['Loaded by hand, never synced from packet','#d97706'],
     nopacket:['No field packet in the folder','#d97706'],empty:['Packet has no takeoff rows the tracker can read','var(--red)'],error:['Import failed','var(--red)']};
   let h=`<div class="sec"><h2>Field packets <span class="h2-sub">Field / Jobs</span></h2>
     <p class="note">Every job folder under Field\\Jobs\\{year} is checked for a field packet. A job with no scope yet is imported automatically. A job that already has scope is only replaced when you press Re-sync.</p>
-    <button class="btn btn-sm" onclick="S.pk=null;sessionStorage.removeItem('vhtrk_pk_scan');render()"><i class="ti ti-refresh"></i> Scan again</button></div>`;
+    <button class="btn btn-sm" onclick="S.pk=null;sessionStorage.removeItem('vhtrk_pk_scan');render()"><i class="ti ti-refresh"></i> Scan again</button> <button class="btn btn-sm" onclick="pkVerify(true)"><i class="ti ti-checks"></i> Check packets against tracker now</button>
+    <p class="note" style="margin-top:8px">${S.pkCheck?'Last full bid pack check: '+esc(String(S.pkCheck.at).slice(0,10))+(S.pkCheck.by?' by '+esc(S.pkCheck.by):'')+'.':'No bid pack check has run yet.'} It runs by itself once a week when an admin opens the tracker.${S.pkChecking?' <b>Checking now…</b>':''}</p></div>`;
   if(S.pk.err)h+=`<div class="sec" style="border-color:var(--red)">Scan failed: ${esc(S.pk.err)}</div>`;
   (S.pk.jobs||[]).forEach(j=>{const L=lab[j.status]||[j.status,'inherit'];
     h+=`<div class="sec" style="display:flex;gap:12px;align-items:center;flex-wrap:wrap"><div style="flex:1;min-width:220px"><b>${esc(j.job)}</b> ${esc(j.name)} <span class="note">${esc(j.year)}</span><br>
       <span class="note">${j.file?esc(j.file.name)+' \u00b7 edited '+String(j.file.modified).slice(0,10):'no packet file'} \u00b7 ${j.rows} scope rows</span><br>
-      <span style="font-size:12.5px;color:${L[1]}">${L[0]}${j.err?': '+esc(j.err):''}</span></div>
+      <span style="font-size:12.5px;color:${L[1]}">${L[0]}${j.err?': '+esc(j.err):''}</span>${pkCheckLine(j.job)}</div>
       ${j.file?`<button class="btn btn-sm" onclick="pkResync('${esc(j.job)}')"><i class="ti ti-refresh-dot"></i> ${j.rows?'Re-sync':'Import'}</button>`:''}</div>`;});
   if(!(S.pk.jobs||[]).length&&!S.pk.err)h+=`<div class="sec"><div class="empty">No job folders found under Field\\Jobs.</div></div>`;
   return h;

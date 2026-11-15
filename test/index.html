@@ -434,7 +434,7 @@ async function initApp(){
   }catch(e){console.warn(e);}
   initWeeks();updUC();updNav();render();updBadge();
 }
-const VH_BUILD='2026-11-15.19';
+const VH_BUILD='2026-11-15.20';
 console.log('[VH] Timesheets build',VH_BUILD);
 let __vhAuthToastAt=0;
 // interactive=true only from a user-initiated action: saves drafts, then allows the MSAL
@@ -1074,6 +1074,7 @@ async function tkFlush(loud){
     catch(e){err=(e&&e.message)||String(e);console.warn('ticket send',e);break;}
   }
   window.__tkBusy=false;tkRefreshCount();
+  if(sent)setTimeout(function(){vhTrackerRefresh(true);},3000);
   if(sent&&!err)toast(sent+' item'+(sent>1?'s':'')+' sent.','success');
   else if(err&&(loud||sent))toast((sent?sent+' sent. ':'')+'Could not send the rest yet ('+err+'). They are safe on this iPad.','error');
 }
@@ -1139,6 +1140,22 @@ function vhGo(where){
     tkOpen(iso,'','');
   }
 }
+// Keep the Excel job trackers in the Field folder current without anyone opening the tracker:
+// load the tracker page hidden in the background, where it rebuilds and saves them.
+// After a submit or a sent ticket/test it runs at most every 5 minutes; otherwise every 2 hours.
+function vhTrackerRefresh(force){
+  try{
+    if(!navigator.onLine||!auth.user)return;
+    const last=+localStorage.getItem('vhts_trk_bg')||0;
+    if(Date.now()-last<(force?5:120)*60000)return;
+    localStorage.setItem('vhts_trk_bg',String(Date.now()));
+    const old=document.getElementById('vh-trk-bg');if(old)old.remove();
+    const fr=document.createElement('iframe');fr.id='vh-trk-bg';fr.src='tracker.html?autosave=1';fr.setAttribute('aria-hidden','true');
+    fr.style.cssText='position:absolute;width:0;height:0;border:0;visibility:hidden';
+    document.body.appendChild(fr);
+    setTimeout(function(){const x=document.getElementById('vh-trk-bg');if(x)x.remove();},150000);
+  }catch(e){}
+}
 function rHome(){
   const wk=S.weeks[S.currentWeek]||{employees:[],entries:{}};
   let hrs=0;(wk.employees||[]).forEach(function(eid){hrs+=ct(wk,eid).c;});
@@ -1169,6 +1186,7 @@ function rHome(){
   h+=tile('ti-chart-bar','#0f766e','Job Tracker','Progress by run, what is done, earthwork yards and cost',"location.href='tracker.html'");
   h+='</div></div>';
   document.getElementById('mc').innerHTML=h;
+  vhTrackerRefresh(false);
   tkAll().then(function(r){const n=(r||[]).length;const el=document.getElementById('tk-pend-home');if(el&&n)el.innerHTML='<span style="color:#d97706;font-weight:700">'+n+' waiting to send</span>';}).catch(function(){});
 }
 // ===== UTILITY TESTING (build .15) ============================================
@@ -2743,6 +2761,7 @@ async function subTS(){
   // 3. Push the reporting lists and be honest about the outcome (periodic sync retries failures)
   const [prodR,jlR]=await Promise.all([submitProductionToSP(wk,true),submitJobLinesToSP(wk,true)]);
   updBadge();render();
+  setTimeout(function(){vhTrackerRefresh(true);},3000);
   const prodOk=prodR&&prodR.ok!==false;
   const jlOk=jlR&&jlR.ok!==false;
   if(jlOk&&prodOk){
