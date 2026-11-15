@@ -139,7 +139,7 @@ const FALLBACK_ADMINS=['dmorris@valentiheld.com','abewley@valentiheld.com','jroe
 const SCOPE_LIST_NAME='JobScope';
 const STATUS_LIST_NAME='TrackerStatus';
 const PHASE_LABELS={'300':'Earth — Mass','310':'Earth — Finish','400':'Storm','450':'Storm — Other','500':'Sanitary','600':'Water'};
-const VH_TRK_BUILD='2026-11-15.24';
+const VH_TRK_BUILD='2026-11-15.25';
 console.log('[VH] Job Trackers build',VH_TRK_BUILD);
 
 let mi;
@@ -592,32 +592,140 @@ function ewSheets(wb,only){
 }
 // The office copy: the same workbook saved into the Field folder so anyone can open it without the app.
 const OFFICE_FILE='Field/VH Job Tracker.xlsx';
+// ===== STYLED EXCEL TRACKERS ===================================================
+// The office and per-job workbooks are built with ExcelJS (loaded only when saving) so they
+// can carry colors, progress bars, frozen headers and filters. If the library cannot load,
+// saving falls back to the plain workbook.
+function xlLib(){
+  if(window.ExcelJS)return Promise.resolve();
+  return new Promise(function(res,rej){const s=document.createElement('script');s.src='https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js';s.onload=function(){res();};s.onerror=function(){rej(new Error('Excel styling library did not load'));};document.head.appendChild(s);});
+}
+function ewWho(x){const a=Object.keys((x&&x.who)||{});return (a.length?a:Object.keys((x&&x.who2)||{})).join(', ');}
+function xlModel(job){
+  const ok=(S.earth&&ewValid())||null;
+  const good=function(j){j=String(j||'').trim();if(job)return j===job;return !ok||!!ok[j.toUpperCase()];};
+  const rows=S.scope.filter(function(r){return good(r.JobNum);});
+  const sum={};
+  rows.forEach(function(r){const k=r.JobNum+'|'+r.Phase;const o=sum[k]=sum[k]||{job:r.JobNum,ph:r.Phase,bid:0,earn:0,items:0,done:0};
+    const pct=effPct(r.JobNum,r);o.bid+=r.BidHrs;o.earn+=r.BidHrs*pct/100;o.items++;if(pct>=100)o.done++;});
+  const util=Object.values(sum).sort(function(a,b){return a.job.localeCompare(b.job)||a.ph.localeCompare(b.ph);}).map(function(o){
+    const act=(actualByJobPhase(o.job)[o.ph])||0;
+    return {job:o.job,label:(PHASE_LABELS[o.ph]||'Phase')+' ('+o.ph+')',bid:r1(o.bid),earn:r1(o.earn),act:r1(act),rem:r1(o.bid-o.earn),vari:r1(act-o.earn),pct:o.bid?o.earn/o.bid:0,items:o.items,done:o.done};});
+  const ai={};
+  const runs=rows.slice().sort(function(a,b){return a.JobNum.localeCompare(b.JobNum)||a.Phase.localeCompare(b.Phase)||String(a.Area).localeCompare(String(b.Area))||String(a.ItemID).localeCompare(String(b.ItemID),undefined,{numeric:true});}).map(function(r){
+    if(!(r.JobNum in ai))ai[r.JobNum]=actualByItem(r.JobNum)||{};
+    const pct=effPct(r.JobNum,r);
+    return {job:r.JobNum,phase:r.Phase,area:r.Area,id:r.ItemID,type:r.ItemType,descr:r.Descr,qty:r.BidQty||null,unit:r.Unit,inst:r.BidQty?r1(r.BidQty*pct/100):null,pct:pct/100,bid:r1(r.BidHrs),earn:r1(r.BidHrs*pct/100),rem:r1(r.BidHrs*(1-pct/100)),burn:r1(ai[r.JobNum][nid(r.ItemID)]||0)};});
+  const earth=[],edaily=[];
+  if(S.earth&&S.earth.rows){
+    ewJobs().filter(function(j){return !job||j===job;}).forEach(function(j){
+      const d=ewData(j);const cfg=(S.earth.setup.jobs||{})[j]||{};
+      ['300','310'].forEach(function(ph){
+        const s=ewSummary(j,ph,d),P=EW_PH[ph];if(!s.bidQ&&!s.cost&&!s.qty)return;
+        earth.push({job:j,work:P.label,unit:P.unit,bidQ:s.bidQ||null,qty:Math.round(s.qty),pct:s.bidQ?s.qty/s.bidQ:null,bidC:s.bidC||null,cost:Math.round(s.cost),bidU:isFinite(s.bidU)?s.bidU:null,actU:isFinite(s.actU)?s.actU:null,
+          over:(isFinite(s.earned)&&s.qty)?Math.round(s.earned-s.cost):null,proj:isFinite(s.proj)?Math.round(s.proj):null});
+        Object.keys(d.ph[ph].days).sort().reverse().forEach(function(dt){const x=d.ph[ph].days[dt];
+          edaily.push({job:j,date:dt,who:ewWho(x),work:P.label,qty:x.qty?Math.round(x.qty):null,unit:P.unit,mach:r1(x.mach),lab:r1(x.lab),cost:Math.round(x.cost),per:x.qty?x.cost/x.qty:null,bidU:isFinite(s.bidU)?s.bidU:null});});
+      });
+    });
+  }
+  const daily=S.prod.filter(function(f){return good(f.Jobnumber);}).map(function(f){
+    const ph=String(f.Phase||'').trim();const q=parseFloat(String(f['Yardage_x002f_production']||'').replace(/,/g,''));
+    return {job:String(f.Jobnumber||'').trim(),date:String(f.Date||f.Created||'').slice(0,10),foreman:f.Foreman||'',work:PHASE_LABELS[ph]||ph,run:f['STR_x0020_ID']||'',qty:isFinite(q)?q:null,unit:f.Unit||'',
+      hrs:(+f['Production_x0020_Hours'])||null,crew:(+f['Crew_x0020_Size'])||null,notes:f.Notes||''};
+  }).sort(function(a,b){return b.date.localeCompare(a.date)||a.job.localeCompare(b.job);});
+  return {job:job||'',util:util,runs:runs,earth:earth,edaily:edaily,daily:daily};
+}
+async function xlBuild(X,m){
+  const NAVY='FF0F2A47',BLUE='FF185FA5',BAND='FFF3F6FA',GREEN='FF15803D',RED='FFC62828',INK='FF111827',MUTE='FF6B7280',LINE='FFD9DEE5',WHITE='FFFFFFFF';
+  const all=!m.job;
+  const wb=new X.Workbook();wb.creator='VH Job Tracker';wb.created=new Date();
+  const fill=function(c){return {type:'pattern',pattern:'solid',fgColor:{argb:c}};};
+  const title=function(ws,ncol){
+    ws.mergeCells(1,1,1,ncol);let c=ws.getCell(1,1);c.value=m.title;c.font={bold:true,size:18,color:{argb:WHITE}};c.fill=fill(NAVY);c.alignment={vertical:'middle',indent:1};ws.getRow(1).height=36;
+    ws.mergeCells(2,1,2,ncol);c=ws.getCell(2,1);c.value=m.sub;c.font={size:10,color:{argb:'FFDCE6F2'}};c.fill=fill(NAVY);c.alignment={vertical:'middle',indent:1};ws.getRow(2).height=22;};
+  const section=function(ws,r,text,ncol){ws.mergeCells(r,1,r,ncol);const c=ws.getCell(r,1);c.value=text;c.font={bold:true,size:13,color:{argb:NAVY}};c.alignment={vertical:'bottom'};c.border={bottom:{style:'medium',color:{argb:BLUE}}};ws.getRow(r).height=28;};
+  const note=function(ws,r,text,ncol){ws.mergeCells(r,1,r,ncol);const c=ws.getCell(r,1);c.value=text;c.font={italic:true,size:10,color:{argb:MUTE}};};
+  // cols: {h,key,w,fmt,align,bar,color(v,row),wrap}
+  const table=function(ws,r0,cols,rows){
+    cols.forEach(function(c,i){const cell=ws.getCell(r0,i+1);cell.value=c.h;cell.font={bold:true,size:10,color:{argb:WHITE}};cell.fill=fill(BLUE);cell.alignment={vertical:'middle',horizontal:i?'center':'left',wrapText:true,indent:i?0:1};});
+    ws.getRow(r0).height=32;
+    rows.forEach(function(row,ri){const r=r0+1+ri;cols.forEach(function(c,ci){
+      const cell=ws.getCell(r,ci+1);const v=row[c.key];const empty=(v===''||v==null||(typeof v==='number'&&!isFinite(v)));
+      cell.value=empty?null:v;if(c.fmt)cell.numFmt=c.fmt;
+      cell.alignment={vertical:'middle',horizontal:c.align||(typeof v==='number'?'right':'left'),wrapText:!!c.wrap,indent:(ci===0?1:0)};
+      const col=(!empty&&c.color)?c.color(v,row):null;
+      cell.font={size:10,color:{argb:col||INK},bold:!!col||ci===0};
+      if(ri%2)cell.fill=fill(BAND);cell.border={bottom:{style:'hair',color:{argb:LINE}}};});
+      ws.getRow(r).height=20;});
+    cols.forEach(function(c,ci){if(c.bar&&rows.length){const L=ws.getColumn(ci+1).letter;
+      ws.addConditionalFormatting({ref:L+(r0+1)+':'+L+(r0+rows.length),rules:[{type:'dataBar',priority:1,gradient:false,minLength:0,maxLength:100,cfvo:[{type:'num',value:0},{type:'num',value:1}],color:{argb:c.bar}}]});}});
+    return r0+rows.length;};
+  const widths=function(ws,cols){cols.forEach(function(c,i){const col=ws.getColumn(i+1);if(!col.width||col.width<c.w)col.width=c.w;});};
+  const overUnder=function(v){return v<0?RED:GREEN;};
+  const J=all?[{h:'Job',key:'job',w:10}]:[];
+  const cUtil=J.concat([{h:'Utility',key:'label',w:24},{h:'% Complete',key:'pct',w:16,fmt:'0%',bar:'FF63BE7B',align:'center'},{h:'Bid Hrs',key:'bid',w:12,fmt:'#,##0.0'},{h:'Earned Hrs',key:'earn',w:12,fmt:'#,##0.0'},
+    {h:'Burned Hrs',key:'act',w:12,fmt:'#,##0.0'},{h:'Remaining Hrs',key:'rem',w:13,fmt:'#,##0.0'},{h:'Burned vs Earned',key:'vari',w:13,fmt:'+#,##0.0;-#,##0.0;0',color:function(v){return v>0.5?RED:(v<-0.5?GREEN:null);}},
+    {h:'Runs / Lots',key:'items',w:11,fmt:'#,##0'},{h:'Done',key:'done',w:9,fmt:'#,##0'}]);
+  const cEarth=J.concat([{h:'Earthwork',key:'work',w:24},{h:'% Complete',key:'pct',w:16,fmt:'0%',bar:'FFE0A458',align:'center'},{h:'Bid Qty',key:'bidQ',w:12,fmt:'#,##0'},{h:'Actual Qty',key:'qty',w:12,fmt:'#,##0'},{h:'Unit',key:'unit',w:12,align:'center'},
+    {h:'Bid Cost',key:'bidC',w:13,fmt:'$#,##0'},{h:'Cost To Date',key:'cost',w:13,fmt:'$#,##0'},{h:'Bid $ / Unit',key:'bidU',w:11,fmt:'$#,##0.00'},{h:'Actual $ / Unit',key:'actU',w:11,fmt:'$#,##0.00',color:function(v,r){return r.bidU!=null?(v>r.bidU?RED:GREEN):null;}},
+    {h:'Over (-) / Under (+)',key:'over',w:14,fmt:'+$#,##0;-$#,##0;$0',color:overUnder},{h:'Projected Final',key:'proj',w:14,fmt:'$#,##0',color:function(v,r){return r.bidC?(v>r.bidC?RED:GREEN):null;}}]);
+  const cDaily=J.concat([{h:'Date',key:'date',w:24},{h:'Entered By',key:'foreman',w:16},{h:'Work',key:'work',w:14},{h:'Run / Structure',key:'run',w:14},{h:'Quantity',key:'qty',w:12,fmt:'#,##0.##'},{h:'Unit',key:'unit',w:12,align:'center'},
+    {h:'Production Hrs',key:'hrs',w:13,fmt:'#,##0.0'},{h:'Crew',key:'crew',w:9,fmt:'0'},{h:'Notes',key:'notes',w:44,wrap:true}]);
+  const cEDaily=J.concat([{h:'Date',key:'date',w:14},{h:'Entered By',key:'who',w:22},{h:'Work',key:'work',w:16},{h:'Quantity',key:'qty',w:12,fmt:'#,##0'},{h:'Unit',key:'unit',w:8,align:'center'},{h:'Machine Hrs',key:'mach',w:12,fmt:'#,##0.0'},
+    {h:'Labor Hrs',key:'lab',w:11,fmt:'#,##0.0'},{h:'Cost',key:'cost',w:12,fmt:'$#,##0'},{h:'$ / Unit',key:'per',w:11,fmt:'$#,##0.00',color:function(v,r){return r.bidU!=null?(v>r.bidU?RED:GREEN):null;}}]);
+  const cRuns=J.concat([{h:'Run / Lot',key:'id',w:16},{h:'% Done',key:'pct',w:14,fmt:'0%',bar:'FF63BE7B',align:'center'},{h:'Phase',key:'phase',w:8,align:'center'},{h:'Plan Sheet',key:'area',w:11,align:'center'},{h:'Type',key:'type',w:9,align:'center'},{h:'Description',key:'descr',w:28},
+    {h:'Bid Qty',key:'qty',w:10,fmt:'#,##0.#'},{h:'Installed',key:'inst',w:10,fmt:'#,##0.#'},{h:'Unit',key:'unit',w:7,align:'center'},{h:'Bid Hrs',key:'bid',w:10,fmt:'#,##0.0'},{h:'Earned Hrs',key:'earn',w:11,fmt:'#,##0.0'},{h:'Remaining Hrs',key:'rem',w:12,fmt:'#,##0.0'},{h:'Burned Hrs',key:'burn',w:11,fmt:'#,##0.0',color:function(v,r){return (v>r.bid+0.05&&r.bid>0)?RED:null;}}]);
+  // ---- Overview
+  const NC=11+(all?1:0);
+  let ws=wb.addWorksheet('Overview',{views:[{showGridLines:false}],pageSetup:{orientation:'landscape',fitToPage:true,fitToWidth:1,fitToHeight:0}});
+  title(ws,NC);let r=4;
+  section(ws,r,'Utilities: bid hours vs earned and burned',NC);r++;
+  if(m.util.length){r=table(ws,r,cUtil,m.util);widths(ws,cUtil);}else{note(ws,r,'No utility scope loaded for this job yet.',NC);}
+  r+=2;section(ws,r,'Earthwork: yards and cost vs bid',NC);r++;
+  if(m.earth.length){r=table(ws,r,cEarth,m.earth);widths(ws,cEarth);}else{note(ws,r,'No earthwork time, production or bid numbers yet.',NC);}
+  r+=2;section(ws,r,'Most recent daily reports',NC);r++;
+  if(m.daily.length){const cShort=cDaily.slice(0,cDaily.length-1);r=table(ws,r,cShort,m.daily.slice(0,10));widths(ws,cShort);}else{note(ws,r,'No daily production reports yet.',NC);}
+  // ---- detail sheets
+  const sheet=function(name,cols,rows,empty){
+    const w=wb.addWorksheet(name,{views:[{state:'frozen',ySplit:3,showGridLines:false}],pageSetup:{orientation:'landscape',fitToPage:true,fitToWidth:1,fitToHeight:0}});
+    cols.forEach(function(c,i){w.getColumn(i+1).width=c.w;});
+    const saveSub=m.sub;title(w,cols.length);
+    if(rows.length){table(w,3,cols,rows);w.autoFilter={from:{row:3,column:1},to:{row:3+rows.length,column:cols.length}};}
+    else{w.getCell(4,1).value=empty;w.getCell(4,1).font={italic:true,size:10,color:{argb:MUTE}};}
+    return saveSub;};
+  sheet('Runs and Lots',cRuns,m.runs,'No utility scope loaded yet.');
+  sheet('Daily Reports',cDaily,m.daily,'No daily production reports yet.');
+  sheet('Earthwork Daily',cEDaily,m.edaily,'No earthwork days yet.');
+  wb.eachSheet(function(w){w.eachRow(function(row){row.eachCell(function(c){c.font=Object.assign({name:'Calibri'},c.font||{});});});});
+  return wb;
+}
 async function saveOfficeTracker(auto){
   try{
     if(typeof XLSX==='undefined'||!S.loaded)return;
     if(auto){const last=+localStorage.getItem('vhtrk_office_saved')||0;if(Date.now()-last<30*60000)return;}
     const tok=await getToken(!auto);if(!tok)return;
     if(!S.earth&&!S.earthLoading)await loadEarth(true); // quiet: no re-render under someone typing
-    const wb=buildTrackerWb('',true);if(!wb){if(!auto)toast('Nothing to save yet','err');return;}
+    let styled=true;try{await xlLib();}catch(e){styled=false;console.warn('styled workbook unavailable',e);}
     const who=(auth.user&&auth.user.name)||'';
-    const info=XLSX.utils.aoa_to_sheet([['VH Job Tracker'],['Updated',new Date().toLocaleString()],['Updated by',who],[],['This file is written by the tracker app. Do not edit it here: changes are overwritten the next time it updates.'],['Open the tracker app to change progress or earthwork setup.']]);
-    info['!cols']=[{wch:14},{wch:60}];
-    XLSX.utils.book_append_sheet(wb,info,'About');
-    wb.SheetNames.unshift(wb.SheetNames.pop()); // About first
-    const buf=XLSX.write(wb,{type:'array',bookType:'xlsx'});
-    const url='https://graph.microsoft.com/v1.0/drives/'+EW_DRIVE+'/root:/'+OFFICE_FILE.split('/').map(encodeURIComponent).join('/')+':/content';
-    const r=await fetch(url,{method:'PUT',headers:{Authorization:'Bearer '+tok,'Content-Type':'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'},body:buf});
+    const stamp='Updated '+new Date().toLocaleString()+(who?' by '+who:'')+'  \u00b7  written by the tracker app, so edits made here are overwritten';
+    const XT='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+    const make=async function(job,title){
+      if(styled){const m=xlModel(job);if(!m.util.length&&!m.earth.length&&!m.daily.length)return null;m.title=title;m.sub=stamp;return await (await xlBuild(ExcelJS,m)).xlsx.writeBuffer();}
+      const wb=buildTrackerWb(job,true);return wb?XLSX.write(wb,{type:'array',bookType:'xlsx'}):null;};
+    const put=function(path,buf){return fetch(pkUrl(path)+':/content',{method:'PUT',headers:{Authorization:'Bearer '+tok,'Content-Type':XT},body:buf});};
+    const all=await make('','VH Job Tracker \u00b7 all jobs');
+    if(!all){if(!auto)toast('Nothing to save yet','err');return;}
+    const r=await put(OFFICE_FILE,all);
     if(r.status===423||r.status===409){if(!auto)toast('The office copy is open in Excel and locked. Close it and try again.','err');return;}
     if(!r.ok)throw new Error('save '+r.status);
-    // One workbook per job, saved in that job's own folder: utilities and earthwork for that job only.
+    // One workbook per job, saved in that job's Production folder.
     let nJob=0,nLock=0;
     try{
       const folders=(S.earth&&S.earth.folders)||await pkJobList(tok);
       for(const job of Object.keys(folders||{})){
-        const jwb=buildTrackerWb(job,true);if(!jwb)continue;
-        const ji=XLSX.utils.aoa_to_sheet([['Job Tracker: '+folders[job].split('/').pop()],['Updated',new Date().toLocaleString()],['Updated by',who],[],['This file is written by the tracker app. Do not edit it here: changes are overwritten the next time it updates.']]);
-        ji['!cols']=[{wch:14},{wch:60}];XLSX.utils.book_append_sheet(jwb,ji,'About');jwb.SheetNames.unshift(jwb.SheetNames.pop());
-        const jr=await fetch(pkUrl(PK_ROOT+'/'+folders[job]+'/'+job+' Job Tracker.xlsx')+':/content',{method:'PUT',headers:{Authorization:'Bearer '+tok,'Content-Type':'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'},body:XLSX.write(jwb,{type:'array',bookType:'xlsx'})});
+        const buf=await make(job,folders[job].split('/').pop());if(!buf)continue;
+        const jr=await put(PK_ROOT+'/'+folders[job]+'/Production/'+job+' Job Tracker.xlsx',buf);
         if(jr.ok)nJob++;else if(jr.status===423||jr.status===409)nLock++;
       }
     }catch(e){console.warn('per-job trackers',e);}
@@ -1146,7 +1254,7 @@ function ewStray(){ // job numbers with earthwork time that match no job folder,
 function ewData(job){
   const st=S.earth.setup,rates=ewRates(job);
   const out={ph:{'300':{days:{},cost:0,qty:0},'310':{days:{},cost:0,qty:0}},equip:{},unmapped:0};
-  const day=(ph,dt)=>out.ph[ph].days[dt]||(out.ph[ph].days[dt]={cost:0,qty:0,mach:0,lab:0});
+  const day=(ph,dt)=>out.ph[ph].days[dt]||(out.ph[ph].days[dt]={cost:0,qty:0,mach:0,lab:0,who:{},who2:{}});
   S.earth.rows.forEach(f=>{
     if(String(f.Jobnumber||'').trim()!==job)return;
     const ph=String(f.Phase||'').trim(),dt=String(f.WorkDate||'').slice(0,10);if(!dt)return;
@@ -1162,14 +1270,14 @@ function ewData(job){
     });
     const labH=Math.max(0,hrs-eqH);
     c+=labH*(rates[ewClass(f.EmployeeTitle)]||0);
-    const d=day(ph,dt);d.cost+=c;d.mach+=eqH;d.lab+=labH;out.ph[ph].cost+=c;
+    const d=day(ph,dt);d.cost+=c;d.mach+=eqH;d.lab+=labH;out.ph[ph].cost+=c;const sb=String(f.SubmittedBy||'').split('@')[0];if(sb)d.who2[sb]=1;
   });
   S.prod.forEach(f=>{
     if(String(f.Jobnumber||'').trim()!==job)return;
     const ph=String(f.Phase||'').trim();if(!EW_PH[ph])return;
     const q=parseFloat(String(f['Yardage_x002f_production']||'').replace(/,/g,''));if(!(q>0))return;
     const dt=String(f.Date||f.Created||'').slice(0,10);if(!dt)return;
-    day(ph,dt).qty+=q;out.ph[ph].qty+=q;
+    const dd=day(ph,dt);dd.qty+=q;out.ph[ph].qty+=q;if(f.Foreman)dd.who[String(f.Foreman).trim()]=1;
   });
   return out;
 }
@@ -1233,10 +1341,10 @@ function renderEarthJob(job){
         <div class="k"><div class="lbl">Projected final</div><div class="val${isFinite(s.proj)&&s.proj>s.bidC?' bad':''}">${isFinite(s.proj)?money(s.proj):'\u2014'}</div><div class="sub">${money2(s.perLeft)} / ${P.unit} left in budget</div></div>
       </div>`;
     if(days.length){
-      h+=`<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:13px;margin-top:8px"><tr style="text-align:right;color:var(--text3);font-size:11px"><th style="text-align:left;padding:5px 6px">Date</th><th style="padding:5px 6px">${P.unit}</th><th style="padding:5px 6px">Machine h</th><th style="padding:5px 6px">Labor h</th><th style="padding:5px 6px">Cost</th><th style="padding:5px 6px">$ / ${P.unit}</th></tr>`;
+      h+=`<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:13px;margin-top:8px"><tr style="text-align:right;color:var(--text3);font-size:11px"><th style="text-align:left;padding:5px 6px">Date</th><th style="text-align:left;padding:5px 6px">Entered by</th><th style="padding:5px 6px">${P.unit}</th><th style="padding:5px 6px">Machine h</th><th style="padding:5px 6px">Labor h</th><th style="padding:5px 6px">Cost</th><th style="padding:5px 6px">$ / ${P.unit}</th></tr>`;
       days.slice().reverse().forEach(dt=>{const x=d.ph[ph].days[dt];const u=x.qty?x.cost/x.qty:NaN;
         const flag=x.cost>0&&!x.qty?'cost with no '+P.unit+' reported':(x.qty>0&&!x.cost?P.unit+' with no time':'');
-        h+=`<tr style="text-align:right;border-top:1px solid var(--border)"><td style="text-align:left;padding:5px 6px">${dt}${flag?` <span style="color:var(--red);font-size:11px">${flag}</span>`:''}</td><td class="num" style="padding:5px 6px">${x.qty?fmt0(x.qty):'\u2014'}</td><td class="num" style="padding:5px 6px">${fmt(x.mach)}</td><td class="num" style="padding:5px 6px">${fmt(x.lab)}</td><td class="num" style="padding:5px 6px">${money(x.cost)}</td><td class="num" style="padding:5px 6px;color:${isFinite(u)&&isFinite(s.bidU)&&u>s.bidU?'var(--red)':'inherit'}">${money2(u)}</td></tr>`;});
+        h+=`<tr style="text-align:right;border-top:1px solid var(--border)"><td style="text-align:left;padding:5px 6px">${dt}${flag?` <span style="color:var(--red);font-size:11px">${flag}</span>`:''}</td><td style="text-align:left;padding:5px 6px">${esc(ewWho(x))}</td><td class="num" style="padding:5px 6px">${x.qty?fmt0(x.qty):'\u2014'}</td><td class="num" style="padding:5px 6px">${fmt(x.mach)}</td><td class="num" style="padding:5px 6px">${fmt(x.lab)}</td><td class="num" style="padding:5px 6px">${money(x.cost)}</td><td class="num" style="padding:5px 6px;color:${isFinite(u)&&isFinite(s.bidU)&&u>s.bidU?'var(--red)':'inherit'}">${money2(u)}</td></tr>`;});
       h+=`</table></div>`;
     }else h+=`<p class="note">No time or production reported yet.</p>`;
     h+=`</div>`;
