@@ -139,7 +139,7 @@ const FALLBACK_ADMINS=['dmorris@valentiheld.com','abewley@valentiheld.com','jroe
 const SCOPE_LIST_NAME='JobScope';
 const STATUS_LIST_NAME='TrackerStatus';
 const PHASE_LABELS={'300':'Earth — Mass','310':'Earth — Finish','400':'Storm','450':'Storm — Other','500':'Sanitary','600':'Water'};
-const VH_TRK_BUILD='2026-11-15.27';
+const VH_TRK_BUILD='2026-11-15.28';
 const VH_BG=/[?&]autosave=1/.test(location.search); // loaded hidden by the time app, only to refresh the Excel trackers
 console.log('[VH] Job Trackers build',VH_TRK_BUILD);
 
@@ -1475,16 +1475,55 @@ function renderEarthJob(job){
         <div class="k"><div class="lbl">Projected final</div><div class="val${isFinite(s.proj)&&s.proj>s.bidC?' bad':''}">${isFinite(s.proj)?money(s.proj):'\u2014'}</div><div class="sub">${money2(s.perLeft)} / ${P.unit} left in budget</div></div>
       </div>`;
     if(days.length){
-      h+=`<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:13px;margin-top:8px"><tr style="text-align:right;color:var(--text3);font-size:11px"><th style="text-align:left;padding:5px 6px">Date</th><th style="text-align:left;padding:5px 6px">Entered by</th><th style="padding:5px 6px">${P.unit}</th><th style="padding:5px 6px">Machine h</th><th style="padding:5px 6px">Labor h</th><th style="padding:5px 6px">Cost</th><th style="padding:5px 6px">$ / ${P.unit}</th></tr>`;
+      h+=`<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:13px;margin-top:8px"><tr style="text-align:right;color:var(--text3);font-size:11px"><th style="text-align:left;padding:5px 6px">Date <span style="font-weight:400">(tap a day for the breakdown)</span></th><th style="text-align:left;padding:5px 6px">Entered by</th><th style="padding:5px 6px">${P.unit}</th><th style="padding:5px 6px">Machine h</th><th style="padding:5px 6px">Labor h</th><th style="padding:5px 6px">Cost</th><th style="padding:5px 6px">$ / ${P.unit}</th></tr>`;
       days.slice().reverse().forEach(dt=>{const x=d.ph[ph].days[dt];const u=x.qty?x.cost/x.qty:NaN;
         const flag=x.cost>0&&!x.qty?'cost with no '+P.unit+' reported':(x.qty>0&&!x.cost?P.unit+' with no time':'');
-        h+=`<tr style="text-align:right;border-top:1px solid var(--border)"><td style="text-align:left;padding:5px 6px">${dt}${flag?` <span style="color:var(--red);font-size:11px">${flag}</span>`:''}</td><td style="text-align:left;padding:5px 6px">${esc(ewWho(x))}</td><td class="num" style="padding:5px 6px">${x.qty?fmt0(x.qty):'\u2014'}</td><td class="num" style="padding:5px 6px">${fmt(x.mach)}</td><td class="num" style="padding:5px 6px">${fmt(x.lab)}</td><td class="num" style="padding:5px 6px">${money(x.cost)}</td><td class="num" style="padding:5px 6px;color:${isFinite(u)&&isFinite(s.bidU)&&u>s.bidU?'var(--red)':'inherit'}">${money2(u)}</td></tr>`;});
+        h+=`<tr onclick="S.eday=(S.eday==='${ph}|${dt}')?'':'${ph}|${dt}';render()" style="text-align:right;border-top:1px solid var(--border);cursor:pointer"><td style="text-align:left;padding:5px 6px;white-space:nowrap"><i class="ti ti-chevron-${S.eday===ph+'|'+dt?'down':'right'}" style="font-size:12px;opacity:.6"></i> ${dt}${flag?` <span style="color:var(--red);font-size:11px">${flag}</span>`:''}</td><td style="text-align:left;padding:5px 6px">${esc(ewWho(x))}</td><td class="num" style="padding:5px 6px">${x.qty?fmt0(x.qty):'\u2014'}</td><td class="num" style="padding:5px 6px">${fmt(x.mach)}</td><td class="num" style="padding:5px 6px">${fmt(x.lab)}</td><td class="num" style="padding:5px 6px">${money(x.cost)}</td><td class="num" style="padding:5px 6px;color:${isFinite(u)&&isFinite(s.bidU)&&u>s.bidU?'var(--red)':'inherit'}">${money2(u)}</td></tr>`;if(S.eday===ph+'|'+dt)h+='<tr><td colspan="7" style="padding:2px 6px 12px">'+ewDayDetail(job,ph,dt)+'</td></tr>';});
       h+=`</table></div>`;
     }else h+=`<p class="note">No time or production reported yet.</p>`;
     h+=`</div>`;
   });
   if(!cfg.bidCY&&!cfg.bidSY&&!S.eset)h+=`<div class="sec"><p class="note">This job has no bid numbers yet.${auth.isAdmin?' Open <b>Setup</b> and enter the bid yards and bid cost from the field packet.':''}</p></div>`;
   return h;
+}
+// Tap a day on the Earthwork page: who was on which machine, how long each machine ran,
+// who worked on the ground, what each was charged at, and what was reported for production.
+function ewDayDetail(job,ph,dt){
+  const st=S.earth.setup,rates=ewRates(job),P=EW_PH[ph];
+  const lines=[];const mach={};let tot=0;
+  S.earth.rows.forEach(function(f){
+    if(String(f.Jobnumber||'').trim()!==job||String(f.Phase||'').trim()!==ph||String(f.WorkDate||'').slice(0,10)!==dt)return;
+    const hrs=+f.Hours||0;let eq=[];try{eq=JSON.parse(f.Equipment||'[]')||[];}catch(e){}
+    let eqH=0;
+    eq.forEach(function(x){const h=parseFloat(x&&x.hours)||0;if(!(h>0))return;
+      const num=String(x.number||x.id||'').trim();const cat=ewCat(num,x.description,st);
+      const rate=cat?(rates[cat]||0):0;const cost=h*rate;eqH+=h;tot+=cost;const what='#'+num+(x.description?' '+x.description:'');
+      lines.push({who:f.EmployeeName||'',role:f.EmployeeTitle||'',what:what,cat:cat===null?'NO RATE SET':(cat||'ignored'),h:h,rate:rate,cost:cost,bad:cat===null});
+      const m=mach[num]||(mach[num]={what:what,h:0,cost:0,ops:{}});m.h+=h;m.cost+=cost;if(f.EmployeeName)m.ops[f.EmployeeName]=1;});
+    const lab=Math.max(0,hrs-eqH);
+    if(lab>0){const cls=ewClass(f.EmployeeTitle);const rate=rates[cls]||0;tot+=lab*rate;lines.push({who:f.EmployeeName||'',role:f.EmployeeTitle||'',what:'No machine (on the ground)',cat:cls,h:lab,rate:rate,cost:lab*rate});}
+  });
+  lines.sort(function(a,b){return a.who.localeCompare(b.who)||b.h-a.h;});
+  const td='padding:4px 8px;border-top:1px solid var(--border)';const th='padding:4px 8px';const R=';text-align:right';
+  const hd='<tr style="color:var(--text3);font-size:11px;text-align:left">';
+  let h='<div style="background:var(--bg2);border-radius:8px;padding:10px 12px;text-align:left;cursor:default" onclick="event.stopPropagation()">';
+  const prod=S.prod.filter(function(f){return String(f.Jobnumber||'').trim()===job&&String(f.Phase||'').trim()===ph&&String(f.Date||f.Created||'').slice(0,10)===dt;});
+  h+='<div style="font-weight:700;margin-bottom:4px">Production reported</div>';
+  if(prod.length)prod.forEach(function(f){h+='<div class="note" style="margin-bottom:2px"><b>'+esc(f.Foreman||'Unknown')+'</b>: '+esc(String(f['Yardage_x002f_production']||'0'))+' '+P.unit+(f['Production_x0020_Hours']?', '+esc(String(f['Production_x0020_Hours']))+' production hrs':'')+(f['Crew_x0020_Size']?', crew of '+esc(String(f['Crew_x0020_Size'])):'')+(f.Notes?'. '+esc(f.Notes):'')+'</div>';});
+  else h+='<div class="note" style="color:var(--red)">No production report for this day.</div>';
+  const mk=Object.keys(mach).sort(function(a,b){return mach[b].h-mach[a].h;});
+  if(mk.length){
+    h+='<div style="font-weight:700;margin:10px 0 4px">Machines that ran</div><table style="width:100%;border-collapse:collapse;font-size:12.5px">'+hd+'<th style="'+th+'">Machine</th><th style="'+th+'">Operated by</th><th style="'+th+R+'">Hours</th><th style="'+th+R+'">Cost</th></tr>';
+    mk.forEach(function(n){const m=mach[n];h+='<tr><td style="'+td+'">'+esc(m.what)+'</td><td style="'+td+'">'+esc(Object.keys(m.ops).join(', '))+'</td><td class="num" style="'+td+R+'">'+fmt(m.h)+'</td><td class="num" style="'+td+R+'">'+money(m.cost)+'</td></tr>';});
+    h+='</table>';
+  }
+  h+='<div style="font-weight:700;margin:10px 0 4px">Crew</div>';
+  if(lines.length){
+    h+='<table style="width:100%;border-collapse:collapse;font-size:12.5px">'+hd+'<th style="'+th+'">Person</th><th style="'+th+'">Role</th><th style="'+th+'">On</th><th style="'+th+'">Charged as</th><th style="'+th+R+'">Hours</th><th style="'+th+R+'">Rate</th><th style="'+th+R+'">Cost</th></tr>';
+    lines.forEach(function(l){h+='<tr><td style="'+td+'">'+esc(l.who)+'</td><td style="'+td+'">'+esc(l.role)+'</td><td style="'+td+'">'+esc(l.what)+'</td><td style="'+td+(l.bad?';color:var(--red);font-weight:700':'')+'">'+esc(l.cat)+'</td><td class="num" style="'+td+R+'">'+fmt(l.h)+'</td><td class="num" style="'+td+R+'">'+(l.rate?money2(l.rate):'\u2014')+'</td><td class="num" style="'+td+R+'">'+money(l.cost)+'</td></tr>';});
+    h+='<tr><td colspan="6" style="'+td+R+';font-weight:700">Day total</td><td class="num" style="'+td+R+';font-weight:700">'+money(tot)+'</td></tr></table>';
+  }else h+='<div class="note">No timesheet hours have synced for this day yet.</div>';
+  return h+'</div>';
 }
 function ewSetupForm(job,d){
   const st=S.earth.setup,cfg=(st.jobs||{})[job]||{},rates=ewRates(job);
