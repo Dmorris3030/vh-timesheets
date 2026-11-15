@@ -139,7 +139,7 @@ const FALLBACK_ADMINS=['dmorris@valentiheld.com','abewley@valentiheld.com','jroe
 const SCOPE_LIST_NAME='JobScope';
 const STATUS_LIST_NAME='TrackerStatus';
 const PHASE_LABELS={'300':'Earth — Mass','310':'Earth — Finish','400':'Storm','450':'Storm — Other','500':'Sanitary','600':'Water'};
-const VH_TRK_BUILD='2026-11-15.19';
+const VH_TRK_BUILD='2026-11-15.20';
 console.log('[VH] Job Trackers build',VH_TRK_BUILD);
 
 let mi;
@@ -299,6 +299,7 @@ async function loadAll(){
     S._aq={}; // reported-qty cache follows Field Data
     S.loaded=true;
     setTimeout(()=>saveOfficeTracker(true),4000); // keep the office copy fresh (at most every 30 min per device)
+    setTimeout(()=>pkAuto(),1500); // pick up new job folders / new field packets
   }catch(e){console.warn('loadAll:',e);toast('Load failed: '+e.message,'err');}
 }
 async function refresh(){toast('Refreshing…');await loadAll();if(S.view==='earth'){S.earth=null;await loadEarth();}render();toast('Up to date');}
@@ -404,6 +405,7 @@ function hdr(){
   return `<div class="hdr"><div class="hdr-in">
     <div class="brand" onclick="S.view='portfolio';S.job='';render()"><div class="logo">VH</div>Job Trackers</div>
     <div class="hbtns">
+      ${auth.isAdmin?`<button class="btn btn-sm" onclick="S.view='packets';render()"><i class="ti ti-folders"></i> Packets${S.pk&&S.pk.attention?` <b style="color:var(--red)">${S.pk.attention}</b>`:''}</button>`:''}
       ${auth.isAdmin?`<button class="btn btn-sm" onclick="S.view='import';render()"><i class="ti ti-file-import"></i> Import scope</button>`:''}
       ${S.loaded&&S.scope.length?`<button class="btn btn-sm" onclick="exportXlsx(S.view==='job'?S.job:'')"><i class="ti ti-file-spreadsheet"></i> Export</button>`:''}
       ${S.loaded?`<button class="btn btn-sm" title="Save the Excel copy the office opens in the Field folder" onclick="saveOfficeTracker(false)"><i class="ti ti-cloud-upload"></i> Office copy</button>`:''}
@@ -811,10 +813,225 @@ function render(){
   else if(!S.loaded)body=`<div class="loading"><div class="spinner"></div><div>Loading scope…</div></div>`;
   else if(S.view==='import')body=renderImport();
   else if(S.view==='earth')body=renderEarth();
+  else if(S.view==='packets')body=renderPackets();
   else if(S.view==='job'&&S.job)body=renderJob();
   else body=renderPortfolio();
   document.getElementById('app').innerHTML=hdr()+`<div class="container">${body}</div>
     <div style="text-align:center;font-size:11px;color:var(--text3);opacity:.7;padding-bottom:14px">Build ${VH_TRK_BUILD}</div>`;
+}
+// ===== FIELD PACKET SYNC =======================================================
+// No more pasting run tables. The tracker reads each job's field packet straight from
+// Field/Jobs/{year}/{job folder}/ and builds the scope from the takeoff tabs:
+//   STORM T-OFF -> phase 400 runs, SAN T-OFF -> phase 500 runs, SAN LAT T-OFF -> phase 500 laterals.
+// New year folders and new job folders are found automatically. A job with NO scope yet is
+// imported on its own; a job that already has scope is only re-synced when an admin approves it,
+// because re-syncing replaces rows and progress is tied to run IDs.
+const PK_ROOT='Field/Jobs';const PK_STATE=PK_ROOT+'/scope-sync.json';
+function pkUrl(p){return 'https://graph.microsoft.com/v1.0/drives/'+EW_DRIVE+'/root:/'+p.split('/').map(encodeURIComponent).join('/');}
+function pkNum(v){if(typeof v==='number')return isFinite(v)?v:NaN;if(typeof v==='string'&&v.trim()!==''){const n=Number(v.replace(/,/g,''));return isFinite(n)?n:NaN;}return NaN;}
+function pkParseRuns(rows,job,phase){
+  const isId=v=>typeof v==='string'&&/^[A-Za-z0-9.()' ]{1,16}\s?-\s?[A-Za-z0-9.()' ]{1,16}$/.test(v.trim())&&!/total/i.test(v);
+  // ID column = whichever of the first 4 columns holds the most run IDs followed by a length
+  let idc=-1,best=0;
+  for(let c=0;c<4;c++){let n=0;rows.forEach(r=>{if(r&&isId(r[c])&&pkNum(r[c+1])>0)n++;});if(n>best){best=n;idc=c;}}
+  if(idc<0)return [];
+  const lc=idc+1;
+  // Hours column: the column k where length / (some rate column j) = k on most rows. Layout-independent,
+  // so it does not matter that storm calls it "Bid Hours" and sanitary calls it "prod".
+  const votes={};
+  rows.forEach(r=>{if(!r||!isId(r[idc]))return;const L=pkNum(r[lc]);if(!(L>0))return;
+    // length / rate = hours holds both ways round, so the pair alone cannot say which is which.
+    // In every packet the rate column sits to the LEFT of the hours column, so only j<k counts.
+    for(let j=lc+1;j<=lc+14;j++){const rate=pkNum(r[j]);if(!(rate>0))continue;
+      for(let k=j+1;k<=lc+14;k++){const h=pkNum(r[k]);if(!(h>0))continue;
+        if(Math.abs(L/rate-h)<=0.011*Math.max(1,h))votes[k]=(votes[k]||0)+1;}}});
+  const hc=Object.keys(votes).sort((a,b)=>votes[b]-votes[a])[0];
+  const out=[];const seen={};let area='';
+  rows.forEach(r=>{if(!r)return;const v=r[idc];
+    if(typeof v==='string'&&/^[A-Za-z]{0,3}\d+\.\d+[A-Za-z]?$/.test(v.trim())&&!(pkNum(r[lc])>0)){area=v.trim();return;} // plan sheet marker, e.g. C6.15
+    if(!isId(v))return;const L=pkNum(r[lc]);if(!(L>0))return;
+    let id=v.trim().replace(/\s*-\s*/,'-').toUpperCase();
+    seen[id]=(seen[id]||0)+1;if(seen[id]>1)id+=' ('+seen[id]+')'; // twin runs keep their own row
+    const size=pkNum(r[lc+1]),depth=pkNum(r[lc+2]);
+    const h=hc!=null?pkNum(r[+hc]):NaN;
+    out.push({Title:id,JobNum:job,Phase:phase,ItemType:'run',Descr:(size>0?size+'" pipe':'')+(depth>0?(size>0?', ':'')+depth+' ft deep':''),
+      BidHrs:h>0?Math.round(h*100)/100:0,BidQty:Math.round(L*10)/10,Unit:'LF',Area:area});});
+  return out;
+}
+function pkParseLats(rows,job){
+  let hr=-1,cols=[];
+  for(let i=0;i<Math.min(rows.length,40);i++){const r=rows[i]||[];const c=[];r.forEach((v,ci)=>{if(typeof v==='string'&&/^lot\s*#?$/i.test(v.trim()))c.push(ci);});if(c.length){hr=i;cols=c;break;}}
+  if(hr<0)return [];
+  let rate=NaN;
+  rows.forEach(r=>{if(!r||isFinite(rate))return;r.forEach((v,ci)=>{if(isFinite(rate))return;if(typeof v==='string'&&/bid\s*prod/i.test(v)){for(let k=ci+1;k<ci+6;k++){const n=pkNum(r[k]);if(n>0){rate=n;break;}}}});});
+  const out=[];const seen={};
+  cols.forEach(c=>{
+    const h=rows[hr]||[];let rc=c+1;for(let k=c+1;k<=c+3;k++){if(typeof h[k]==='string'&&/pipe\s*run/i.test(h[k])){rc=k;break;}}
+    for(let i=hr+1;i<rows.length;i++){const r=rows[i]||[];const lot=r[c];
+      const ls=(typeof lot==='number')?String(lot):(typeof lot==='string'?lot.trim():'');
+      if(!/^\d+[A-Za-z]?$/.test(ls))continue;const L=pkNum(r[rc]);if(!(L>0))continue;
+      if(seen[ls])continue;seen[ls]=1;
+      out.push({Title:ls,JobNum:job,Phase:'500',ItemType:'lateral',Descr:'Lateral, lot '+ls,BidHrs:rate>0?Math.round(L/rate*100)/100:0,BidQty:L,Unit:'LF',Area:''});}
+  });
+  return out;
+}
+// Earthwork bid numbers and the rate sheet, read from the same packet
+function pkParseEarth(wb){
+  const sheet=re=>{const n=wb.SheetNames.find(x=>re.test(x));return n?XLSX.utils.sheet_to_json(wb.Sheets[n],{header:1,raw:true,defval:null}):null;};
+  const out={};const m=sheet(/mass\s*earthwork\s*tracker/i);
+  if(m){const costs=[];
+    m.forEach(r=>{if(!r)return;r.forEach((v,ci)=>{if(typeof v!=='string')return;const s=v.toUpperCase();
+      const left=()=>{for(let k=ci-1;k>=0&&k>=ci-3;k--){const n=pkNum(r[k]);if(n>0)return n;}return 0;};
+      const right=()=>{for(let k=ci+1;k<=ci+3;k++){const n=pkNum(r[k]);if(n>0)return n;}return 0;};
+      if(/^BID YARDAGE/.test(s))out.bidCY=Math.round(left());
+      else if(/^BID SY/.test(s))out.bidSY=Math.round(left());
+      else if(/^BID COST:?$/.test(s.trim()))costs.push(right());});});
+    if(costs[0])out.bidCost=Math.round(costs[0]);if(costs[1])out.bidCostFG=Math.round(costs[1]);}
+  const rs=sheet(/rate\s*sheet/i);
+  if(rs){const rates={};const norm=x=>String(x||'').toUpperCase().replace(/\s+/g,' ').trim();
+    const all=EW_MACH.concat(EW_LAB);
+    rs.forEach(r=>{if(!r)return;const n=norm(r[0]),v=pkNum(r[1]);if(!n||!(v>0))return;const hit=all.find(c=>norm(c)===n);if(hit)rates[hit]=Math.round(v*100)/100;});
+    if(Object.keys(rates).length)out.rates=rates;}
+  return out;
+}
+function pkParse(wb,job){
+  const sheet=re=>{const n=wb.SheetNames.find(x=>re.test(x.trim()));return n?XLSX.utils.sheet_to_json(wb.Sheets[n],{header:1,raw:true,defval:null}):null;};
+  const st=sheet(/^STORM\s*T-?\s*OFF/i),sa=sheet(/^SAN(ITARY)?\s*T-?\s*OFF/i),sl=sheet(/^SAN(ITARY)?\s*LAT.*T-?\s*OFF/i);
+  let rows=[];
+  if(st)rows=rows.concat(pkParseRuns(st,job,'400'));
+  if(sa)rows=rows.concat(pkParseRuns(sa,job,'500'));
+  if(sl)rows=rows.concat(pkParseLats(sl,job));
+  return {rows,earth:pkParseEarth(wb)};
+}
+function pkTotals(rows){const o={};rows.forEach(r=>{const k=r.Phase+'|'+r.ItemType;const x=o[k]=o[k]||{phase:r.Phase,type:r.ItemType,n:0,lf:0,hrs:0};x.n++;x.lf+=r.BidQty;x.hrs+=r.BidHrs;});return Object.values(o);}
+async function pkScan(tok){
+  const H={Authorization:'Bearer '+tok};
+  const kids=async p=>{const r=await fetch(pkUrl(p)+':/children?$select=name,id,folder,file,lastModifiedDateTime&$top=400',{headers:H});if(!r.ok)throw new Error('folder read '+r.status+' ('+p+')');return (await r.json()).value||[];};
+  const years=(await kids(PK_ROOT)).filter(k=>k.folder&&/^\d{4}$/.test(k.name));
+  const jobs=[];
+  for(const y of years){
+    const jf=(await kids(PK_ROOT+'/'+y.name)).filter(k=>k.folder&&/^\d{3,5}[A-Za-z]?(?![0-9A-Za-z])/.test(k.name));
+    const found=await Promise.all(jf.map(async f=>{
+      const files=(await kids(PK_ROOT+'/'+y.name+'/'+f.name)).filter(k=>k.file&&/\.(xlsx|xlsm)$/i.test(k.name)&&/packet/i.test(k.name)&&!/^~\$/.test(k.name));
+      files.sort((a,b)=>(/field\s*packet/i.test(b.name)-/field\s*packet/i.test(a.name))||String(b.lastModifiedDateTime).localeCompare(String(a.lastModifiedDateTime)));
+      const job=f.name.match(/^\d{3,5}[A-Za-z]?/)[0];
+      return {job,year:y.name,folder:f.name,name:f.name.replace(/^\d{3,5}[A-Za-z]?\s*[-_ ]\s*/,''),file:files[0]?{name:files[0].name,id:files[0].id,modified:files[0].lastModifiedDateTime}:null};
+    }));
+    jobs.push(...found);
+  }
+  return jobs.sort((a,b)=>a.job.localeCompare(b.job));
+}
+async function pkState(tok){const r=await fetch(pkUrl(PK_STATE)+':/content',{headers:{Authorization:'Bearer '+tok}});if(r.status===404)return{jobs:{}};if(!r.ok)throw new Error('sync record '+r.status);const d=await r.json();return d&&d.jobs?d:{jobs:{}};}
+async function pkStateSave(tok,job,rec){ // read-merge-write so two admins never erase each other's record
+  for(let a=0;a<3;a++){
+    const H={Authorization:'Bearer '+tok};let etag=null,cur={jobs:{}};
+    const mr=await fetch(pkUrl(PK_STATE),{headers:H});
+    if(mr.status!==404){if(!mr.ok)return;etag=(await mr.json()).eTag;const cr=await fetch(pkUrl(PK_STATE)+':/content',{headers:H});if(!cr.ok)return;const d=await cr.json();if(d&&d.jobs)cur=d;}
+    cur.jobs[job]=rec;const PH={Authorization:'Bearer '+tok,'Content-Type':'application/json'};if(etag)PH['If-Match']=etag;
+    const pr=await fetch(pkUrl(PK_STATE)+':/content',{method:'PUT',headers:PH,body:JSON.stringify(cur)});
+    if(pr.status===412)continue;return;
+  }
+}
+async function pkLoadPacket(tok,j){
+  const r=await fetch('https://graph.microsoft.com/v1.0/drives/'+EW_DRIVE+'/items/'+j.file.id+'/content',{headers:{Authorization:'Bearer '+tok}});
+  if(!r.ok)throw new Error('packet download '+r.status);
+  const wb=XLSX.read(await r.arrayBuffer(),{type:'array'});
+  return pkParse(wb,j.job);
+}
+async function pkWrite(tok,j,parsed){
+  const rows=parsed.rows;
+  const victims=S.scope.filter(r=>r.JobNum===j.job&&rows.some(n=>n.Phase===r.Phase&&n.ItemType===r.ItemType));
+  for(const b of chunk(victims,20))await gBatch(tok,b.map((v,i)=>({id:String(i+1),method:'DELETE',url:`/sites/${FD_SITE}/lists/${S.lists.scope}/items/${v.spId}`,headers:{'If-Match':'*'}})));
+  for(const b of chunk(rows,20)){
+    const resp=await gBatch(tok,b.map((row,i)=>({id:String(i+1),method:'POST',url:`/sites/${FD_SITE}/lists/${S.lists.scope}/items`,headers:{'Content-Type':'application/json'},body:{fields:packFields('scope',row)}})));
+    const bad=resp.filter(r=>r.status>=400);if(bad.length)throw new Error(bad.length+' rows failed (HTTP '+bad[0].status+')');
+  }
+  await pkStateSave(tok,j.job,{file:j.file.name,modified:j.file.modified,syncedAt:new Date().toISOString(),by:(auth.user&&auth.user.name)||'',rows:rows.length});
+  // earthwork setup: fill it in from the packet only if nobody has set this job up by hand
+  try{
+    const e=parsed.earth||{};
+    if(e.bidCY||e.bidSY){
+      const H={Authorization:'Bearer '+tok};let etag=null,cur={rates:{},eqMap:{},jobs:{}};
+      const mr=await fetch(ewUrl(),{headers:H});
+      if(mr.status!==404&&mr.ok){etag=(await mr.json()).eTag;const cr=await fetch(ewUrl()+':/content',{headers:H});if(cr.ok){const d=await cr.json();if(d&&typeof d==='object')cur=Object.assign(cur,d);}}
+      cur.jobs=cur.jobs||{};
+      if(!cur.jobs[j.job]){
+        cur.jobs[j.job]={name:j.name,bidCY:e.bidCY||0,bidCost:e.bidCost||0,bidSY:e.bidSY||0,bidCostFG:e.bidCostFG||0,rates:e.rates||{},fromPacket:true};
+        const PH={Authorization:'Bearer '+tok,'Content-Type':'application/json'};if(etag)PH['If-Match']=etag;
+        await fetch(ewUrl()+':/content',{method:'PUT',headers:PH,body:JSON.stringify(cur)});
+        if(S.earth)S.earth.setup=cur;
+      }
+    }
+  }catch(e){console.warn('earth setup from packet',e);}
+}
+// Runs by itself for admins: finds new jobs and imports any job that has a packet but no scope yet.
+async function pkAuto(force){
+  if(!auth.isAdmin||S.pkBusy||!S.lists||typeof XLSX==='undefined')return;
+  if(!force){const last=+sessionStorage.getItem('vhtrk_pk_scan')||0;if(Date.now()-last<10*60000&&S.pk)return;}
+  S.pkBusy=true;
+  try{
+    const tok=await getToken();if(!tok)return;
+    const [jobs,state]=await Promise.all([pkScan(tok),pkState(tok)]);
+    sessionStorage.setItem('vhtrk_pk_scan',String(Date.now()));
+    const have={};S.scope.forEach(r=>{have[r.JobNum]=(have[r.JobNum]||0)+1;});
+    const imported=[],failed=[];
+    for(const j of jobs){
+      const rec=state.jobs[j.job];
+      j.rows=have[j.job]||0;
+      if(!j.file){j.status='nopacket';continue;}
+      if(!j.rows){
+        if(rec&&rec.modified===j.file.modified&&rec.rows===0){j.status='empty';continue;} // already tried this exact file: nothing usable in it
+        try{
+          const parsed=await pkLoadPacket(tok,j);
+          if(!parsed.rows.length){await pkStateSave(tok,j.job,{file:j.file.name,modified:j.file.modified,syncedAt:new Date().toISOString(),rows:0});j.status='empty';continue;}
+          await pkWrite(tok,j,parsed);imported.push(j.job);j.status='synced';j.rows=parsed.rows.length;
+        }catch(e){console.warn('packet sync',j.job,e);failed.push(j.job);j.status='error';j.err=e.message;}
+      }else if(!rec)j.status='manual';                       // scope was loaded by hand before packet sync existed
+      else if(rec.modified!==j.file.modified)j.status='changed'; // packet edited since the last sync
+      else j.status='synced';
+    }
+    S.pk={jobs,at:Date.now(),attention:jobs.filter(j=>j.status==='changed'||j.status==='error'||j.status==='empty').length};
+    if(imported.length){await loadAll();toast('Scope imported from field packets: '+imported.join(', '));}
+    if(failed.length)toast('Packet import failed for '+failed.join(', ')+'. Open Packets for details.','err');
+    render();
+  }catch(e){console.warn('pkAuto',e);S.pk=S.pk||{jobs:[],err:e.message,attention:0};if(force)toast('Packet scan failed: '+e.message,'err');}
+  finally{S.pkBusy=false;}
+}
+async function pkResync(job){
+  const j=((S.pk&&S.pk.jobs)||[]).find(x=>x.job===job);if(!j||!j.file||S.pkBusy)return;
+  S.pkBusy=true;toast('Reading '+j.file.name+'…');
+  try{
+    const tok=await getToken(true);if(!tok)return;
+    const parsed=await pkLoadPacket(tok,j);
+    if(!parsed.rows.length){toast('No storm, sanitary or lateral takeoff rows found in that packet.','err');return;}
+    const newIds={};parsed.rows.forEach(r=>{newIds[r.Phase+'|'+r.ItemType+'|'+nid(r.Title)]=1;});
+    const old=S.scope.filter(r=>r.JobNum===job&&parsed.rows.some(n=>n.Phase===r.Phase&&n.ItemType===r.ItemType));
+    const gone=old.filter(r=>!newIds[r.Phase+'|'+r.ItemType+'|'+nid(r.ItemID)]);
+    const lost=gone.filter(r=>pctOf(job,r.ItemID)>0);
+    const tot=pkTotals(parsed.rows).map(x=>`${PHASE_LABELS[x.phase]||x.phase} ${x.type}s: ${x.n} items, ${fmt0(x.lf)} LF, ${fmt(x.hrs)} bid hrs`).join('\n');
+    const msg=`Re-sync job ${job} from "${j.file.name}"?\n\n${tot}\n\n`+
+      (old.length?`${old.length} existing rows will be replaced. ${gone.length} of them are not in the packet under the same ID`+(lost.length?`, and ${lost.length} of those have progress recorded that will no longer show (${lost.slice(0,6).map(r=>r.ItemID).join(', ')}${lost.length>6?'…':''}).`:'.'):'No existing rows are affected.');
+    if(!confirm(msg))return;
+    await pkWrite(tok,j,parsed);await loadAll();S.pk=null;sessionStorage.removeItem('vhtrk_pk_scan');
+    toast(parsed.rows.length+' scope rows loaded for '+job);pkAuto(true);
+  }catch(e){toast('Re-sync failed: '+e.message,'err');}
+  finally{S.pkBusy=false;render();}
+}
+function renderPackets(){
+  if(!S.pk){pkAuto(true);return `<div class="loading"><div class="spinner"></div><div>Scanning the Field folder…</div></div>`;}
+  const lab={synced:['In sync','var(--green,#16a34a)'],changed:['Packet changed since last sync','var(--red)'],manual:['Loaded by hand, never synced from packet','#d97706'],
+    nopacket:['No field packet in the folder','#d97706'],empty:['Packet has no takeoff rows the tracker can read','var(--red)'],error:['Import failed','var(--red)']};
+  let h=`<div class="sec"><h2>Field packets <span class="h2-sub">Field / Jobs</span></h2>
+    <p class="note">Every job folder under Field\\Jobs\\{year} is checked for a field packet. A job with no scope yet is imported automatically. A job that already has scope is only replaced when you press Re-sync.</p>
+    <button class="btn btn-sm" onclick="S.pk=null;sessionStorage.removeItem('vhtrk_pk_scan');render()"><i class="ti ti-refresh"></i> Scan again</button></div>`;
+  if(S.pk.err)h+=`<div class="sec" style="border-color:var(--red)">Scan failed: ${esc(S.pk.err)}</div>`;
+  (S.pk.jobs||[]).forEach(j=>{const L=lab[j.status]||[j.status,'inherit'];
+    h+=`<div class="sec" style="display:flex;gap:12px;align-items:center;flex-wrap:wrap"><div style="flex:1;min-width:220px"><b>${esc(j.job)}</b> ${esc(j.name)} <span class="note">${esc(j.year)}</span><br>
+      <span class="note">${j.file?esc(j.file.name)+' \u00b7 edited '+String(j.file.modified).slice(0,10):'no packet file'} \u00b7 ${j.rows} scope rows</span><br>
+      <span style="font-size:12.5px;color:${L[1]}">${L[0]}${j.err?': '+esc(j.err):''}</span></div>
+      ${j.file?`<button class="btn btn-sm" onclick="pkResync('${esc(j.job)}')"><i class="ti ti-refresh-dot"></i> ${j.rows?'Re-sync':'Import'}</button>`:''}</div>`;});
+  if(!(S.pk.jobs||[]).length&&!S.pk.err)h+=`<div class="sec"><div class="empty">No job folders found under Field\\Jobs.</div></div>`;
+  return h;
 }
 // ===== EARTHWORK YARDAGE & COST ==============================================
 // Mirrors the field packet's "Dirt Job Cost Tracker", but nobody types the daily lines:
