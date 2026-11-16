@@ -434,7 +434,7 @@ async function initApp(){
   }catch(e){console.warn(e);}
   initWeeks();updUC();updNav();render();updBadge();
 }
-const VH_BUILD='2026-11-15.22';
+const VH_BUILD='2026-11-16.23';
 console.log('[VH] Timesheets build',VH_BUILD);
 let __vhAuthToastAt=0;
 // interactive=true only from a user-initiated action: saves drafts, then allows the MSAL
@@ -3148,6 +3148,7 @@ async function subTS(){
   const prev={status:wk.status,submittedBy:wk.submittedBy,submittedAt:wk.submittedAt,returnedAt:wk.returnedAt,assignedManager:wk.assignedManager};
   wk.status='submitted';wk.submittedBy=by;wk.submittedAt=new Date().toISOString();wk.comments=document.getElementById('sn').value;wk.returnedAt='';
   wk.assignedManager=mgrs[0].email; // Store which manager this is assigned to
+  wk.submitterName=(auth.user&&auth.user.name)||by; // the foreman's account name: names the folder their timesheet files go in
   // 1. The manager-facing submission is the source of truth — it must land or nothing counts.
   const okSP=await saveSP();
   if(!okSP){
@@ -3159,6 +3160,7 @@ async function subTS(){
   // 2. Submission landed: archive a sent copy on this device, THEN clear the draft.
   //    If the submission is ever lost server-side, the foreman restores it in two taps.
   vhArchiveSent(S.currentWeek,wk);
+  try{tsfSave(JSON.parse(JSON.stringify(wk)),S.currentWeek,'');}catch(e){}
   try{const drafts=JSON.parse(localStorage.getItem('vhts_drafts')||'{}');delete drafts[S.currentWeek];localStorage.setItem('vhts_drafts',JSON.stringify(drafts));}catch(e){}
   // 3. Push the reporting lists and be honest about the outcome (periodic sync retries failures)
   const [prodR,jlR]=await Promise.all([submitProductionToSP(wk,true),submitJobLinesToSP(wk,true)]);
@@ -3207,6 +3209,7 @@ function rApproval(){
       });
     }
   }
+  setTimeout(tsfCatchUp,800); // write any timesheet files that are missing or out of date
   const sent=vhSentList();const sentKeys=Object.keys(sent).sort().reverse();
   if(sentKeys.length){
     h+=`<div style="font-size:13px;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:.4px;margin:24px 0 10px">Sent copies on this device</div>`;
@@ -3307,15 +3310,119 @@ function vwWkK(key){
   h+=`</div>`;
   showM(h,'vwm');
 }
+// ===== TIMESHEET FILES (build .23) ============================================
+// Every submitted timesheet is also saved as an Excel file the office can open, by foreman:
+//   Field/Timesheets/{foreman}/Week ending {date} - {foreman}.xlsx
+// It is written when the foreman submits and again when a manager approves or returns it, so
+// the file always carries the current status. The Approvals page quietly catches up any that
+// were missed (no signal at the time, or timesheets from before this was added).
+function vhXlLib(){
+  if(window.ExcelJS)return Promise.resolve();
+  return new Promise(function(res,rej){const s=document.createElement('script');s.src='https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js';s.onload=function(){res();};s.onerror=function(){rej(new Error('Excel library did not load'));};document.head.appendChild(s);});
+}
+function tsfForeman(wk,key){
+  if(wk&&wk.submitterName)return tkClean(wk.submitterName);
+  const em=(key&&key.indexOf(':')>0)?String(key.split(':')[1]||'').toLowerCase():String((auth.user&&auth.user.email)||'').toLowerCase();
+  // an older timesheet from the same person may not carry the name: borrow it from one that does
+  if(em){const k2=Object.keys(S.weeks).find(function(k){return k.indexOf(':')>0&&String(k.split(':')[1]||'').toLowerCase()===em&&S.weeks[k]&&S.weeks[k].submitterName;});if(k2)return tkClean(S.weeks[k2].submitterName);}
+  return tkClean(em.split('@')[0]||(wk&&wk.submittedBy)||'Unknown');
+}
+function tsfClock(x){const m=/^(\d{1,2}):(\d{2})$/.exec(String(x||''));if(!m)return String(x||'');let h=+m[1];const ap=h>=12?'PM':'AM';h=h%12||12;return h+':'+m[2]+' '+ap;}
+async function tsfBuild(X,wk,iso,who,statusLine){
+  const NAVY='FF0F2A47',BLUE='FF185FA5',BAND='FFF3F6FA',INK='FF111827',MUTE='FF6B7280',LINE='FFD9DEE5',WHITE='FFFFFFFF',RED='FFC62828';
+  const fill=function(c){return {type:'pattern',pattern:'solid',fgColor:{argb:c}};};
+  const dates=wd(iso);const wb=new X.Workbook();wb.creator='VH Timesheets';wb.created=new Date();
+  const banner=function(ws,ncol,t){
+    ws.mergeCells(1,1,1,ncol);let c=ws.getCell(1,1);c.value=t;c.font={bold:true,size:18,color:{argb:WHITE}};c.fill=fill(NAVY);c.alignment={vertical:'middle',indent:1};ws.getRow(1).height=36;
+    ws.mergeCells(2,1,2,ncol);c=ws.getCell(2,1);c.value=statusLine;c.font={size:10,color:{argb:'FFDCE6F2'}};c.fill=fill(NAVY);c.alignment={vertical:'middle',indent:1};ws.getRow(2).height=22;};
+  const head=function(ws,r,labels){labels.forEach(function(l,i){const c=ws.getCell(r,i+1);c.value=l;c.font={bold:true,size:10,color:{argb:WHITE}};c.fill=fill(BLUE);c.alignment={vertical:'middle',horizontal:i<2?'left':'center',wrapText:true,indent:i?0:1};});ws.getRow(r).height=32;};
+  const body=function(ws,r,vals,opt){vals.forEach(function(v,i){const c=ws.getCell(r,i+1);c.value=(v===''||v==null)?null:v;
+    c.font={size:10,bold:!!(opt&&opt.bold)||i===0,color:{argb:(opt&&opt.red&&opt.red[i])?RED:INK}};
+    c.alignment={vertical:'middle',horizontal:typeof v==='number'?'right':'left',indent:i===0?1:0,wrapText:!!(opt&&opt.wrap&&opt.wrap[i])};
+    if(typeof v==='number')c.numFmt='0.##';
+    if(opt&&opt.band)c.fill=fill(BAND);c.border=(opt&&opt.top)?{top:{style:'thin',color:{argb:NAVY}}}:{bottom:{style:'hair',color:{argb:LINE}}};});ws.getRow(r).height=20;};
+  const title='Timesheet \u00b7 '+who+' \u00b7 week ending '+fs(dates[dates.length-1])+'/'+String(iso).slice(0,4);
+  // ---- sheet 1: the week at a glance
+  const ws=wb.addWorksheet('Timesheet',{views:[{showGridLines:false}],pageSetup:{orientation:'landscape',fitToPage:true,fitToWidth:1,fitToHeight:0}});
+  [26,18,9,9,9,9,9,9,9,10,10].forEach(function(w,i){ws.getColumn(i+1).width=w;});
+  banner(ws,11,title);
+  head(ws,4,['Employee','Title'].concat(dates.map(function(dt,i){return DAYS[i]+' '+fs(dt);}),['Total','Overtime']));
+  const dayTot=dates.map(function(){return 0;});let grand=0,r=5;const lines=[];const byJob={};
+  (wk.employees||[]).forEach(function(eid,ei){
+    const emp=empById(eid);let tot=0;
+    const cells=dates.map(function(dt,di){let h=0;
+      getJobLines(wk,eid,dt).forEach(function(ln){const c=calcJobHours(ln);if(!(c.total>0))return;h+=c.total;
+        const eq=(ln.equipment||[]).filter(function(x){return parseFloat(x&&x.hours)>0;}).map(function(x){return '#'+(x.number||x.id||'')+' ('+x.hours+' h)';}).join(', ');
+        lines.push([dt,DAYS[di],emp.name,emp.title||'',String(ln.job||''),String(ln.phase||''),tsfClock(ln.startTime),tsfClock(ln.stopTime),(ln.lunch===''||ln.lunch==null)?'':ln.lunch+' h',c.total,eq,ln.notes||'']);
+        const jk=String(ln.job||'(no job)')+'|'+String(ln.phase||'');const j=byJob[jk]=byJob[jk]||{job:String(ln.job||'(no job)'),phase:String(ln.phase||''),hrs:0,who:{}};j.hrs+=c.total;j.who[emp.name]=1;});
+      dayTot[di]+=h;tot+=h;return h>0?h:'';});
+    grand+=tot;const ot=tot>40?tot-40:'';
+    const red={};if(ot!=='')red[10]=1;
+    body(ws,r,[emp.name,emp.title||''].concat(cells,[tot,ot]),{band:ei%2===1,red:red});r++;
+  });
+  body(ws,r,['Crew total',''].concat(dayTot.map(function(h){return h>0?h:'';}),[grand,'']),{bold:true,top:true});r+=2;
+  if(wk.comments&&String(wk.comments).trim()){ws.mergeCells(r,1,r,11);const c=ws.getCell(r,1);c.value='Notes: '+String(wk.comments).trim();c.font={size:10,color:{argb:MUTE}};c.alignment={wrapText:true,vertical:'top'};ws.getRow(r).height=Math.min(120,18*(1+Math.floor(String(wk.comments).length/120)));}
+  // ---- sheet 2: every line as entered
+  const wd2=wb.addWorksheet('Detail',{views:[{state:'frozen',ySplit:3,showGridLines:false}],pageSetup:{orientation:'landscape',fitToPage:true,fitToWidth:1,fitToHeight:0}});
+  [12,7,24,16,9,8,10,10,8,8,30,40].forEach(function(w,i){wd2.getColumn(i+1).width=w;});
+  banner(wd2,12,title);head(wd2,3,['Date','Day','Employee','Title','Job','Phase','Start','Stop','Lunch','Hours','Equipment','Notes']);
+  lines.sort(function(a,b){return a[0].localeCompare(b[0])||a[2].localeCompare(b[2]);});
+  lines.forEach(function(l,i){body(wd2,4+i,l,{band:i%2===1,wrap:{10:1,11:1}});});
+  if(lines.length)wd2.autoFilter={from:{row:3,column:1},to:{row:3+lines.length,column:12}};
+  // ---- sheet 3: hours by job and phase
+  const wj=wb.addWorksheet('By Job',{views:[{showGridLines:false}]});
+  [14,10,12,60].forEach(function(w,i){wj.getColumn(i+1).width=w;});
+  banner(wj,4,title);head(wj,4,['Job','Phase','Hours','People']);
+  Object.keys(byJob).sort().forEach(function(k,i){const j=byJob[k];body(wj,5+i,[j.job,j.phase,j.hrs,Object.keys(j.who).join(', ')],{band:i%2===1,wrap:{3:1}});});
+  wb.eachSheet(function(w){w.eachRow(function(row){row.eachCell(function(c){c.font=Object.assign({name:'Calibri'},c.font||{});});});});
+  return wb;
+}
+async function tsfSave(wk,iso,key){
+  try{
+    if(!navigator.onLine||!wk||!wk.status||wk.status==='draft')return false;
+    const tok=await getTok();if(!tok)return false;
+    await vhXlLib();
+    const who=tsfForeman(wk,key);
+    const dstr=function(x){const d=x?new Date(x):new Date();return (d.getMonth()+1)+'/'+d.getDate()+'/'+d.getFullYear();};
+    const st=wk.status==='approved'?('APPROVED by '+(wk.approvedBy||'manager')+' on '+dstr(wk.approvedAt))
+      :(wk.status==='returned'?('RETURNED to the foreman on '+dstr(wk.returnedAt)+'  \u00b7  not final')
+      :('Submitted '+dstr(wk.submittedAt)+'  \u00b7  waiting for approval'));
+    const wb=await tsfBuild(ExcelJS,wk,iso,who,st);
+    const buf=await wb.xlsx.writeBuffer();
+    window.__tsfDirs=window.__tsfDirs||{};
+    if(!window.__tsfDirs[who]){await tkEnsureFolder(tok,'Field','Timesheets');await tkEnsureFolder(tok,'Field/Timesheets',who);window.__tsfDirs[who]=1;}
+    const r=await fetch(tkUrl('Field/Timesheets/'+who+'/Week ending '+iso+' - '+who+'.xlsx')+':/content',{method:'PUT',headers:{Authorization:'Bearer '+tok,'Content-Type':'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'},body:buf});
+    if(!r.ok)console.warn('timesheet file',r.status);
+    return r.ok;
+  }catch(e){console.warn('timesheet file',e);return false;}
+}
+// Managers' devices hold every timesheet sent to them: write any file that is missing or stale.
+async function tsfCatchUp(){
+  if(window.__tsfBusy||!navigator.onLine)return;window.__tsfBusy=true;
+  try{
+    let done={};try{done=JSON.parse(localStorage.getItem('vhts_tsf_done')||'{}');}catch(e){}
+    let n=0;
+    for(const key of Object.keys(S.weeks)){
+      if(key.indexOf(':')<0)continue;const wk=S.weeks[key];if(!wk||!wk.status||wk.status==='draft')continue;
+      const sig=wk.status+'|'+(wk.approvedAt||'')+'|'+(wk.returnedAt||'')+'|'+(wk.submittedAt||'');
+      if(done[key]===sig)continue;
+      const ok=await tsfSave(wk,key.split(':')[0],key);
+      if(!ok)break;
+      done[key]=sig;try{localStorage.setItem('vhts_tsf_done',JSON.stringify(done));}catch(e){}
+      if(++n>=8)break;
+    }
+  }catch(e){console.warn('tsfCatchUp',e);}
+  finally{window.__tsfBusy=false;}
+}
 function appWkK(key){const wk=S.weeks[key];if(!wk)return;const n=auth.user?auth.user.name:prompt('Your name:');if(!n)return;
   wk.status='approved';wk.approvedBy=n;wk.approvedAt=new Date().toISOString();
-  saveAllSubmittedSP();updBadge();render();toast('Approved!','success');}
+  saveAllSubmittedSP();updBadge();render();toast('Approved!','success');setTimeout(tsfCatchUp,1500);}
 function vhRvJump(eid){const c=document.getElementById('rv-'+eid);if(!c)return;c.scrollIntoView({behavior:'smooth',block:'start'});c.style.transition='box-shadow .3s';c.style.boxShadow='0 0 0 3px #f59e0b';setTimeout(function(){c.style.boxShadow='';},2000);}
 function retWkK(key,pre){const wk=S.weeks[key];if(!wk)return;
   let seed='';if(pre){try{seed=vhCheckWeek(wk,key.split(':')[0],true,key).slice(0,6).map(function(f){return f.who+(f.day?' '+f.day:'')+': '+f.msg;}).join(' | ');}catch(e){}}
   const r=prompt('Reason for returning (edit as needed):',seed);if(r===null)return;
   wk.status='returned';wk.returnedAt=new Date().toISOString();if(r)wk.comments=(wk.comments||'')+'\nReturned: '+r;
-  saveAllSubmittedSP();updBadge();render();toast('Returned to foreman — they\'ll land on it next time they open the app.','success');}
+  saveAllSubmittedSP();updBadge();render();toast('Returned to foreman — they\'ll land on it next time they open the app.','success');setTimeout(tsfCatchUp,1500);}
 function adminDeleteSubmissionK(key){
   if(!confirm('Delete this timesheet from SharePoint? This cannot be undone.'))return;
   const p=key.split(':');
@@ -3416,7 +3523,7 @@ async function fmMoveDo(){
 }
 // Legacy iso-key handlers kept for any stale references — now no-ops to avoid silent overwrites.
 function appWk(iso){const n=auth.user?auth.user.name:prompt('Your name:');if(!n)return;if(!S.weeks[iso])return;S.weeks[iso].status='approved';S.weeks[iso].approvedBy=n;S.weeks[iso].approvedAt=new Date().toISOString();
-  saveAllSubmittedSP();updBadge();render();toast('Approved!','success');}
+  saveAllSubmittedSP();updBadge();render();toast('Approved!','success');setTimeout(tsfCatchUp,1500);}
 function retWk(iso){const r=prompt('Reason for returning:');if(r===null)return;if(!S.weeks[iso])return;S.weeks[iso].status='returned';S.weeks[iso].returnedAt=new Date().toISOString();if(r)S.weeks[iso].comments=(S.weeks[iso].comments||'')+'\nReturned: '+r;S.weeks[iso].submittedBy='';saveAllSubmittedSP();updBadge();render();toast('Returned to foreman.','success');}
 function vwWk(iso){S.currentWeek=iso;document.getElementById('ws').value=iso;showPage('review');}
 function rExport(){if(!auth.isAdmin){document.getElementById('mc').innerHTML=`<div class="pg"><div class="nd"><i class="ti ti-lock"></i>Admins only.</div></div>`;return;}
