@@ -434,7 +434,7 @@ async function initApp(){
   }catch(e){console.warn(e);}
   initWeeks();updUC();updNav();render();updBadge();
 }
-const VH_BUILD='2026-11-15.20';
+const VH_BUILD='2026-11-15.21';
 console.log('[VH] Timesheets build',VH_BUILD);
 let __vhAuthToastAt=0;
 // interactive=true only from a user-initiated action: saves drafts, then allows the MSAL
@@ -1183,6 +1183,7 @@ function rHome(){
   h+=tile('ti-shovel','#16a34a','Production',nProd?(nProd+' report'+(nProd>1?'s':'')+' this week'):'Daily footage, runs and plan markup',"vhGo('prod')");
   h+=tile('ti-receipt','#d97706','Tickets','<span id="tk-pend-home">Photograph a stone or pipe ticket</span>',"vhGo('ticket')");
   h+=tile('ti-gauge','#7c3aed','Testing','Air, mandrel, vacuum, pressure, televising',"tsOpen()");
+  h+=tile('ti-highlight','#0891b2',"What's Done",'Highlight the plan sheet with what your crew finished this week',"wdOpen()");
   h+=tile('ti-chart-bar','#0f766e','Job Tracker','Progress by run, what is done, earthwork yards and cost',"location.href='tracker.html'");
   h+='</div></div>';
   document.getElementById('mc').innerHTML=h;
@@ -1450,6 +1451,261 @@ function mkRot(){return (MK.pdfRotate+MK.userRot)%360;}
 function mkSheetBase(name){return (name||'plan').replace(/\.pdf$/i,'').replace(/[^A-Za-z0-9_-]+/g,'_');}
 function mkDriveUrl(path){return 'https://graph.microsoft.com/v1.0/sites/'+SITE_ID+'/drive/root:/'+path;}
 
+// ===== WHATS DONE (build .21) =================================================
+// Home page button -> pick the job -> pick a highlight sheet -> highlight this week's work.
+// Sheets are small single-page PDFs in {job}/Whats Done/Sheets (Estimating library, Field/Jobs).
+// Every save adds to what is already highlighted and writes, into the job's Whats Done folder:
+//   "{sheet} - Whats Done.pdf"       the current print, replaced each time
+//   "History/{date} {sheet}.pdf"     a dated copy
+//   "Marks/{sheet}.json"             the highlight strokes, so next week builds on this week
+const WD_ROOT='Field/Jobs';
+function wdId(){return Date.now().toString(36)+Math.random().toString(36).slice(2,7);}
+function wdToday(){const d=new Date();return new Date(d.getTime()-d.getTimezoneOffset()*60000).toISOString().slice(0,10);}
+function wdEsc(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;');}
+function wdShortDate(iso){const p=String(iso||'').split('-');return p.length===3?(+p[1])+'/'+(+p[2]):String(iso||'');}
+function wdPhaseFor(name){const n=String(name||'').toUpperCase();return /STORM/.test(n)?'400':(/WATER/.test(n)?'600':(/SANIT/.test(n)?'500':''));}
+function wdIn(s){return{id:s.id||wdId(),kind:s.kind||'hl',phase:s.phase,color:s.color,width:s.width,date:s.date||'',by:s.by||'',pts:(s.pts||[]).map(function(p){return Array.isArray(p)?{x:p[0],y:p[1]}:{x:p.x,y:p.y};})};}
+function wdOut(s){return{id:s.id,kind:s.kind,phase:s.phase,color:s.color,width:s.width,date:s.date,by:s.by,pts:s.pts.map(function(p){return[Math.round(p.x*1e5)/1e5,Math.round(p.y*1e5)/1e5];})};}
+function wdThin(pts){const out=[];let last=null;pts.forEach(function(p,i){if(!last||i===pts.length-1||Math.hypot(p.x-last.x,p.y-last.y)>0.0012){out.push({x:p.x,y:p.y});last=p;}});return out;}
+function wdMyJobs(){
+  const wk=S.weeks[S.currentWeek];const o={};if(!wk)return o;
+  Object.keys(wk.entries||{}).forEach(function(k){((wk.entries[k]||{}).jobLines||[]).forEach(function(l){const j=String(l.job||'').trim();if(j)o[j]=1;});});
+  try{prodEntries(wk).forEach(function(p){const j=String(p.job||'').trim();if(j)o[j]=1;});}catch(e){}
+  return o;
+}
+async function wdScan(tok,force){
+  if(!force){try{const c=JSON.parse(sessionStorage.getItem('vhts_wd_jobs')||'null');if(c&&Date.now()-c.at<10*60000)return c.jobs;}catch(e){}}
+  const H={Authorization:'Bearer '+tok};
+  const kids=async function(p){const r=await fetch(tkUrl(p)+':/children?$top=400',{headers:H});if(r.status===404)return[];if(!r.ok)throw new Error('folder read '+r.status);return (await r.json()).value||[];};
+  const years=(await kids(WD_ROOT)).filter(function(k){return k.folder&&/^\d{4}$/.test(k.name);});
+  const jobs=[];
+  for(const y of years){
+    const jf=(await kids(WD_ROOT+'/'+y.name)).filter(function(k){return k.folder&&/^\d{3,5}[A-Za-z]?(?![0-9A-Za-z])/.test(k.name);});
+    const got=await Promise.all(jf.map(async function(f){
+      const dir=WD_ROOT+'/'+y.name+'/'+f.name;let sheets=[];
+      try{sheets=(await kids(dir+'/Whats Done/Sheets')).filter(function(k){return k.file&&/\.pdf$/i.test(k.name);});}catch(e){}
+      return {job:f.name.match(/^\d{3,5}[A-Za-z]?/)[0],name:f.name,dir:dir,sheets:sheets.map(function(k){return{id:k.id,name:k.name};}).sort(function(a,b){return a.name.localeCompare(b.name,undefined,{numeric:true});})};
+    }));
+    got.forEach(function(g){if(g.sheets.length)jobs.push(g);});
+  }
+  jobs.sort(function(a,b){return a.job.localeCompare(b.job);});
+  try{sessionStorage.setItem('vhts_wd_jobs',JSON.stringify({at:Date.now(),jobs:jobs}));}catch(e){}
+  return jobs;
+}
+function wdPanel(title,body,back){
+  let el=document.getElementById('wd-sheet');if(!el){el=document.createElement('div');el.id='wd-sheet';document.body.appendChild(el);}
+  el.innerHTML='<div style="position:fixed;inset:0;background:var(--bg);z-index:300;display:flex;flex-direction:column">'+
+    '<div style="display:flex;align-items:center;gap:8px;padding:calc(10px + env(safe-area-inset-top)) 12px 10px;border-bottom:0.5px solid var(--border)">'+
+      '<button onclick="'+(back?'wdList()':'wdClosePanel()')+'" style="background:none;border:none;color:inherit;font-size:22px;padding:4px 8px;cursor:pointer"><i class="ti '+(back?'ti-arrow-left':'ti-x')+'"></i></button>'+
+      '<strong style="flex:1;font-size:17px">'+title+'</strong></div>'+
+    '<div style="flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:14px 16px calc(24px + env(safe-area-inset-bottom));max-width:720px;width:100%;margin:0 auto;box-sizing:border-box">'+body+'</div></div>';
+}
+function wdClosePanel(){const el=document.getElementById('wd-sheet');if(el)el.remove();}
+async function wdOpen(openJob){
+  if(!navigator.onLine){toast("You're offline. Highlighting needs a connection.",'error');return;}
+  const tok=await getTok(true);if(!tok){toast('Sign in first.','error');return;}
+  wdPanel('Whats Done','<div style="padding:30px;text-align:center;color:var(--text2)">Loading jobs\u2026</div>');
+  let jobs=[];
+  try{jobs=await wdScan(tok,false);}
+  catch(e){wdPanel('Whats Done','<div class="ib"><i class="ti ti-alert-triangle"></i><span>Could not load the job folders: '+wdEsc(e.message)+'</span></div>');return;}
+  window.__wd={jobs:jobs};
+  if(openJob&&jobs.some(function(x){return x.job===openJob;})){wdJob(openJob);return;}
+  wdList();
+}
+function wdList(){
+  const jobs=(window.__wd&&window.__wd.jobs)||[];const mine=wdMyJobs();
+  if(!jobs.length){wdPanel('Whats Done','<div class="ib"><i class="ti ti-info-circle"></i><span>No highlight sheets are set up yet. The office adds them to each job\'s Whats Done folder.</span></div>');return;}
+  const sorted=jobs.slice().sort(function(a,b){return (mine[b.job]?1:0)-(mine[a.job]?1:0)||a.job.localeCompare(b.job);});
+  let h='<p style="font-size:14px;color:var(--text2);margin-bottom:12px">Pick the job, then the sheet. Highlight what your crew finished this week and save.</p>';
+  sorted.forEach(function(j){
+    h+='<button class="btn btn-bl" style="justify-content:flex-start;gap:14px;min-height:64px;margin-bottom:10px;text-align:left" onclick="wdJob(\''+j.job+'\')"><i class="ti ti-map-2" style="font-size:24px;color:var(--accent);flex-shrink:0"></i><span style="flex:1;min-width:0"><strong style="font-size:16px;display:block">'+wdEsc(j.name)+'</strong><span style="font-size:12.5px;color:var(--text2);font-weight:400">'+j.sheets.length+' sheet'+(j.sheets.length>1?'s':'')+(mine[j.job]?' \u00b7 on your timesheet this week':'')+'</span></span><i class="ti ti-chevron-right" style="color:var(--text3)"></i></button>';});
+  wdPanel('Whats Done',h);
+}
+async function wdJob(job){
+  const j=((window.__wd&&window.__wd.jobs)||[]).find(function(x){return x.job===job;});if(!j){wdList();return;}
+  wdPanel(wdEsc(j.name),'<div style="padding:30px;text-align:center;color:var(--text2)">Loading sheets\u2026</div>',true);
+  const cur={};
+  try{const tok=await getTok();const r=await fetch(tkUrl(j.dir+'/Whats Done')+':/children?$top=400',{headers:{Authorization:'Bearer '+tok}});
+    if(r.ok)((await r.json()).value||[]).forEach(function(k){const m=/^(.*) - Whats Done\.pdf$/i.exec(k.name||'');
+      if(m&&k.file)cur[m[1].toLowerCase()]={when:String(k.lastModifiedDateTime||'').slice(0,10),by:(k.lastModifiedBy&&k.lastModifiedBy.user&&k.lastModifiedBy.user.displayName)||''};});
+  }catch(e){}
+  if(!document.getElementById('wd-sheet'))return; // closed while loading
+  const wk0=wd(S.currentWeek)[0];
+  let h='<p style="font-size:14px;color:var(--text2);margin-bottom:12px">Tap a sheet to open it. Earlier highlights are already on it, so you only add this week\'s work.</p>';
+  j.sheets.forEach(function(s,i){
+    const nm=s.name.replace(/\.pdf$/i,'');const c=cur[nm.toLowerCase()];const fresh=c&&c.when>=wk0;
+    const ph=wdPhaseFor(nm);const col=ph?MK_COLORS[ph]:'#64748b';
+    h+='<button class="btn btn-bl" style="justify-content:flex-start;gap:14px;min-height:64px;margin-bottom:10px;text-align:left" onclick="wdOpenSheet(\''+j.job+'\','+i+')"><span style="width:10px;height:44px;border-radius:5px;background:'+col+';flex-shrink:0"></span><span style="flex:1;min-width:0"><strong style="font-size:15.5px;display:block">'+wdEsc(nm)+'</strong><span style="font-size:12.5px;font-weight:'+(fresh?'600':'400')+';color:'+(fresh?'#16a34a':(c?'#d97706':'var(--text2)'))+'">'+(c?(fresh?'Updated this week':'Not updated this week')+' \u00b7 last '+wdEsc(wdShortDate(c.when))+(c.by?' by '+wdEsc(c.by):''):'Nothing highlighted yet')+'</span></span><i class="ti ti-chevron-right" style="color:var(--text3)"></i></button>';});
+  wdPanel(wdEsc(j.name),h,true);
+}
+async function wdOpenSheet(job,idx){
+  const j=((window.__wd&&window.__wd.jobs)||[]).find(function(x){return x.job===job;});if(!j)return;
+  if(!window.pdfjsLib||!window.PDFLib){toast('Plan tools are still loading. Try again in a moment.','error');return;}
+  wdClosePanel();
+  MK={entryId:null,job:j.job,phase:'500',date:wdToday(),plans:j.sheets,planIdx:+idx,color:MK_COLORS['500'],width:12,markKind:'hl',
+    zoom:1,fit:0,gfx:0,gfy:0,gz:1,lz:1,tx:0,ty:0,baseW:1,baseH:1,backing:1,cssW:1,cssH:1,pdfRotate:0,userRot:0,
+    strokes:[],redo:[],drawing:false,cur:null,gOn:false,gd:0,gnx:0,gny:0,lmx:0,lmy:0,lf:1,panning:false,sx:0,sy:0,winBound:false,
+    ftPerPoint:0,calibrating:false,calibPts:[],calibLine:null,pdfDoc:null,bytes:null,
+    foreman:(auth.user&&auth.user.name)||'',
+    wd:{dir:j.dir,jobName:j.name,base:[],erased:{},dirty:false,meta:null,erase:false,sheet:''}};
+  mkBuildOverlay();wdDress();
+  await mkPickPlan(+idx);
+}
+// Re-skin the markup viewer for highlighting: no scale / pin / area tools, three colour buttons and an eraser.
+function wdDress(){
+  const o=document.getElementById('mk-overlay');if(!o)return;
+  const x=o.querySelector('button[onclick="mkClose()"]');if(x)x.onclick=function(){wdTryClose();};
+  const st=o.querySelector('strong');if(st){st.textContent='Whats Done \u00b7 Job '+MK.job;if(st.nextElementSibling&&st.nextElementSibling.tagName==='SPAN')st.nextElementSibling.style.display='none';}
+  const sel=o.querySelector('select');if(sel){sel.value=String(MK.planIdx);sel.style.maxWidth='260px';sel.style.fontSize='13px';sel.onchange=function(){wdSwitch(sel);};}
+  ['mk-scalebtn','mk-pinbtn','mk-kArea','mk-kLine'].forEach(function(id){const b=document.getElementById(id);if(b)b.style.display='none';});
+  const note=document.getElementById('mk-note');if(note)note.placeholder='Note for this update (optional)';
+  const bar=document.createElement('div');bar.id='wd-bar';
+  bar.style.cssText='display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:7px 10px;background:#222;color:#fff;border-top:1px solid #3a3a3a';
+  bar.innerHTML='<span style="font-size:12px;color:#bbb">Highlight as</span><span id="wd-chips" style="display:flex;gap:6px"></span><button id="wd-erase" onclick="wdErase()" style="margin-left:auto;background:#3a3a3a;border:none;color:#fff;border-radius:7px;padding:8px 12px;cursor:pointer;font-size:13px">Erase a highlight</button>';
+  o.insertBefore(bar,document.getElementById('mk-wrap'));
+  wdChips();
+}
+function wdChips(){
+  const box=document.getElementById('wd-chips');if(!box||!MK||!MK.wd)return;box.innerHTML='';
+  [['400','Storm'],['500','Sanitary'],['600','Water']].forEach(function(a){
+    const on=MK.phase===a[0]&&!MK.wd.erase;const b=document.createElement('button');b.textContent=a[1];
+    b.style.cssText='border:2px solid '+MK_COLORS[a[0]]+';background:'+(on?MK_COLORS[a[0]]:'transparent')+';color:#fff;border-radius:16px;padding:7px 14px;cursor:pointer;font-size:13px;font-weight:700';
+    b.onclick=function(){MK.wd.erase=false;wdSetPhase(a[0]);};box.appendChild(b);});
+  const e=document.getElementById('wd-erase');
+  if(e){e.style.background=MK.wd.erase?'#ffd400':'#3a3a3a';e.style.color=MK.wd.erase?'#000':'#fff';e.textContent=MK.wd.erase?'Erasing: tap a highlight':'Erase a highlight';}
+}
+function wdSetPhase(ph){MK.phase=ph;MK.color=MK_COLORS[ph]||'#c8102e';wdChips();mkMeasure();}
+function wdErase(){MK.wd.erase=!MK.wd.erase;wdChips();}
+function wdEraseAt(p){
+  const W=MK.baseW,H=MK.baseH;const tol=Math.max(MK.width*1.2,16/((MK.fit||1)*(MK.zoom||1)));
+  const d2=function(a,b,q){const ax=a.x*W,ay=a.y*H,bx=b.x*W,by=b.y*H,qx=q.x*W,qy=q.y*H;const dx=bx-ax,dy=by-ay;const L=dx*dx+dy*dy;let t=L?((qx-ax)*dx+(qy-ay)*dy)/L:0;t=Math.max(0,Math.min(1,t));const ex=ax+t*dx-qx,ey=ay+t*dy-qy;return ex*ex+ey*ey;};
+  const near=function(st){for(let i=1;i<st.pts.length;i++){if(d2(st.pts[i-1],st.pts[i],p)<=tol*tol)return true;}return false;};
+  for(let i=MK.strokes.length-1;i>=0;i--){if(near(MK.strokes[i])){MK.strokes.splice(i,1);mkRedraw();mkMeasure();mkScheduleSharpen();return;}}
+  const b=MK.wd.base;
+  for(let i=b.length-1;i>=0;i--){if(near(b[i])){MK.wd.erased[b[i].id]=1;b.splice(i,1);MK.wd.dirty=true;mkRedraw();mkMeasure();mkScheduleSharpen();return;}}
+}
+function wdSwitch(sel){
+  if((MK.strokes.length||MK.wd.dirty)&&!confirm('You have highlights on this sheet that are not saved. Switch sheets without saving?')){sel.value=String(MK.planIdx);return;}
+  mkPickPlan(sel.value);
+}
+function wdTryClose(){
+  if(MK&&MK.wd&&(MK.strokes.length||MK.wd.dirty)&&!confirm('Close without saving your highlights?'))return;
+  const job=MK&&MK.job;mkClose();if(job)wdOpen(job);
+}
+function wdMeasure(el){
+  const w=MK.wd,n=MK.strokes.length;el.style.color=(n||w.dirty)?'#ffd400':'#bbb';
+  el.textContent=n?(n+' new highlight'+(n>1?'s':'')+' \u00b7 not saved yet'):(w.dirty?'Highlight erased \u00b7 not saved yet':(w.meta&&w.meta.updated?'Last updated '+wdShortDate(String(w.meta.updated).slice(0,10))+(w.meta.by?' by '+w.meta.by:''):'Nothing highlighted on this sheet yet'));
+}
+async function wdLoadMarks(){
+  const w=MK.wd;w.base=[];w.erased={};w.dirty=false;w.meta=null;w.erase=false;
+  w.sheet=(MK.plans[MK.planIdx].name||'').replace(/\.pdf$/i,'');
+  const ph=wdPhaseFor(w.sheet);wdSetPhase(ph||MK.phase||'500');
+  try{const pg=await MK.pdfDoc.getPage(1);const v=pg.view;MK.width=Math.max(8,Math.round(Math.max(Math.abs(v[2]-v[0]),Math.abs(v[3]-v[1]))/190));}catch(e){}
+  try{
+    const tok=await getTok();
+    const r=await fetch(tkUrl(w.dir+'/Whats Done/Marks/'+w.sheet+'.json')+':/content',{headers:{Authorization:'Bearer '+tok}});
+    if(r.ok){const rec=await r.json();
+      if(rec&&Array.isArray(rec.strokes)){w.meta={updated:rec.updated,by:rec.by};if(typeof rec.userRot==='number')MK.userRot=rec.userRot;w.base=rec.strokes.map(wdIn);}}
+  }catch(e){console.warn('wd marks',e);}
+  const ni=document.getElementById('mk-note');if(ni)ni.value='';
+}
+async function wdSave(){
+  const w=MK.wd;
+  if(!MK.strokes.length&&!w.dirty){mkBanner('Nothing new to save.');setTimeout(function(){mkBanner('');},1600);return;}
+  const btn=document.getElementById('mk-save');btn.disabled=true;btn.textContent='Saving\u2026';
+  try{
+    const tok=await getTok(true);if(!tok){toast('Session expired. Sign in again.','error');return;}
+    const today=wdToday(),who=MK.foreman||'';
+    const note=((document.getElementById('mk-note')||{}).value||'').trim();
+    const mine=MK.strokes.map(function(s){return{id:wdId(),kind:'hl',phase:s.phase,color:s.color,width:s.width,date:today,by:who,pts:wdThin(s.pts)};});
+    const marksUrl=tkUrl(w.dir+'/Whats Done/Marks/'+w.sheet+'.json');
+    if(!w.foldersOk){await tkEnsureFolder(tok,w.dir+'/Whats Done','Marks');await tkEnsureFolder(tok,w.dir+'/Whats Done','History');w.foldersOk=true;}
+    let all=null;
+    for(let a=0;a<4;a++){
+      // Re-read the sheet's marks first, so two foremen on the same sheet never erase each other.
+      let etag=null,server=[],srvRot=MK.userRot;
+      const mr=await fetch(marksUrl,{headers:{Authorization:'Bearer '+tok}});
+      if(mr.status!==404){
+        if(!mr.ok)throw new Error('marks read '+mr.status);
+        etag=(await mr.json()).eTag;
+        const cr=await fetch(marksUrl+':/content',{headers:{Authorization:'Bearer '+tok}});if(!cr.ok)throw new Error('marks read '+cr.status);
+        const rec=await cr.json();if(rec&&Array.isArray(rec.strokes)){server=rec.strokes.map(wdIn);if(typeof rec.userRot==='number')srvRot=rec.userRot;}
+      }
+      const k=((Math.round((MK.userRot-srvRot)/90)%4)+4)%4;
+      const have={};w.base.forEach(function(s){have[s.id]=1;});
+      const extra=server.filter(function(s){return !have[s.id]&&!w.erased[s.id];});
+      extra.forEach(function(s){for(let i=0;i<k;i++)s.pts=s.pts.map(function(p){return{x:1-p.y,y:p.x};});});
+      all=w.base.concat(extra,mine);
+      const body={job:MK.job,sheet:w.sheet,userRot:MK.userRot,updated:new Date().toISOString(),by:who,note:note,strokes:all.map(wdOut)};
+      const H={Authorization:'Bearer '+tok,'Content-Type':'application/json'};if(etag)H['If-Match']=etag;
+      const pr=await fetch(marksUrl+':/content'+(etag?'':'?@microsoft.graph.conflictBehavior=fail'),{method:'PUT',headers:H,body:JSON.stringify(body)});
+      if(pr.status===412||pr.status===409){all=null;continue;}
+      if(!pr.ok)throw new Error('marks save '+pr.status);
+      break;
+    }
+    if(!all)throw new Error('someone else was saving this sheet. Try again');
+    // The marks are safe now. Fold them in so a retry of the print can never double them up.
+    w.base=all;MK.strokes=[];MK.redo=[];w.erased={};w.dirty=true;mkRedraw();
+    const page=await MK.pdfDoc.getPage(1);const rot=mkRot();const vp=page.getViewport({scale:1,rotation:rot});
+    const used={};all.forEach(function(s){if(s.phase)used[s.phase]=s.color;});
+    const legend=Object.keys(used).sort().map(function(p2){return{color:used[p2],label:MK_LABEL[p2]||p2};});
+    const d=new Date();
+    const bytes=await wdFlatten(MK.bytes,all,rot,vp.width,vp.height,function(u,v){return vp.convertToPdfPoint(u*vp.width,v*vp.height);},
+      {lines:[w.jobName+'  |  '+w.sheet,'Whats done through '+(d.getMonth()+1)+'/'+d.getDate()+'/'+d.getFullYear()+(who?'  |  updated by '+who:'')+(note?'  |  '+note:'')],legend:legend});
+    const put=function(path){return fetch(tkUrl(path)+':/content',{method:'PUT',headers:{Authorization:'Bearer '+tok,'Content-Type':'application/pdf'},body:bytes});};
+    const r1=await put(w.dir+'/Whats Done/'+w.sheet+' - Whats Done.pdf');
+    if(r1.status===423)throw new Error('the print is open on a computer and locked. Close it there and press Save again');
+    if(!r1.ok)throw new Error('print save '+r1.status);
+    await put(w.dir+'/Whats Done/History/'+today+' '+w.sheet+'.pdf');
+    w.dirty=false;
+    toast('Saved. The print is in the job\'s Whats Done folder.','success');
+    const job=MK.job;mkClose();wdOpen(job);
+  }catch(e){console.error('wd save',e);toast('Could not save: '+((e&&e.message)||e),'error');}
+  finally{const b=document.getElementById('mk-save');if(b){b.disabled=false;b.textContent='Save';}}
+}
+// Highlights are drawn onto the ORIGINAL sheet as real vector strokes, so the saved print keeps
+// full plan quality at any zoom and stays small. toPdf(u,v) maps a point in the on-screen
+// (rotated) view, 0..1 each way, to PDF page coordinates.
+function wdHex(c){const m=/^#?([0-9a-f]{6})$/i.exec(String(c||''));const n=m?parseInt(m[1],16):0xc8102e;return[((n>>16)&255)/255,((n>>8)&255)/255,(n&255)/255];}
+function wdAscii(s){return String(s==null?'':s).replace(/[^\x20-\x7E]/g,'?');}
+async function wdFlatten(bytes,strokes,rot,viewW,viewH,toPdf,stamp){
+  const L=PDFLib;
+  const doc=await L.PDFDocument.load(bytes,{ignoreEncryption:true,updateMetadata:false});
+  const pg=doc.getPage(0);
+  pg.node.normalize(); // isolate the sheet's own drawing state so ours starts clean
+  const gs={};
+  const key=function(a){const k=String(a);if(!gs[k])gs[k]=pg.node.newExtGState('WD',doc.context.obj({Type:'ExtGState',CA:a,BM:'Multiply'}));return gs[k];};
+  const ops=[L.pushGraphicsState()];
+  strokes.forEach(function(st){
+    if(!st.pts||st.pts.length<2)return;const c=wdHex(st.color);
+    ops.push(L.setGraphicsState(key(st.kind==='line'?0.85:0.45)),L.setLineCap(L.LineCapStyle.Round),L.setLineJoin(L.LineJoinStyle.Round),L.setLineWidth(st.width||10),L.setStrokingColor(L.rgb(c[0],c[1],c[2])));
+    st.pts.forEach(function(p,i){const q=toPdf(p.x,p.y);ops.push(i?L.lineTo(q[0],q[1]):L.moveTo(q[0],q[1]));});
+    ops.push(L.stroke());
+  });
+  ops.push(L.popGraphicsState());
+  pg.pushOperators.apply(pg,ops);
+  if(stamp){
+    const font=await doc.embedFont(L.StandardFonts.HelveticaBold);
+    const fs=Math.max(8,viewH/105),pad=fs*0.6,lh=fs*1.35;
+    const lines=stamp.lines.map(wdAscii);
+    let wmax=0;lines.forEach(function(t){wmax=Math.max(wmax,font.widthOfTextAtSize(t,fs));});
+    const leg=stamp.legend||[];let lw=0;leg.forEach(function(g){lw+=fs*1.4+font.widthOfTextAtSize(wdAscii(g.label),fs)+fs;});
+    const bw=Math.max(wmax,lw)+pad*2,bh=lh*(lines.length+(leg.length?1:0))+pad*1.4;
+    const x0=viewW*0.012,y0=viewH*0.012; // box top-left, in view units
+    const at=function(xv,yv){return toPdf(xv/viewW,yv/viewH);};
+    const R=L.degrees(rot);
+    const o=at(x0,y0+bh);
+    pg.drawRectangle({x:o[0],y:o[1],width:bw,height:bh,rotate:R,color:L.rgb(1,1,1),opacity:0.92,borderColor:L.rgb(0.06,0.16,0.28),borderWidth:Math.max(0.6,fs/14)});
+    lines.forEach(function(t,i){const q=at(x0+pad,y0+pad+lh*(i+1)-fs*0.28);pg.drawText(t,{x:q[0],y:q[1],size:fs,font:font,rotate:R,color:L.rgb(0.06,0.16,0.28)});});
+    let lx=x0+pad;const ly=y0+pad+lh*(lines.length+1)-fs*0.28;
+    leg.forEach(function(g){const c=wdHex(g.color);const q=at(lx,ly);
+      pg.drawRectangle({x:q[0],y:q[1],width:fs*1.1,height:fs*0.8,rotate:R,color:L.rgb(c[0],c[1],c[2]),opacity:0.6});
+      const tq=at(lx+fs*1.4,ly);pg.drawText(wdAscii(g.label),{x:tq[0],y:tq[1],size:fs,font:font,rotate:R,color:L.rgb(0.06,0.16,0.28)});
+      lx+=fs*1.4+font.widthOfTextAtSize(wdAscii(g.label),fs)+fs;});
+  }
+  pg.setRotation(L.degrees(rot));
+  return await doc.save();
+}
 async function openMarkup(entryId){
   const wk=S.weeks[S.currentWeek];
   const entry=prodEntries(wk).find(function(e){return e.id==entryId;});
@@ -1483,7 +1739,7 @@ async function mkFileBytes(idx){
   const f=MK.plans[idx];const u=f['@microsoft.graph.downloadUrl']||f.downloadUrl;
   if(u)return await (await fetch(u)).arrayBuffer();
   const tok=await getTok();
-  return await (await fetch('https://graph.microsoft.com/v1.0/sites/'+SITE_ID+'/drive/items/'+f.id+'/content',{headers:{Authorization:'Bearer '+tok}})).arrayBuffer();
+  return await (await fetch((MK.wd?'https://graph.microsoft.com/v1.0/drives/'+TK_DRIVE:'https://graph.microsoft.com/v1.0/sites/'+SITE_ID+'/drive')+'/items/'+f.id+'/content',{headers:{Authorization:'Bearer '+tok}})).arrayBuffer();
 }
 async function mkPickPlan(i){
   MK.planIdx=+i;mkStatus('Rendering…');
@@ -1492,8 +1748,7 @@ async function mkPickPlan(i){
     pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
     MK.pdfDoc=await pdfjsLib.getDocument({data:buf.slice(0)}).promise;
     MK.userRot=0;MK.strokes=[];MK.redo=[];MK.calibLine=null;MK.pinning=false;MK.pins=null;MK.pinDirty=false;
-    await mkLoadScale();
-    await mkLoadExisting();
+    if(MK.wd){MK.ftPerPoint=0;await wdLoadMarks();}else{await mkLoadScale();await mkLoadExisting();}
     await mkRender(true);mkStatus('');mkMeasure();mkSyncScale();
   }catch(e){console.error('mk pick',e);mkStatus('Could not open plan PDF.');}
 }
@@ -1553,7 +1808,7 @@ function mkSetZoom(nz,ax,ay){nz=mkClamp(nz,MK_ZMIN,MK_ZMAX);if(Math.abs(nz-MK.zo
 function mkZoom(f){const w=document.getElementById('mk-wrap');mkSetZoom(MK.zoom*f,w.clientWidth/2,w.clientHeight/2);}
 async function mkFit(){await mkRender(true);}
 function mkRotate(){const t=function(p){return{x:1-p.y,y:p.x};};
-  MK.strokes.forEach(function(s){s.pts=s.pts.map(t);});MK.redo.forEach(function(s){s.pts=s.pts.map(t);});
+  MK.strokes.forEach(function(s){s.pts=s.pts.map(t);});MK.redo.forEach(function(s){s.pts=s.pts.map(t);});if(MK.wd)MK.wd.base.forEach(function(s){s.pts=s.pts.map(t);});
   if(MK.calibLine)MK.calibLine={p1:t(MK.calibLine.p1),p2:t(MK.calibLine.p2)};MK.calibPts=MK.calibPts.map(t);
   if(MK.pins){Object.keys(MK.pins).forEach(function(k){const p=MK.pins[k];if(p)MK.pins[k]=[1-p[1],p[0]];});}
   MK.userRot=(MK.userRot+90)%360;mkRender(true);}
@@ -1564,7 +1819,7 @@ function mkArrow(ctx,x1,y1,x2,y2,sz,col){const a=Math.atan2(y2-y1,x2-x1);ctx.sav
   ctx.beginPath();ctx.moveTo(x2,y2);ctx.lineTo(x2-sz*Math.cos(a-.45),y2-sz*Math.sin(a-.45));ctx.lineTo(x2-sz*Math.cos(a+.45),y2-sz*Math.sin(a+.45));ctx.closePath();ctx.fill();ctx.restore();}
 function mkRedraw(){
   const oc=document.getElementById('mk-ink');if(!oc)return;const ctx=oc.getContext('2d');ctx.clearRect(0,0,oc.width,oc.height);
-  MK.strokes.forEach(function(st){mkStyle(ctx,st,MK.backing);
+  (MK.wd?MK.wd.base.concat(MK.strokes):MK.strokes).forEach(function(st){mkStyle(ctx,st,MK.backing);
     ctx.beginPath();st.pts.forEach(function(p,i){const x=p.x*oc.width,y=p.y*oc.height;i?ctx.lineTo(x,y):ctx.moveTo(x,y);});ctx.stroke();
     if(st.kind==='line'&&st.pts.length>=2){const n=st.pts.length;mkArrow(ctx,st.pts[n-2].x*oc.width,st.pts[n-2].y*oc.height,st.pts[n-1].x*oc.width,st.pts[n-1].y*oc.height,Math.max(14,st.width*3)*MK.backing,st.color);}});
   ctx.globalAlpha=1;
@@ -1591,6 +1846,7 @@ function mkDown(e){
   if(e.touches&&e.touches.length===2){e.preventDefault();mkHideDetail();MK.gOn=true;MK.drawing=false;MK.cur=null;mkRedraw();MK.gd=Math.max(1,mkTDist(e));const m=mkTMid(e);MK.gfx=(m.x-MK.tx)/(MK.cssW*MK.zoom);MK.gfy=(m.y-MK.ty)/(MK.cssH*MK.zoom);MK.gz=MK.zoom;MK.lz=MK.zoom;MK.lmx=m.x;MK.lmy=m.y;return;}
   if(MK.calibrating){if(!MK.gOn){e.preventDefault&&e.preventDefault();mkCalibTap(mkPt(e));}return;}
   if(MK.pinning){if(!MK.gOn){e.preventDefault&&e.preventDefault();pinTap(mkPt(e));}return;}
+  if(MK.wd&&MK.wd.erase){if(!MK.gOn&&(!e.touches||e.touches.length===1)){e.preventDefault&&e.preventDefault();wdEraseAt(mkPt(e));}return;}
   if((!e.touches||e.touches.length===1)&&!MK.gOn){e.preventDefault&&e.preventDefault();MK.drawing=true;MK.cur={color:MK.color,width:MK.width,kind:MK.markKind,phase:MK.phase,pts:[mkPt(e)]};}
 }
 function mkMove(e){
@@ -1713,7 +1969,7 @@ function mkTotals(){
   MK.strokes.forEach(function(st){if(st.kind==='line'){lineCount++;lineLF+=mkLen(st)*fpp;}else{areaSF+=mkArea(st)*fpp*fpp;}});
   return{lineCount:lineCount,lineLF:lineLF,avgLineLF:lineCount?lineLF/lineCount:0,sf:areaSF,sy:areaSF/9};
 }
-function mkMeasure(){const el=document.getElementById('mk-measure');if(!el)return;const ph=MK.phase;
+function mkMeasure(){const el=document.getElementById('mk-measure');if(!el)return;if(MK.wd){wdMeasure(el);return;}const ph=MK.phase;
   if(!MK.ftPerPoint){el.textContent=(MK_LABEL[ph]||'')+' · set scale to measure';el.style.color='#bbb';return;}
   const t=mkTotals();const parts=[];
   if(ph==='300'){if(t.sf>0)parts.push(mkFmt(t.sf)+' SF area');if(t.lineCount>0)parts.push('Haul ≈ '+mkFmt(t.avgLineLF)+' ft'+(t.lineCount>1?' (avg of '+t.lineCount+')':''));}
@@ -1732,6 +1988,7 @@ function mkSyncBar(){mkActBtn(document.getElementById('mk-kArea'),MK.markKind===
 
 // ── save: flattened PDF + marks JSON + scale + auto-fill ─────────────────────
 async function mkSave(){
+  if(MK.wd){return wdSave();}
   if(!MK.strokes.length){mkBanner('Nothing marked yet to save.');setTimeout(function(){mkBanner('');},1600);return;}
   const btn=document.getElementById('mk-save');btn.disabled=true;btn.textContent='Saving…';
   try{
@@ -1802,7 +2059,7 @@ async function mkSharpen(){
     if(MK.gOn||MK.drawing||!document.getElementById('mk-wrap')){MK._sharpening=false;return;}
     const ic=off.getContext('2d');ic.lineCap='round';ic.lineJoin='round';
     const MX=function(x){return ((x-nx0)/(nx1-nx0))*cw;},MY=function(y){return ((y-ny0)/(ny1-ny0))*ch;};
-    MK.strokes.forEach(function(st){ic.strokeStyle=st.color;ic.globalAlpha=st.kind==='line'?.85:.4;ic.lineWidth=st.width*scale;ic.beginPath();st.pts.forEach(function(p,i){const x=MX(p.x),y=MY(p.y);i?ic.lineTo(x,y):ic.moveTo(x,y);});ic.stroke();if(st.kind==='line'&&st.pts.length>=2){const n=st.pts.length;mkArrow(ic,MX(st.pts[n-2].x),MY(st.pts[n-2].y),MX(st.pts[n-1].x),MY(st.pts[n-1].y),Math.max(14,st.width*3)*scale,st.color);}});
+    (MK.wd?MK.wd.base.concat(MK.strokes):MK.strokes).forEach(function(st){ic.strokeStyle=st.color;ic.globalAlpha=st.kind==='line'?.85:.4;ic.lineWidth=st.width*scale;ic.beginPath();st.pts.forEach(function(p,i){const x=MX(p.x),y=MY(p.y);i?ic.lineTo(x,y):ic.moveTo(x,y);});ic.stroke();if(st.kind==='line'&&st.pts.length>=2){const n=st.pts.length;mkArrow(ic,MX(st.pts[n-2].x),MY(st.pts[n-2].y),MX(st.pts[n-1].x),MY(st.pts[n-1].y),Math.max(14,st.width*3)*scale,st.color);}});
     ic.globalAlpha=1;
     MK._det={nx0:nx0,ny0:ny0,nx1:nx1,ny1:ny1,cw:cw,ch:ch,scale:scale};
     const d=mkDetailCanvas();d.width=cw;d.height=ch;
