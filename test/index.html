@@ -426,7 +426,72 @@ async function compressPhoto(dataUrl, maxSize=800, quality=0.6){
   });
 }
 
+// ===== KEEPING IN-PROGRESS TIME SAFE ON THE DEVICE (build .24) ================
+// 1. Stored time is read the moment the app opens, before sign-in. Until now it was only read
+//    after sign-in was confirmed, so a weak connection showed an empty timesheet, and the first
+//    thing typed into it was then saved over the stored time.
+// 2. Saving adds to or updates what is stored. It never drops a stored week it has not loaded.
+// 3. An earlier copy is kept every 15 minutes while time is being entered (in the browser's own
+//    database, on this device). Settings > Restore my time brings one back.
+function vhLoadLocalDrafts(){
+  try{
+    const d=JSON.parse(localStorage.getItem('vhts_drafts')||'{}')||{};
+    Object.keys(d).forEach(function(iso){if(iso.indexOf(':')<0&&d[iso]&&!S.weeks[iso])S.weeks[iso]=d[iso];});
+    window.__vhDraftsRead=true;
+  }catch(e){console.warn('local drafts',e);}
+}
+function vhWkPristine(wk){return !wk||(!(wk.employees||[]).length&&!Object.keys(wk.entries||{}).length&&!Object.keys(wk.production||{}).length);}
+function vhWkHours(wk){let h=0;try{Object.values((wk&&wk.entries)||{}).forEach(function(e){((e&&e.jobLines)||[]).forEach(function(ln){const c=calcJobHours(ln);if(c&&c.total>0)h+=c.total;});});}catch(e){}return Math.round(h*100)/100;}
+function vhSnapDb(){return new Promise(function(res,rej){const r=indexedDB.open('vhts_backup',1);r.onupgradeneeded=function(){r.result.createObjectStore('snaps',{keyPath:'at'});};r.onsuccess=function(){res(r.result);};r.onerror=function(){rej(r.error);};});}
+async function vhSnapAll(){const db=await vhSnapDb();return new Promise(function(res,rej){const q=db.transaction('snaps').objectStore('snaps').getAll();q.onsuccess=function(){res(q.result||[]);};q.onerror=function(){rej(q.error);};});}
+async function vhSnapPut(str,force){
+  try{
+    if(!str||str==='{}')return;
+    const last=+localStorage.getItem('vhts_snap_at')||0;
+    if(!force&&Date.now()-last<15*60000)return;
+    let d={};try{d=JSON.parse(str)||{};}catch(e){return;}
+    if(!Object.keys(d).some(function(k){return !vhWkPristine(d[k]);}))return; // nothing worth keeping
+    localStorage.setItem('vhts_snap_at',String(Date.now()));
+    const db=await vhSnapDb();
+    await new Promise(function(res,rej){const tx=db.transaction('snaps','readwrite');tx.objectStore('snaps').put({at:new Date().toISOString(),data:str});tx.oncomplete=function(){res();};tx.onerror=function(){rej(tx.error);};});
+    const all=(await vhSnapAll()).sort(function(a,b){return a.at<b.at?1:-1;});
+    if(all.length>30){const tx=db.transaction('snaps','readwrite');all.slice(30).forEach(function(s){tx.objectStore('snaps').delete(s.at);});}
+  }catch(e){console.warn('snapshot',e);}
+}
+async function vhRestoreOpen(){
+  let snaps=[];try{snaps=(await vhSnapAll()).sort(function(a,b){return a.at<b.at?1:-1;});}catch(e){}
+  let h='<div class="mh"></div><h2>Restore my time</h2><p>The app keeps earlier copies of your unsent time on this device. Pick one to bring it back.</p>';
+  let shown=0;
+  snaps.slice(0,30).forEach(function(s){
+    let d={};try{d=JSON.parse(s.data)||{};}catch(e){}
+    const parts=Object.keys(d).sort().reverse().map(function(iso){const wk=d[iso];const hrs=vhWkHours(wk);return hrs>0?('Week ending '+fs(iso)+': '+(wk.employees||[]).length+' crew, '+hrs+' h'):'';}).filter(Boolean);
+    if(!parts.length)return;shown++;
+    const t=new Date(s.at);
+    h+='<div style="border:1px solid var(--border);border-radius:12px;padding:10px 12px;margin-bottom:8px;display:flex;align-items:center;gap:10px"><div style="flex:1;min-width:0"><div style="font-weight:700;font-size:14.5px">'+t.toLocaleDateString(undefined,{weekday:'short',month:'numeric',day:'numeric'})+', '+t.toLocaleTimeString(undefined,{hour:'numeric',minute:'2-digit'})+'</div><div style="font-size:12.5px;color:var(--text2)">'+parts.join('<br>')+'</div></div><button class="btn btn-sm btn-p" onclick="vhRestore(\''+s.at+'\')">Restore</button></div>';
+  });
+  if(!shown)h+='<div class="ib"><i class="ti ti-info-circle"></i><span>No earlier copies on this device yet. One is kept about every 15 minutes while you enter time.</span></div>';
+  h+='<div class="mf"><button class="btn btn-bl" onclick="closeM()">Close</button></div>';
+  showM(h,'rst');
+}
+async function vhRestore(at){
+  let snaps=[];try{snaps=await vhSnapAll();}catch(e){}
+  const s=snaps.find(function(x){return x.at===at;});if(!s)return;
+  let d={};try{d=JSON.parse(s.data)||{};}catch(e){toast('That copy could not be read.','error');return;}
+  if(!confirm('Bring back this copy? It replaces what is on screen now for those weeks. What you have now is kept as a copy too, so you can switch back.'))return;
+  await vhSnapPut(localStorage.getItem('vhts_drafts')||'{}',true);
+  let n=0,skipped=0;
+  Object.keys(d).forEach(function(iso){
+    const cur=S.weeks[iso];
+    if(cur&&cur.status&&cur.status!=='draft'&&cur.status!=='returned'){skipped++;return;} // already submitted: leave it alone
+    S.weeks[iso]=d[iso];n++;
+  });
+  window.__vhDraftsRead=true;_writeDrafts();closeM();initWeeks();render();updBadge();
+  toast(n?('Your time is restored.'+(skipped?' A week that was already submitted was left alone.':'')):'Nothing to restore: those weeks are already submitted.','success');
+}
 async function initApp(){
+  // Stored time first, and on screen straight away: sign-in can be slow or fail on a weak signal.
+  vhLoadLocalDrafts();
+  try{initWeeks();updNav();render();}catch(e){console.warn(e);}
   try{mi=new msal.PublicClientApplication(MCFG);await mi.initialize();
     const rsp=await mi.handleRedirectPromise();
     if(rsp&&rsp.account)await onIn(rsp.account);
@@ -434,7 +499,7 @@ async function initApp(){
   }catch(e){console.warn(e);}
   initWeeks();updUC();updNav();render();updBadge();
 }
-const VH_BUILD='2026-11-16.23';
+const VH_BUILD='2026-11-20.24';
 console.log('[VH] Timesheets build',VH_BUILD);
 let __vhAuthToastAt=0;
 // interactive=true only from a user-initiated action: saves drafts, then allows the MSAL
@@ -704,11 +769,18 @@ async function saveAllSubmittedSP(){
 }
 // Save draft to localStorage only (device-local, not shared)
 function _writeDrafts(){
-  const drafts={};
-  Object.entries(S.weeks).forEach(([iso,wk])=>{
-    if(iso.includes(':'))return; // foreign sub, not my draft
-    if(wk.status==='draft'||wk.status==='returned')drafts[iso]=wk;
+  const prev=localStorage.getItem('vhts_drafts')||'{}';
+  let drafts={};try{drafts=JSON.parse(prev)||{};}catch(e){drafts={};}
+  Object.entries(S.weeks).forEach(function(p){
+    const iso=p[0],wk=p[1];
+    if(iso.indexOf(':')>=0)return; // foreign sub, not my draft
+    if(wk.status==='draft'||wk.status==='returned'){
+      // A blank week that was created before the stored time was ever read must not replace it.
+      if(!window.__vhDraftsRead&&vhWkPristine(wk)&&drafts[iso]&&!vhWkPristine(drafts[iso]))return;
+      drafts[iso]=wk;
+    }else delete drafts[iso]; // submitted or approved: no longer a draft
   });
+  vhSnapPut(prev,false); // keep the copy we are about to replace
   localStorage.setItem('vhts_drafts',JSON.stringify(drafts));
 }
 function saveDraft(){
@@ -3579,6 +3651,7 @@ function expCSV(k){const iso=k.split(':')[0];const wk=S.weeks[k];if(!wk)return;c
   const blob=new Blob([rows.join('\n')],{type:'text/csv'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=`time_cards_${iso}.csv`;a.click();toast('Downloaded!','success');
 }
 function rSettings(){let h=`<div class="pg"><div class="ph"><h1>Settings</h1></div>`;
+  h+='<div style="border:1px solid var(--border);border-radius:14px;padding:14px;margin-bottom:16px;display:flex;align-items:center;gap:12px"><i class="ti ti-history" style="font-size:26px;color:var(--accent)"></i><div style="flex:1"><strong style="font-size:15px;display:block">Restore my time</strong><span style="font-size:12.5px;color:var(--text2)">Bring back an earlier copy of time you have not submitted yet</span></div><button class="btn btn-sm" onclick="vhRestoreOpen()">Open</button></div>';
   h+=`<div class="card"><strong style="font-size:16px;font-weight:700;display:block;margin-bottom:12px;letter-spacing:-.2px">Account</strong>
     ${auth.user?`<div style="display:flex;align-items:center;gap:14px;margin-bottom:16px"><span class="av" style="width:50px;height:50px;font-size:18px;flex-shrink:0">${auth.user.initials}</span><div><strong style="font-size:15px">${auth.user.name}</strong><br><span style="font-size:13px;color:var(--text2)">${auth.user.email}</span><br><span class="rb${auth.isAdmin?' adm':''}" style="margin-top:6px;display:inline-flex">${auth.isAdmin?'Administrator':'User'}</span></div></div><div class="acts"><button class="btn" onclick="loadSP()" style="flex:1"><i class="ti ti-refresh"></i> Refresh</button><button class="btn btn-d" onclick="signOut()" style="flex:1"><i class="ti ti-logout"></i> Sign out</button></div>`:`<button class="btn btn-p btn-bl" onclick="signIn()">Sign in with Microsoft</button>`}
   </div>`;
