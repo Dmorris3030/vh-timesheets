@@ -469,6 +469,7 @@ async function vhRestoreOpen(){
     const t=new Date(s.at);
     h+='<div style="border:1px solid var(--border);border-radius:12px;padding:10px 12px;margin-bottom:8px;display:flex;align-items:center;gap:10px"><div style="flex:1;min-width:0"><div style="font-weight:700;font-size:14.5px">'+t.toLocaleDateString(undefined,{weekday:'short',month:'numeric',day:'numeric'})+', '+t.toLocaleTimeString(undefined,{hour:'numeric',minute:'2-digit'})+'</div><div style="font-size:12.5px;color:var(--text2)">'+parts.join('<br>')+'</div></div><button class="btn btn-sm btn-p" onclick="vhRestore(\''+s.at+'\')">Restore</button></div>';
   });
+  h+='<button class="btn btn-bl" style="justify-content:center;margin:4px 0 10px" onclick="vhBackupOffer(true)"><i class="ti ti-cloud-up"></i> Check the server backup</button>';
   if(!shown)h+='<div class="ib"><i class="ti ti-info-circle"></i><span>No earlier copies on this device yet. One is kept about every 15 minutes while you enter time.</span></div>';
   h+='<div class="mf"><button class="btn btn-bl" onclick="closeM()">Close</button></div>';
   showM(h,'rst');
@@ -488,6 +489,154 @@ async function vhRestore(at){
   window.__vhDraftsRead=true;_writeDrafts();closeM();initWeeks();render();updBadge();
   toast(n?('Your time is restored.'+(skipped?' A week that was already submitted was left alone.':'')):'Nothing to restore: those weeks are already submitted.','success');
 }
+// ===== BUILD .26: fuel receipts, T&M jobs, server backup, signed-out warning ==
+function vhSignedOutBanner(){
+  if(auth.user)return '';
+  const known=!!(mi&&auth.account);
+  return '<div style="background:#fef2f2;border:1.5px solid #dc2626;color:#991b1b;border-radius:12px;padding:12px 14px;margin-bottom:12px;display:flex;align-items:center;gap:12px"><i class="ti ti-user-off" style="font-size:24px;flex-shrink:0"></i><div style="flex:1;font-size:13.5px"><strong>'+(known?'Your sign-in could not be confirmed.':'You are not signed in.')+'</strong> Time you enter is kept on this device only. It cannot be sent or backed up until '+(known?'the app reaches the server. Check your signal and try again.':'you sign in.')+'</div><button class="btn btn-sm btn-p" style="flex-shrink:0" onclick="'+(known?'vhRetrySignIn()':'signIn()')+'">'+(known?'Try again':'Sign in')+'</button></div>';
+}
+async function vhRetrySignIn(){toast('Checking\u2026','');try{await onIn(auth.account);}catch(e){}render();if(!auth.user)toast('Still no connection to the server.','error');}
+// ---- T&M jobs: a number that is not on the active list is allowed once the foreman confirms it
+function vhTmKey(job){return String(job||'').trim().toUpperCase().replace(/[^A-Z0-9-]/g,'');}
+function vhTmOk(job){const wk=S.weeks[S.currentWeek];if(!wk)return;wk.tmJobs=wk.tmJobs||{};wk.tmJobs[vhTmKey(job)]=true;saveDraftSilent();render();toast('Job '+job+' marked as T&M. Your manager will see it flagged.','success');}
+function vhTripsHtml(wk){
+  const tr=wk.trips.slice().sort(function(a,b){return String(a.date).localeCompare(String(b.date))||((+a.begin||0)-(+b.begin||0));});
+  let hh=0,mm=0;const c='padding:5px 6px;border-top:0.5px solid var(--border)';
+  let h='<div style="font-size:11px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.4px;margin:12px 0 4px">Trip log</div><div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12.5px"><tr style="text-align:left;color:var(--text3);font-size:11px"><th style="padding:5px 6px">Date</th><th style="padding:5px 6px">Truck</th><th style="padding:5px 6px">From</th><th style="padding:5px 6px">To</th><th style="padding:5px 6px;text-align:right">Miles</th><th style="padding:5px 6px;text-align:right">Hours</th><th style="padding:5px 6px">Hauled</th></tr>';
+  tr.forEach(function(x){const mi=Math.max(0,(+x.end||0)-(+x.begin||0));hh+=(+x.hours||0);mm+=mi;
+    h+='<tr><td style="'+c+'">'+fs(x.date)+'</td><td style="'+c+'">'+wdEsc(x.truck)+'</td><td style="'+c+'">'+wdEsc(x.from)+'</td><td style="'+c+'">'+wdEsc(x.to)+'</td><td style="'+c+';text-align:right">'+(Math.round(mi*10)/10)+'</td><td style="'+c+';text-align:right">'+(+x.hours||0)+'</td><td style="'+c+'">'+(TL_SHORT[(x.svc||0)-1]||'')+(x.manual?' <span style="color:var(--text3)">(entered by hand)</span>':'')+'</td></tr>';});
+  return h+'<tr><td colspan="4" style="'+c+';text-align:right;font-weight:700">Total</td><td style="'+c+';text-align:right;font-weight:700">'+(Math.round(mm*10)/10)+'</td><td style="'+c+';text-align:right;font-weight:700">'+(Math.round(hh*100)/100)+'</td><td style="'+c+'"></td></tr></table></div>';
+}
+// ---- Server backup of time that has not been submitted yet. One small file per person in the
+//      timesheet site (Drafts/{email}.json), refreshed a few minutes after each change.
+let __vhBkT=null,__vhBkLast=0,__vhBkSig='',__vhBkDir=false;
+function vhHash(s){let h=0;for(let i=0;i<s.length;i+=5)h=(h*31+s.charCodeAt(i))|0;return h;}
+function vhBackupUrl(){const em=String((auth.user&&auth.user.email)||'').toLowerCase().replace(/[^a-z0-9@._-]/g,'');return em?('https://graph.microsoft.com/v1.0/sites/'+SITE_ID+'/drive/root:/Drafts/'+encodeURIComponent(em)+'.json:/content'):'';}
+function vhBackupSoon(){clearTimeout(__vhBkT);__vhBkT=setTimeout(function(){vhBackupPush(false,false);},90000);}
+async function vhBackupPush(force,allowBlank){
+  try{
+    if(!navigator.onLine||!auth.user)return false;const url=vhBackupUrl();if(!url)return false;
+    const str=localStorage.getItem('vhts_drafts')||'{}';let d={};try{d=JSON.parse(str)||{};}catch(e){return false;}
+    // A blank device must never overwrite a good backup. Only a real submit may clear it.
+    if(!allowBlank&&!Object.keys(d).some(function(k){return !vhWkPristine(d[k]);}))return false;
+    const sig=str.length+':'+vhHash(str);if(!force&&sig===__vhBkSig)return true;
+    if(!force&&Date.now()-__vhBkLast<180000){vhBackupSoon();return false;}
+    const tok=await getTok();if(!tok)return false;
+    if(!__vhBkDir){__vhBkDir=true;try{await fetch('https://graph.microsoft.com/v1.0/sites/'+SITE_ID+'/drive/root/children',{method:'POST',headers:{Authorization:'Bearer '+tok,'Content-Type':'application/json'},body:JSON.stringify({name:'Drafts',folder:{},'@microsoft.graph.conflictBehavior':'fail'})});}catch(e){}}
+    const body=JSON.stringify({at:new Date().toISOString(),by:auth.user.name||'',device:(/iPad|iPhone|Android|Windows|Macintosh/.exec(navigator.userAgent)||['device'])[0],build:VH_BUILD,drafts:d});
+    const r=await fetch(url,{method:'PUT',headers:{Authorization:'Bearer '+tok,'Content-Type':'application/json'},body:body});
+    if(r.ok){__vhBkLast=Date.now();__vhBkSig=sig;return true;}
+    return false;
+  }catch(e){return false;}
+}
+async function vhBackupFetch(){
+  try{const url=vhBackupUrl();if(!url||!navigator.onLine)return null;const tok=await getTok();if(!tok)return null;
+    const r=await fetch(url,{headers:{Authorization:'Bearer '+tok}});if(!r.ok)return null;const j=await r.json();return (j&&j.drafts)?j:null;}catch(e){return null;}
+}
+// Offer the server backup when this device has no in-progress time (new, wiped or replaced device).
+async function vhBackupOffer(asked){
+  try{
+    const mine=function(k){return k.indexOf(':')<0&&S.weeks[k]&&(S.weeks[k].status==='draft'||S.weeks[k].status==='returned')&&!vhWkPristine(S.weeks[k]);};
+    if(!asked&&Object.keys(S.weeks).some(mine))return;
+    const b=await vhBackupFetch();
+    if(!b){if(asked)toast('No server backup was found for you.','');return;}
+    const floor=new Date(curSatIso()+'T12:00:00');floor.setDate(floor.getDate()-7);const minIso=floor.toISOString().slice(0,10);
+    const list=Object.keys(b.drafts).filter(function(iso){const cur=S.weeks[iso];return iso>=minIso&&vhWkHours(b.drafts[iso])>0&&(!cur||cur.status==='draft'||cur.status==='returned');});
+    if(!list.length){if(asked)toast('The server backup has nothing newer than what is on this device.','');return;}
+    const parts=list.map(function(iso){return 'week ending '+fs(iso)+' ('+vhWkHours(b.drafts[iso])+' h)';}).join(', ');
+    if(!confirm((asked?'The server backup':'This device has no time entered, but a backup of your unsent time')+' was saved '+new Date(b.at).toLocaleString()+(b.device?' from your '+b.device:'')+': '+parts+'.\n\nBring it back? It replaces what is on screen for '+(list.length>1?'those weeks':'that week')+'.'))return;
+    await vhSnapPut(localStorage.getItem('vhts_drafts')||'{}',true);
+    list.forEach(function(iso){S.weeks[iso]=b.drafts[iso];});
+    window.__vhDraftsRead=true;_writeDrafts();closeM();initWeeks();render();updBadge();toast('Your time is restored from the backup.','success');
+  }catch(e){console.warn('backup offer',e);}
+}
+document.addEventListener('visibilitychange',function(){if(document.visibilityState==='hidden'){try{vhBackupPush(false,false);}catch(e){}}});
+// ---- Fuel receipts: photo plus a few fields, filed by foreman in Field/Fuel Receipts
+function fuOpen(){
+  const mem=tkMem();const old=document.getElementById('tk-sheet');if(old)old.remove();
+  window.__tk={img:null,fuel:true};
+  const lbl='font-size:12px;font-weight:600;color:var(--text2);display:block;margin:12px 0 5px';
+  const inp='width:100%;font-size:16px;padding:11px 12px;border-radius:10px;border:1px solid var(--border);background:var(--bg);color:inherit;box-sizing:border-box';
+  const el=document.createElement('div');el.id='tk-sheet';
+  el.innerHTML='<div style="position:fixed;inset:0;background:var(--bg);z-index:300;display:flex;flex-direction:column">'+
+   '<div style="display:flex;align-items:center;gap:8px;padding:calc(10px + env(safe-area-inset-top)) 12px 10px;border-bottom:0.5px solid var(--border)">'+
+     '<button onclick="tkClose()" style="background:none;border:none;color:inherit;font-size:24px;padding:4px 8px;cursor:pointer">\u2715</button>'+
+     '<strong style="flex:1;font-size:17px">Fuel receipt</strong>'+
+     '<button class="btn btn-p" onclick="fuSave(false)" style="min-height:42px"><i class="ti ti-check"></i> Save</button></div>'+
+   '<div style="flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:14px 16px calc(24px + env(safe-area-inset-bottom));max-width:560px;width:100%;margin:0 auto;box-sizing:border-box">'+
+     '<label class="btn btn-p btn-bl" style="min-height:56px;justify-content:center;cursor:pointer;font-size:16px"><input type="file" accept="image/*" capture="environment" style="display:none" onchange="fuPhoto(this)"/><i class="ti ti-camera"></i> <span id="fu-plabel">Take photo of the receipt</span></label>'+
+     '<img id="fu-prev" style="display:none;width:100%;max-height:260px;object-fit:contain;background:#111;border-radius:10px;margin-top:10px"/>'+
+     '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px"><div><span style="'+lbl+'">Date</span><input id="fu-date" type="date" style="'+inp+'" value="'+wdToday()+'"/></div>'+
+       '<div><span style="'+lbl+'">Truck or equipment #</span><input id="fu-truck" style="'+inp+'" value="'+wdEsc(tlMem().truck||'')+'"/></div></div>'+
+     '<span style="'+lbl+'">Vendor</span><input id="fu-vendor" autocomplete="off" style="'+inp+'"/><div id="fu-chips" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px"></div>'+
+     '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px"><div><span style="'+lbl+'">Gallons</span><input id="fu-gal" inputmode="decimal" style="'+inp+'"/></div>'+
+       '<div><span style="'+lbl+'">Amount ($)</span><input id="fu-amt" inputmode="decimal" style="'+inp+'"/></div></div>'+
+     '<span style="'+lbl+'">Notes</span><input id="fu-notes" style="'+inp+'"/>'+
+     '<button class="btn btn-bl" style="min-height:48px;justify-content:center;margin-top:16px" onclick="fuSave(true)"><i class="ti ti-plus"></i> Save and add another</button>'+
+   '</div></div>';
+  document.body.appendChild(el);
+  const chips=document.getElementById('fu-chips');
+  (mem.fuelVendors||[]).slice(0,6).forEach(function(v){const b=document.createElement('button');b.className='btn btn-sm';b.textContent=v;b.onclick=function(){document.getElementById('fu-vendor').value=v;};chips.appendChild(b);});
+}
+async function fuPhoto(inp){
+  const f=inp.files&&inp.files[0];inp.value='';if(!f||!window.__tk||!window.__tk.fuel)return;
+  try{
+    const data=await new Promise(function(res,rej){const rd=new FileReader();rd.onload=function(){res(rd.result);};rd.onerror=function(){rej(rd.error);};rd.readAsDataURL(f);});
+    window.__tk.img=await compressPhoto(data,1800,0.72);
+    const p=document.getElementById('fu-prev');if(p){p.src=window.__tk.img;p.style.display='block';}
+    const l=document.getElementById('fu-plabel');if(l)l.textContent='Retake photo';
+  }catch(e){toast('That photo could not be read. Try again.','error');}
+}
+async function fuSave(again){
+  const t=window.__tk;if(!t||!t.fuel)return;
+  const v=function(id){return document.getElementById(id).value.trim();};
+  const amt=tlNum(v('fu-amt')),gal=tlNum(v('fu-gal'));const miss=[];
+  if(!t.img)miss.push('a photo of the receipt');if(!v('fu-truck'))miss.push('truck or equipment number');if(!v('fu-vendor'))miss.push('vendor');if(!(amt>0))miss.push('amount');
+  if(miss.length){toast('Still needed: '+miss.join(', ')+'.','error');return;}
+  const meta={date:v('fu-date'),truck:v('fu-truck'),vendor:v('fu-vendor'),gallons:gal>0?gal:'',amount:Math.round(amt*100)/100,notes:v('fu-notes'),by:(auth.user&&auth.user.name)||'',byEmail:(auth.user&&auth.user.email)||'',at:new Date().toISOString()};
+  try{await tkPut({id:Date.now()+'-'+Math.random().toString(36).slice(2,8),type:'fuel',img:t.img,meta:meta});}
+  catch(e){toast('Could not save on this device: '+((e&&e.message)||e),'error');return;}
+  const mem=tkMem();mem.fuelVendors=[meta.vendor].concat((mem.fuelVendors||[]).filter(function(x){return x.toUpperCase()!==meta.vendor.toUpperCase();})).slice(0,8);tkMemSave(mem);
+  tkClose();toast('Fuel receipt saved. '+(navigator.onLine?'Uploading now\u2026':'It will upload when you have signal.'),'success');
+  tkRefreshCount();tkFlush(false);
+  if(again)setTimeout(fuOpen,350);
+}
+async function fuSend(tok,rec){
+  const m=rec.meta;const root='Field/Fuel Receipts';const who=tkClean(m.by||String(m.byEmail||'').split('@')[0]||'Unknown');const dir=root+'/'+who;
+  if(!m.folderOk){await tkEnsureFolder(tok,'Field','Fuel Receipts');await tkEnsureFolder(tok,root,who);m.folderOk=true;}
+  if(rec.img&&!m.url){
+    const blob=await (await fetch(rec.img)).blob();
+    const fname=[m.date,'Truck '+tkClean(m.truck),tkClean(m.vendor),'$'+Number(m.amount).toFixed(2)].join('_')+'.jpg';
+    const r=await fetch(tkUrl(dir+'/'+fname)+':/content?@microsoft.graph.conflictBehavior=rename',{method:'PUT',headers:{Authorization:'Bearer '+tok,'Content-Type':'image/jpeg'},body:blob});
+    if(!r.ok)throw new Error('photo upload '+r.status);
+    const j=await r.json();m.url=j.webUrl||'';m.file=j.name||fname;await tkPut(rec);
+  }
+  const logUrl=tkUrl(root+'/fuel.json');let rows=null;
+  for(let a=0;a<4;a++){
+    const mr=await fetch(logUrl,{headers:{Authorization:'Bearer '+tok}});
+    let etag=null;rows=[];
+    if(mr.status!==404){
+      if(!mr.ok)throw new Error('log read '+mr.status);
+      etag=(await mr.json()).eTag;
+      const cr=await fetch(logUrl+':/content',{headers:{Authorization:'Bearer '+tok}});
+      if(!cr.ok)throw new Error('log read '+cr.status);
+      const d=await cr.json();if(!Array.isArray(d))throw new Error('log unreadable');rows=d;
+    }
+    if(!rows.some(function(x){return x.id===rec.id;})){const row=Object.assign({id:rec.id},m);delete row.folderOk;rows.push(row);}
+    const H={Authorization:'Bearer '+tok,'Content-Type':'application/json'};if(etag)H['If-Match']=etag;
+    const pr=await fetch(logUrl+':/content'+(etag?'':'?@microsoft.graph.conflictBehavior=fail'),{method:'PUT',headers:H,body:JSON.stringify(rows)});
+    if(pr.status===412||pr.status===409){rows=null;continue;}
+    if(!pr.ok)throw new Error('log save '+pr.status);
+    break;
+  }
+  if(!rows)throw new Error('log busy, will retry');
+  const q=function(x){x=String(x==null?'':x);return /[",\n]/.test(x)?'"'+x.replace(/"/g,'""')+'"':x;};
+  const lines=[['Date','Foreman','Truck / Equipment','Vendor','Gallons','Amount','Notes','Entered','Photo'].join(',')];
+  rows.slice().sort(function(a,b){return String(b.date).localeCompare(String(a.date))||String(b.at).localeCompare(String(a.at));}).forEach(function(x){
+    lines.push([x.date,x.by,x.truck,x.vendor,x.gallons,x.amount,x.notes,String(x.at||'').slice(0,16).replace('T',' '),x.url?'=HYPERLINK("'+x.url+'","'+(x.file||'photo')+'")':''].map(q).join(','));});
+  const cr2=await fetch(tkUrl(root+'/Fuel Log.csv')+':/content',{method:'PUT',headers:{Authorization:'Bearer '+tok,'Content-Type':'text/csv'},body:'\ufeff'+lines.join('\r\n')});
+  if(!cr2.ok&&cr2.status!==423)throw new Error('log file save '+cr2.status);
+}
 async function initApp(){
   // Stored time first, and on screen straight away: sign-in can be slow or fail on a weak signal.
   vhLoadLocalDrafts();
@@ -499,7 +648,7 @@ async function initApp(){
   }catch(e){console.warn(e);}
   initWeeks();updUC();updNav();render();updBadge();
 }
-const VH_BUILD='2026-11-20.25';
+const VH_BUILD='2026-11-20.26';
 console.log('[VH] Timesheets build',VH_BUILD);
 let __vhAuthToastAt=0;
 // interactive=true only from a user-initiated action: saves drafts, then allows the MSAL
@@ -564,6 +713,7 @@ async function onIn(account){
     auth.user={name:d.displayName||d.userPrincipalName,email:d.userPrincipalName,initials:(d.displayName||'U').split(' ').map(p=>p[0]).join('').slice(0,2).toUpperCase()};
     auth.isAdmin=S.adminEmails.map(e=>e.toLowerCase()).includes(em);
     updUC();updNav();setSS('busy');await loadSP(true);render();startAutoSave();
+    setTimeout(function(){vhBackupOffer(false);},1500);
     toast('Signed in as '+auth.user.name+(auth.isAdmin?' · Admin':''),'success');
   }catch(e){console.error(e);}
 }
@@ -782,6 +932,7 @@ function _writeDrafts(){
   });
   vhSnapPut(prev,false); // keep the copy we are about to replace
   localStorage.setItem('vhts_drafts',JSON.stringify(drafts));
+  try{vhBackupSoon();}catch(e){}
 }
 function saveDraft(){
   try{
@@ -1287,7 +1438,7 @@ async function tkFlush(loud){
   const tok=await getTok(!!loud);if(!tok){if(loud)toast('Sign in to send tickets.','error');return;}
   window.__tkBusy=true;window.__tkLast=Date.now();let sent=0,err='';
   for(const rec of recs){
-    try{await (rec.type==='test'?tsSend(tok,rec):tkSend(tok,rec));await tkDel(rec.id);sent++;}
+    try{await (rec.type==='test'?tsSend(tok,rec):(rec.type==='fuel'?fuSend(tok,rec):tkSend(tok,rec)));await tkDel(rec.id);sent++;}
     catch(e){err=(e&&e.message)||String(e);console.warn('ticket send',e);break;}
   }
   window.__tkBusy=false;tkRefreshCount();
@@ -1392,6 +1543,7 @@ function rHome(){
       '<span style="font-size:13.5px;color:var(--text2);display:block;margin-top:4px;line-height:1.35">'+sub+'</span></span></button>';
   };
   let h='<div class="pg">';
+  h+=vhSignedOutBanner();
   h+='<div style="margin:6px 0 18px"><div style="font-size:26px;font-weight:800;letter-spacing:-.5px">'+(first?'Hi, '+first.replace(/</g,'&lt;'):'Valenti Held Field')+'</div>'+
      '<div style="font-size:14px;color:var(--text2);margin-top:2px">'+fw(S.currentWeek)+'</div></div>';
   if(!auth.user)h+='<div class="syb"><span class="sd off" style="flex-shrink:0"></span><span style="flex:1;font-size:14px">Not signed in</span><button class="btn btn-p btn-sm" onclick="signIn()" style="flex-shrink:0">Sign in</button></div>';
@@ -1402,6 +1554,7 @@ function rHome(){
   h+=tile('ti-gauge','#7c3aed','Testing','Air, mandrel, vacuum, pressure, televising',"tsOpen()");
   h+=tile('ti-highlight','#0891b2',"What's Done",'Highlight the plan sheet with what your crew finished this week',"wdOpen()");
   h+=tile('ti-truck','#b45309','Trip Log','Truck miles and hauls, turned in with your timesheet',"tlOpen()");
+  h+=tile('ti-gas-station','#be123c','Fuel Receipt','Photo of a fuel receipt, filed under your name',"fuOpen()");
   h+=tile('ti-chart-bar','#0f766e','Job Tracker','Progress by run, what is done, earthwork yards and cost',"location.href='tracker.html'");
   h+='</div></div>';
   document.getElementById('mc').innerHTML=h;
@@ -2988,6 +3141,7 @@ function rEntry(){const wk=S.weeks[S.currentWeek];const dates=wd(S.currentWeek);
     wk.employees=[...new Set(Object.keys(wk.entries).map(k=>k.split(':')[0]).filter(Boolean))];
   }
   let h=`<div class="pg">`;
+  h+=vhSignedOutBanner();
   if(auth.user){h+=`<div class="syb"><span class="sd ok" style="flex-shrink:0"></span><span style="flex:1;font-size:13px">${auth.user.name}${auth.isAdmin?' <span class="rb adm" style="margin-left:4px">Admin</span>':''}</span><button class="btn btn-sm" onclick="saveDraft()" style="flex-shrink:0;font-size:12px">💾 Save</button><button class="btn btn-sm" onclick="loadSP()" style="flex-shrink:0;font-size:12px">↻ Sync</button></div>`;}
   else{h+=`<div class="syb"><span class="sd off" style="flex-shrink:0"></span><span style="flex:1;font-size:14px">Not signed in</span><button class="btn btn-p btn-sm" onclick="signIn()" style="flex-shrink:0">Sign in</button></div>`;}
   // Return-reason banner: shown when the manager returned this week. Extracts the latest "Returned: <reason>"
@@ -3288,7 +3442,11 @@ function vhCheckWeek(wk,iso,mgr,key){
         const job=String(ln.job||'').trim();
         if(!pto&&!job)add('err',tag+c.total+' hours with no job number.');
         else if(!pto&&!String(ln.phase||'').trim())add('err',tag+'Job '+job+' has no phase code.');
-        if(job&&act.length&&!actSet[job.toUpperCase()])add('err',tag+'Job '+job+' is not on the active job list. Check the number.');
+        if(job&&act.length&&!actSet[job.toUpperCase()]){
+          const tk2=vhTmKey(job);
+          if(wk.tmJobs&&wk.tmJobs[tk2]){out._tm=out._tm||{};if(mgr&&!out._tm[tk2]){out._tm[tk2]=1;add('warn','T&M job '+job+' is on this timesheet. It is not on the job list.');}}
+          else out.push({sev:'err',eid:String(eid),di:di,who:who,day:day,msg:tag+'Job '+job+' is not on the active job list. Fix the number, or confirm it is a T&M job.',tm:tk2});
+        }
         if(job){const dk=di+'|'+job;dayJobs[dk]=dayJobs[dk]||{};dayJobs[dk][eid]=(dayJobs[dk][eid]||0)+c.total;}
         if(c.equip>c.total+0.001)add('err',tag+'Equipment hours ('+c.equip+') are more than the hours worked ('+c.total+').');
         if(ln.startTime&&ln.stopTime){
@@ -3432,6 +3590,7 @@ function rReview(){const wk=S.weeks[S.currentWeek];const dates=wd(S.currentWeek)
     if(!iss.length){h+=`<div class="ib" style="border-color:#16a34a"><i class="ti ti-circle-check" style="color:#16a34a"></i><span>No problems found. Ready to submit.</span></div>`;}
     else{
       h+=`<div class="card" style="padding:0;overflow:hidden"><div style="padding:13px 16px"><strong style="font-size:16px">${errs.length?errs.length+' to fix before you can submit':'Check these before you submit'}</strong>${warns.length&&errs.length?`<span style="font-size:13px;color:var(--text2)"> · ${warns.length} to double-check</span>`:''}<div style="font-size:13px;color:var(--text2);margin-top:3px">Tap a line to go straight to it.</div></div>`;
+      {const tms={};errs.forEach(x=>{if(x.tm)tms[x.tm]=1;});Object.keys(tms).forEach(j=>{h+=`<div style="padding:12px 16px;border-top:0.5px solid var(--border);display:flex;gap:12px;align-items:center;background:var(--bg2)"><div style="flex:1;font-size:13.5px">Is <strong>${j}</strong> a T&amp;M job? If the number is right, confirm it. It goes to your manager flagged as T&amp;M.</div><button class="btn btn-sm btn-p" style="flex-shrink:0" onclick="vhTmOk('${j}')">Yes, T&amp;M</button></div>`;});}
       errs.concat(warns).forEach(x=>{
         const isE=x.sev==='err';
         h+=`<div onclick="vhGoIssue('${x.eid}',${x.di})" style="padding:12px 16px;border-top:0.5px solid var(--border);display:flex;gap:12px;align-items:center;cursor:pointer"><i class="ti ${isE?'ti-alert-circle':'ti-alert-triangle'}" style="font-size:20px;flex-shrink:0;color:${isE?'#dc2626':'#d97706'}"></i><div style="flex:1;min-width:0"><strong style="font-size:14px">${x.who}${x.day?' · '+x.day:''}</strong><br><span style="font-size:13px;color:var(--text2)">${String(x.msg).replace(/</g,'&lt;')}</span></div><i class="ti ti-chevron-right" style="color:var(--text3)"></i></div>`;
@@ -3473,6 +3632,7 @@ async function subTS(){
   //    If the submission is ever lost server-side, the foreman restores it in two taps.
   vhArchiveSent(S.currentWeek,wk);
   try{tsfSave(JSON.parse(JSON.stringify(wk)),S.currentWeek,'');}catch(e){}
+  setTimeout(function(){vhBackupPush(true,true);},2500); // the submitted week leaves the backup
   try{const drafts=JSON.parse(localStorage.getItem('vhts_drafts')||'{}');delete drafts[S.currentWeek];localStorage.setItem('vhts_drafts',JSON.stringify(drafts));}catch(e){}
   // 3. Push the reporting lists and be honest about the outcome (periodic sync retries failures)
   const [prodR,jlR]=await Promise.all([submitProductionToSP(wk,true),submitJobLinesToSP(wk,true)]);
@@ -3612,6 +3772,7 @@ function vwWkK(key){
     if(!hasDays)h+=`<div style="font-size:11px;color:var(--text3);font-style:italic">No hours entered</div>`;
     h+=`</div>`;
   });
+  if(Array.isArray(wk.trips)&&wk.trips.length)h+=vhTripsHtml(wk);
   // Footer actions
   h+=`<div class="mf">`;
   if(wk.status==='submitted'){
