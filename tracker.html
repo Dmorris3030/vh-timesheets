@@ -139,7 +139,7 @@ const FALLBACK_ADMINS=['dmorris@valentiheld.com','abewley@valentiheld.com','jroe
 const SCOPE_LIST_NAME='JobScope';
 const STATUS_LIST_NAME='TrackerStatus';
 const PHASE_LABELS={'300':'Earth — Mass','310':'Earth — Finish','400':'Storm','450':'Storm — Other','500':'Sanitary','600':'Water'};
-const VH_TRK_BUILD='2026-11-15.29';
+const VH_TRK_BUILD='2026-11-20.30';
 const VH_BG=/[?&]autosave=1/.test(location.search); // loaded hidden by the time app, only to refresh the Excel trackers
 console.log('[VH] Job Trackers build',VH_TRK_BUILD);
 
@@ -185,7 +185,10 @@ async function loadRoles(){
   try{
     const tok=await getToken();if(!tok)throw new Error('no token');
     const r=await fetch(`https://graph.microsoft.com/v1.0/sites/${TS_SITE}/drive/root:/vhts-state.json:/content`,{headers:{Authorization:'Bearer '+tok}});
-    if(r.ok){const j=await r.json();auth.isAdmin=(j.adminEmails||[]).map(e=>(e||'').toLowerCase()).includes(auth.user.email);return;}
+    if(r.ok){const j=await r.json();auth.isAdmin=(j.adminEmails||[]).map(e=>(e||'').toLowerCase()).includes(auth.user.email);
+      auth.isManager=(j.managers||[]).some(m=>String((m&&m.email)||'').toLowerCase()===auth.user.email);
+      if(!auth.isManager){try{const r2=await fetch(`https://graph.microsoft.com/v1.0/sites/${TS_SITE}/drive/root:/vh_timesheets.json:/content`,{headers:{Authorization:'Bearer '+tok}});if(r2.ok){const j2=await r2.json();auth.isManager=(j2.managers||[]).some(m=>String((m&&m.email)||'').toLowerCase()===auth.user.email);}}catch(e){}}
+      return;}
     throw new Error('no state file');
   }catch(e){auth.isAdmin=FALLBACK_ADMINS.includes(auth.user.email);}
 }
@@ -298,7 +301,7 @@ async function loadAll(){
       const k=String(it.fields[ct.JobNum]||'').trim()+'|'+String(it.fields[ct.ItemID]||'').trim();
       S.status[k]={spId:it.id,pct:Math.max(0,Math.min(100,Math.round((+it.fields[ct.PctDone]||0)*10)/10)),note:it.fields[ct.Note]||''};
     });
-    S.prod=fdItems.map(it=>it.fields).filter(f=>f&&(f.Jobnumber||f['STR_x0020_ID']));
+    S.prod=fdItems.map(it=>{const f=it.fields;if(f&&!f.id)f.id=it.id;return f;}).filter(f=>f&&(f.Jobnumber||f['STR_x0020_ID']));
     S._aq={}; // reported-qty cache follows Field Data
     S.loaded=true;
     setTimeout(()=>saveOfficeTracker(true),4000); // keep the office copy fresh (at most every 30 min per device)
@@ -603,10 +606,10 @@ function utDaily(job){
   utRows(job).forEach(function(f){const ph=String(f.Phase||'').trim();const dt=String(f.WorkDate||'').slice(0,10);if(!ph||!dt)return;const d=day(ph,dt);
     vhCrewLines(f,false).forEach(function(l){if(l.num)d.machH+=l.h;});d.crewH+=(+f.Hours)||0;});
   let keys=Object.keys(days).filter(function(k){return S.phase==='ALL'||days[k].ph===S.phase;}).sort(function(a,b){return days[b].dt.localeCompare(days[a].dt)||days[a].ph.localeCompare(days[b].ph);});
-  if(!keys.length)return '';
+  if(!keys.length)return pdCan()?'<div class="sec"><h2>Daily log '+pdAddBtn(job,'','')+'</h2><p class="note">No production has been reported on this job yet.</p></div>':'';
   const more=keys.length>45;keys=keys.slice(0,45);
   const c='padding:5px 6px';
-  let h='<div class="sec"><h2>Daily log <span class="h2-sub">tap a day for the crew and equipment breakdown</span></h2><div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:13px"><tr style="text-align:right;color:var(--text3);font-size:11px"><th style="text-align:left;'+c+'">Date</th><th style="text-align:left;'+c+'">Utility</th><th style="text-align:left;'+c+'">Entered by</th><th style="text-align:left;'+c+'">Runs worked</th><th style="'+c+'">Qty</th><th style="'+c+'">Production h</th><th style="'+c+'">Crew h</th><th style="'+c+'">Machine h</th></tr>';
+  let h='<div class="sec"><h2>Daily log <span class="h2-sub">tap a day for the crew and equipment breakdown</span>'+pdAddBtn(job,'','')+'</h2><div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:13px"><tr style="text-align:right;color:var(--text3);font-size:11px"><th style="text-align:left;'+c+'">Date</th><th style="text-align:left;'+c+'">Utility</th><th style="text-align:left;'+c+'">Entered by</th><th style="text-align:left;'+c+'">Runs worked</th><th style="'+c+'">Qty</th><th style="'+c+'">Production h</th><th style="'+c+'">Crew h</th><th style="'+c+'">Machine h</th></tr>';
   keys.forEach(function(k){const d=days[k];const open=S.uday===k;
     h+='<tr onclick="S.uday=(S.uday===\''+k+'\')?\'\':\''+k+'\';render()" style="text-align:right;border-top:1px solid var(--border);cursor:pointer"><td style="text-align:left;white-space:nowrap;'+c+'"><i class="ti ti-chevron-'+(open?'down':'right')+'" style="font-size:12px;opacity:.6"></i> '+d.dt+'</td><td style="text-align:left;'+c+'">'+esc(PHASE_LABELS[d.ph]||d.ph)+'</td><td style="text-align:left;'+c+'">'+esc(Object.keys(d.who).join(', '))+'</td><td style="text-align:left;'+c+'">'+esc(Object.keys(d.runs).join(', '))+'</td><td class="num" style="'+c+'">'+(d.qty?fmt(d.qty)+' '+esc(d.unit):'\u2014')+'</td><td class="num" style="'+c+'">'+(d.prodH?fmt(d.prodH):'\u2014')+'</td><td class="num" style="'+c+'">'+fmt(d.crewH)+'</td><td class="num" style="'+c+'">'+fmt(d.machH)+'</td></tr>';
     if(open)h+='<tr><td colspan="8" style="padding:2px 6px 12px">'+utDayDetail(job,d.ph,d.dt)+'</td></tr>';});
@@ -624,8 +627,8 @@ function utDayDetail(job,ph,dt){
   const hd='<tr style="color:var(--text3);font-size:11px;text-align:left">';
   let h='<div style="background:var(--bg2);border-radius:8px;padding:10px 12px;text-align:left;cursor:default" onclick="event.stopPropagation()">';
   const prod=S.prod.filter(function(f){return String(f.Jobnumber||'').trim()===job&&String(f.Phase||'').trim()===ph&&String(f.Date||f.Created||'').slice(0,10)===dt;});
-  h+='<div style="font-weight:700;margin-bottom:4px">Production reported</div>';
-  if(prod.length)prod.forEach(function(f){h+='<div class="note" style="margin-bottom:2px"><b>'+esc(f.Foreman||'Unknown')+'</b>: '+(f['STR_x0020_ID']?'run '+esc(String(f['STR_x0020_ID']))+', ':'')+esc(String(f['Yardage_x002f_production']||'0'))+' '+esc(f.Unit||'')+(f['Production_x0020_Hours']?', '+esc(String(f['Production_x0020_Hours']))+' production hrs':'')+(f['Crew_x0020_Size']?', crew of '+esc(String(f['Crew_x0020_Size'])):'')+(f.Notes?'. '+esc(f.Notes):'')+'</div>';});
+  h+='<div style="font-weight:700;margin-bottom:4px">Production reported'+pdAddBtn(job,dt,ph)+'</div>';
+  if(prod.length)prod.forEach(function(f){h+='<div class="note" style="margin-bottom:2px">'+pdEditBtn(f)+'<b>'+esc(f.Foreman||'Unknown')+'</b>: '+(f['STR_x0020_ID']?'run '+esc(String(f['STR_x0020_ID']))+', ':'')+esc(String(f['Yardage_x002f_production']||'0'))+' '+esc(f.Unit||'')+(f['Production_x0020_Hours']?', '+esc(String(f['Production_x0020_Hours']))+' production hrs':'')+(f['Crew_x0020_Size']?', crew of '+esc(String(f['Crew_x0020_Size'])):'')+(f.Notes?'. '+esc(f.Notes):'')+'</div>';});
   else h+='<div class="note" style="color:var(--red)">No production report for this day.</div>';
   const mk=Object.keys(mach).sort(function(a,b){return mach[b].h-mach[a].h;});
   if(mk.length){
@@ -647,6 +650,105 @@ function xlCrew(job){
     const ph=String(f.Phase||'').trim();const earth=!!EW_PH[ph];
     vhCrewLines(f,earth).forEach(function(l){o.push({job:j,date:String(f.WorkDate||'').slice(0,10),work:PHASE_LABELS[ph]||ph,who:f.EmployeeName||'',role:f.EmployeeTitle||'',what:l.what,cat:l.cat,h:l.h,rate:l.rate||null,cost:earth?Math.round(l.cost):null});});});
   return o.sort(function(a,b){return b.date.localeCompare(a.date)||a.job.localeCompare(b.job)||a.who.localeCompare(b.who);}).slice(0,6000);
+}
+// ===== ADD / EDIT PRODUCTION FROM THE TRACKER (build .30) =====================
+// For admins and managers, when a foreman missed a production report or got one wrong.
+// Rows live in the same Field Data list the time app writes, so progress, cost and the Excel
+// trackers all follow.
+//  - A row ADDED here is stored under "<foreman> (office)". The foreman's iPad only replaces
+//    rows under his exact name, so it can never delete an office entry.
+//  - A row EDITED here stays under the foreman's name. If he changes or resubmits that week's
+//    production from his iPad, his version replaces the edit. The form says so.
+function pdCan(){return !!(auth.isAdmin||auth.isManager);}
+function pdAddBtn(job,dt,ph){if(!pdCan())return '';return '<button class="btn btn-sm" style="margin-left:8px;font-weight:400" onclick="event.stopPropagation();pdOpen(\''+String(job).replace(/[^A-Za-z0-9-]/g,'')+'\',\''+(dt||'')+'\',\''+(ph||'')+'\',\'\')"><i class="ti ti-plus"></i> Add production</button>';}
+function pdEditBtn(f){if(!pdCan()||!f||!f.id)return '';return '<button class="btn btn-sm" style="float:right;padding:2px 8px;font-weight:400" onclick="event.stopPropagation();pdOpen(\'\',\'\',\'\',\''+String(f.id).replace(/[^0-9]/g,'')+'\')"><i class="ti ti-pencil"></i> Edit</button>';}
+function pdClose(){const o=document.getElementById('pd-modal');if(o)o.remove();window.__pd=null;}
+function pdUnit(ph){return ph==='300'?'CY':(ph==='310'?'SY':'LF');}
+function pdToday(){const d=new Date();return new Date(d.getTime()-d.getTimezoneOffset()*60000).toISOString().slice(0,10);}
+function pdOpen(job,dt,ph,id){
+  if(!pdCan())return;
+  const row=id?S.prod.find(function(f){return String(f.id)===String(id);}):null;
+  if(id&&!row){toast('That production entry could not be found. Refresh and try again.','err');return;}
+  job=row?String(row.Jobnumber||'').trim():job;
+  const cur={date:row?String(row.Date||'').slice(0,10):(dt||pdToday()),ph:row?String(row.Phase||'').trim():(ph||''),run:row?(row['STR_x0020_ID']||''):'',
+    qty:row?(row['Yardage_x002f_production']||''):'',unit:row?(row.Unit||''):'',hrs:row?(row['Production_x0020_Hours']||''):'',crew:row?(row['Crew_x0020_Size']||''):'',
+    who:row?(row.Foreman||''):'',notes:row?(row.Notes||''):''};
+  window.__pd={job:job,id:row?row.id:'',row:row};
+  const phs=Object.keys(PHASE_LABELS).sort();
+  const names={};S.prod.forEach(function(f){const n=String(f.Foreman||'').replace(/\s*\(office\)\s*$/i,'').trim();if(n)names[n]=1;});
+  const lbl='font-size:12px;font-weight:600;color:var(--text2);display:block;margin:10px 0 4px';
+  const inp='width:100%;box-sizing:border-box;font-size:15px;padding:9px 10px';
+  // warn when the foreman's own iPad could still overwrite this edit (his current, unsubmitted week)
+  const now=new Date();const sat=new Date(now);sat.setDate(now.getDate()+(6-now.getDay()));const wkStart=new Date(sat);wkStart.setDate(sat.getDate()-6);
+  const inThisWeek=row&&cur.date>=new Date(wkStart.getTime()-wkStart.getTimezoneOffset()*60000).toISOString().slice(0,10);
+  const office=row&&/\(office\)\s*$/i.test(String(row.Foreman||''));
+  let h='<div style="display:flex;align-items:center;gap:8px;margin-bottom:4px"><strong style="font-size:17px;flex:1">'+(row?'Edit production':'Add production')+' \u00b7 job '+esc(job)+'</strong><button class="btn btn-sm" onclick="pdClose()">Cancel</button></div>';
+  if(row&&!office&&inThisWeek)h+='<p class="note" style="color:var(--amber,#d97706);margin:6px 0">This is from '+esc(row.Foreman||'the foreman')+'\'s current week. If he changes his production on his iPad before submitting, his version replaces this edit. Edits to weeks already submitted stay.</p>';
+  h+='<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px"><div><span style="'+lbl+'">Date</span><input id="pd-date" type="date" style="'+inp+'" value="'+esc(cur.date)+'"></div>'+
+     '<div><span style="'+lbl+'">Type of work</span><select id="pd-ph" style="'+inp+'" onchange="pdPhase()">'+(cur.ph&&phs.indexOf(cur.ph)<0?'<option value="'+esc(cur.ph)+'" selected>'+esc(cur.ph)+'</option>':'')+'<option value="">Pick</option>'+phs.map(function(p){return '<option value="'+p+'"'+(p===cur.ph?' selected':'')+'>'+p+' '+esc(PHASE_LABELS[p])+'</option>';}).join('')+'</select></div></div>';
+  h+='<div id="pd-runbox"><span style="'+lbl+'">Run, lot or structure</span><input id="pd-run" list="pd-runs" autocomplete="off" style="'+inp+'" value="'+esc(cur.run)+'"><datalist id="pd-runs"></datalist></div>';
+  h+='<div style="display:grid;grid-template-columns:1.2fr .8fr 1fr 1fr;gap:10px"><div><span style="'+lbl+'">Quantity</span><input id="pd-qty" inputmode="decimal" style="'+inp+'" value="'+esc(cur.qty)+'"></div>'+
+     '<div><span style="'+lbl+'">Unit</span><select id="pd-unit" style="'+inp+'">'+['LF','CY','SY','EA'].map(function(u){return '<option'+(u===(cur.unit||pdUnit(cur.ph))?' selected':'')+'>'+u+'</option>';}).join('')+'</select></div>'+
+     '<div><span style="'+lbl+'">Production hrs</span><input id="pd-hrs" inputmode="decimal" style="'+inp+'" value="'+esc(cur.hrs)+'"></div>'+
+     '<div><span style="'+lbl+'">Crew size</span><input id="pd-crew" inputmode="numeric" style="'+inp+'" value="'+esc(cur.crew)+'"></div></div>';
+  h+='<span style="'+lbl+'">'+(row?'Reported by':'Whose crew did this work')+'</span><input id="pd-who" list="pd-names" autocomplete="off" style="'+inp+'" value="'+esc(cur.who)+'"'+(row?' disabled':'')+'><datalist id="pd-names">'+Object.keys(names).sort().map(function(n){return '<option value="'+esc(n)+'">';}).join('')+'</datalist>';
+  h+='<span style="'+lbl+'">Notes</span><input id="pd-notes" style="'+inp+'" value="'+esc(cur.notes)+'">';
+  h+='<div id="pd-err" style="color:var(--red);font-size:13px;min-height:18px;margin-top:8px"></div>';
+  h+='<div style="display:flex;gap:8px;margin-top:4px"><button class="btn btn-p" id="pd-save" style="flex:1;justify-content:center;min-height:42px" onclick="pdSave()"><i class="ti ti-check"></i> Save</button>'+(row?'<button class="btn" style="color:var(--red)" onclick="pdDelete()"><i class="ti ti-trash"></i> Delete</button>':'')+'</div>';
+  const old=document.getElementById('pd-modal');if(old)old.remove();
+  const o=document.createElement('div');o.id='pd-modal';
+  o.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:500;display:flex;align-items:flex-start;justify-content:center;overflow-y:auto;padding:24px 12px';
+  o.innerHTML='<div style="background:var(--card,var(--bg));color:var(--text);border-radius:14px;padding:18px;max-width:560px;width:100%;box-shadow:0 10px 40px rgba(0,0,0,.3)">'+h+'</div>';
+  document.body.appendChild(o);
+  pdPhase(true);
+}
+function pdPhase(keepUnit){
+  const p=window.__pd;if(!p)return;const ph=document.getElementById('pd-ph').value;
+  const earth=(ph==='300'||ph==='310');
+  const box=document.getElementById('pd-runbox');if(box)box.style.display=earth?'none':'';
+  if(!keepUnit){const u=document.getElementById('pd-unit');if(u)u.value=pdUnit(ph);}
+  const dl=document.getElementById('pd-runs');
+  if(dl)dl.innerHTML=S.scope.filter(function(r){return r.JobNum===p.job&&r.Phase===ph;}).map(function(r){return '<option value="'+esc(r.ItemID)+'">'+esc((r.Descr||'')+(r.BidQty?' \u00b7 '+r.BidQty+' '+(r.Unit||''):''))+'</option>';}).join('');
+}
+function pdTag(notes,verb){
+  const who=(auth.user&&auth.user.name)||'office';const d=new Date();
+  const clean=String(notes||'').replace(/\s*\[(added|edited) by [^\]]*\]\s*/g,' ').trim();
+  return (clean?clean+' ':'')+'['+verb+' by '+who+' '+(d.getMonth()+1)+'/'+d.getDate()+']';
+}
+async function pdSave(){
+  const p=window.__pd;if(!p)return;const v=function(id){const e=document.getElementById(id);return e?String(e.value).trim():'';};
+  const err=function(m){const e=document.getElementById('pd-err');if(e)e.textContent=m;};
+  const num=function(x){const n=parseFloat(String(x).replace(/,/g,''));return isFinite(n)?n:0;};
+  const date=v('pd-date'),ph=v('pd-ph'),earth=(ph==='300'||ph==='310');const run=earth?'':v('pd-run');
+  const qty=num(v('pd-qty')),hrs=num(v('pd-hrs')),crew=num(v('pd-crew'));const who=v('pd-who');
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(date)){err('Pick the date.');return;}
+  if(!ph){err('Pick the type of work.');return;}
+  if(!(qty>0)&&!(hrs>0)){err('Enter a quantity, production hours, or both.');return;}
+  if(!earth&&!run&&qty>0){err('Enter the run, lot or structure this quantity belongs to.');return;}
+  if(!p.id&&!who){err('Enter whose crew did the work.');return;}
+  const btn=document.getElementById('pd-save');btn.disabled=true;err('');
+  try{
+    const tok=await getToken(true);if(!tok)throw new Error('not signed in');
+    const base='https://graph.microsoft.com/v1.0/sites/'+FD_SITE+'/lists/'+FD_LIST+'/items';
+    const fields={Title:p.job+' P'+ph+' '+date,Phase:ph,Date:date,'Yardage_x002f_production':qty,Unit:v('pd-unit')||pdUnit(ph),'STR_x0020_ID':run,Equipment:run,'Production_x0020_Hours':hrs,'Crew_x0020_Size':crew,Notes:pdTag(v('pd-notes'),p.id?'edited':'added')};
+    let r;
+    if(p.id){r=await fetch(base+'/'+p.id+'/fields',{method:'PATCH',headers:{Authorization:'Bearer '+tok,'Content-Type':'application/json'},body:JSON.stringify(fields)});}
+    else{fields.Jobnumber=p.job;fields.Foreman=who.replace(/\s*\(office\)\s*$/i,'')+' (office)';
+      r=await fetch(base,{method:'POST',headers:{Authorization:'Bearer '+tok,'Content-Type':'application/json'},body:JSON.stringify({fields:fields})});}
+    if(!r.ok){let m='';try{m=((await r.json()).error||{}).message||'';}catch(e){}throw new Error('save '+r.status+(m?': '+m.slice(0,120):''));}
+    pdClose();toast(p.id?'Production updated':'Production added');
+    await loadAll();
+  }catch(e){btn.disabled=false;err('Could not save: '+((e&&e.message)||e));}
+}
+async function pdDelete(){
+  const p=window.__pd;if(!p||!p.id)return;
+  if(!confirm('Delete this production entry? The job\'s progress and totals will drop by this amount. This cannot be undone here.'))return;
+  try{
+    const tok=await getToken(true);if(!tok)throw new Error('not signed in');
+    const r=await fetch('https://graph.microsoft.com/v1.0/sites/'+FD_SITE+'/lists/'+FD_LIST+'/items/'+p.id,{method:'DELETE',headers:{Authorization:'Bearer '+tok}});
+    if(!r.ok&&r.status!==404)throw new Error('delete '+r.status);
+    pdClose();toast('Production entry deleted');await loadAll();
+  }catch(e){const el=document.getElementById('pd-err');if(el)el.textContent='Could not delete: '+((e&&e.message)||e);}
 }
 function runRow(job,r,actItem){
   const man=pctOf(job,r.ItemID);
@@ -1580,8 +1682,8 @@ function ewDayDetail(job,ph,dt){
   const hd='<tr style="color:var(--text3);font-size:11px;text-align:left">';
   let h='<div style="background:var(--bg2);border-radius:8px;padding:10px 12px;text-align:left;cursor:default" onclick="event.stopPropagation()">';
   const prod=S.prod.filter(function(f){return String(f.Jobnumber||'').trim()===job&&String(f.Phase||'').trim()===ph&&String(f.Date||f.Created||'').slice(0,10)===dt;});
-  h+='<div style="font-weight:700;margin-bottom:4px">Production reported</div>';
-  if(prod.length)prod.forEach(function(f){h+='<div class="note" style="margin-bottom:2px"><b>'+esc(f.Foreman||'Unknown')+'</b>: '+esc(String(f['Yardage_x002f_production']||'0'))+' '+P.unit+(f['Production_x0020_Hours']?', '+esc(String(f['Production_x0020_Hours']))+' production hrs':'')+(f['Crew_x0020_Size']?', crew of '+esc(String(f['Crew_x0020_Size'])):'')+(f.Notes?'. '+esc(f.Notes):'')+'</div>';});
+  h+='<div style="font-weight:700;margin-bottom:4px">Production reported'+pdAddBtn(job,dt,ph)+'</div>';
+  if(prod.length)prod.forEach(function(f){h+='<div class="note" style="margin-bottom:2px">'+pdEditBtn(f)+'<b>'+esc(f.Foreman||'Unknown')+'</b>: '+esc(String(f['Yardage_x002f_production']||'0'))+' '+P.unit+(f['Production_x0020_Hours']?', '+esc(String(f['Production_x0020_Hours']))+' production hrs':'')+(f['Crew_x0020_Size']?', crew of '+esc(String(f['Crew_x0020_Size'])):'')+(f.Notes?'. '+esc(f.Notes):'')+'</div>';});
   else h+='<div class="note" style="color:var(--red)">No production report for this day.</div>';
   const mk=Object.keys(mach).sort(function(a,b){return mach[b].h-mach[a].h;});
   if(mk.length){
