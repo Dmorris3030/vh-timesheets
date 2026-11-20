@@ -499,7 +499,7 @@ async function initApp(){
   }catch(e){console.warn(e);}
   initWeeks();updUC();updNav();render();updBadge();
 }
-const VH_BUILD='2026-11-20.24';
+const VH_BUILD='2026-11-20.25';
 console.log('[VH] Timesheets build',VH_BUILD);
 let __vhAuthToastAt=0;
 // interactive=true only from a user-initiated action: saves drafts, then allows the MSAL
@@ -1401,6 +1401,7 @@ function rHome(){
   h+=tile('ti-receipt','#d97706','Tickets','<span id="tk-pend-home">Photograph a stone or pipe ticket</span>',"vhGo('ticket')");
   h+=tile('ti-gauge','#7c3aed','Testing','Air, mandrel, vacuum, pressure, televising',"tsOpen()");
   h+=tile('ti-highlight','#0891b2',"What's Done",'Highlight the plan sheet with what your crew finished this week',"wdOpen()");
+  h+=tile('ti-truck','#b45309','Trip Log','Truck miles and hauls, turned in with your timesheet',"tlOpen()");
   h+=tile('ti-chart-bar','#0f766e','Job Tracker','Progress by run, what is done, earthwork yards and cost',"location.href='tracker.html'");
   h+='</div></div>';
   document.getElementById('mc').innerHTML=h;
@@ -1922,6 +1923,245 @@ async function wdFlatten(bytes,strokes,rot,viewW,viewH,toPdf,stamp){
   }
   pg.setRotation(L.degrees(rot));
   return await doc.save();
+}
+// ===== TRIP LOG (build .25) ===================================================
+// The paper Driver Trip Log, on the phone or iPad. Start trip / Arrived read the device's
+// location and fill in the job; the driver types only the ending miles and what was hauled.
+// Trips live inside the week's timesheet, so they are turned in and filed with it.
+// Job locations are shared (Field/Jobs/job-locations.json). A driver's home is kept on their
+// own device only and is never uploaded.
+const TL_SVC=['Transport Equipment','Transport Supplies','Transport Fuel & Job Supplies','Transport Water & Job Supplies'];
+const TL_SHORT=['Equipment','Supplies','Fuel and job supplies','Water and job supplies'];
+function tlMem(){try{return JSON.parse(localStorage.getItem('vhts_trip')||'{}')||{};}catch(e){return {};}}
+function tlMemSave(m){try{localStorage.setItem('vhts_trip',JSON.stringify(m));}catch(e){}}
+function tlWk(){return S.weeks[S.currentWeek];}
+function tlEditable(){const wk=tlWk();return !!wk&&(wk.status==='draft'||wk.status==='returned');}
+function tlTrips(){const wk=tlWk();if(!wk)return [];if(!Array.isArray(wk.trips))wk.trips=[];return wk.trips;}
+function tlSorted(){return tlTrips().slice().sort(function(a,b){return String(a.date).localeCompare(String(b.date))||((+a.begin||0)-(+b.begin||0));});}
+function tlLastEnd(){let m=+tlMem().lastEnd||0;tlTrips().forEach(function(x){if(+x.end>m)m=+x.end;});return m;}
+function tlNum(x){const n=parseFloat(String(x==null?'':x).replace(/,/g,''));return isFinite(n)?n:NaN;}
+function tlDist(a,b,c,d){const R=6371000,p=Math.PI/180;const x=(d-b)*p*Math.cos((a+c)/2*p),y=(c-a)*p;return Math.sqrt(x*x+y*y)*R;}
+function tlLocCache(){try{return JSON.parse(localStorage.getItem('vhts_jobloc')||'{}')||{};}catch(e){return {};}}
+function tlLabel(job){const mem=tlMem();if(mem.home&&mem.home.code===job)return 'Home ('+job+')';const n=(tlLocCache().names||{})[job];return n?(job+' '+n):String(job);}
+// Job names (from the job folders) and saved job locations. Cached so it works with no signal.
+async function tlLoadShared(){
+  const c=tlLocCache();if(c.at&&Date.now()-c.at<6*3600000)return c;
+  try{
+    const tok=await getTok();if(!tok)return c;const H={Authorization:'Bearer '+tok};
+    const out={at:Date.now(),names:c.names||{},loc:c.loc||{}};
+    const r=await fetch(tkUrl('Field/Jobs/'+String(new Date().getFullYear()))+':/children?$top=400&$select=name,folder',{headers:H});
+    if(r.ok){out.names={};((await r.json()).value||[]).forEach(function(k){const m=/^(\d{3,5}[A-Za-z]?)[-_ ]+(.*)$/.exec(k.name||'');if(k.folder&&m)out.names[m[1]]=m[2];});}
+    const l=await fetch(tkUrl('Field/Jobs/job-locations.json')+':/content',{headers:H});
+    if(l.ok){try{const j=await l.json();if(j&&typeof j==='object')out.loc=j;}catch(e){}}
+    localStorage.setItem('vhts_jobloc',JSON.stringify(out));return out;
+  }catch(e){return c;}
+}
+async function tlSaveLoc(job,lat,lng){
+  try{
+    const tok=await getTok();if(!tok)return false;const url=tkUrl('Field/Jobs/job-locations.json');
+    for(let a=0;a<3;a++){
+      let etag=null,cur={};
+      const m=await fetch(url,{headers:{Authorization:'Bearer '+tok}});
+      if(m.ok){etag=(await m.json()).eTag;const c=await fetch(url+':/content',{headers:{Authorization:'Bearer '+tok}});if(c.ok){try{cur=(await c.json())||{};}catch(e){cur={};}}}
+      cur[job]={lat:Math.round(lat*1e6)/1e6,lng:Math.round(lng*1e6)/1e6,by:(auth.user&&auth.user.name)||'',at:new Date().toISOString()};
+      const H={Authorization:'Bearer '+tok,'Content-Type':'application/json'};if(etag)H['If-Match']=etag;
+      const p=await fetch(url+':/content',{method:'PUT',headers:H,body:JSON.stringify(cur)});
+      if(p.status===412)continue;
+      if(p.ok){const c2=tlLocCache();c2.loc=cur;c2.at=Date.now();localStorage.setItem('vhts_jobloc',JSON.stringify(c2));return true;}
+      return false;
+    }
+  }catch(e){}
+  return false;
+}
+function tlGps(){
+  return new Promise(function(res){
+    if(!navigator.geolocation){res(null);return;}
+    let done=false;const fin=function(v){if(!done){done=true;res(v);}};
+    navigator.geolocation.getCurrentPosition(function(p){fin({lat:p.coords.latitude,lng:p.coords.longitude,acc:p.coords.accuracy||9999});},function(){fin(null);},{enableHighAccuracy:true,timeout:12000,maximumAge:30000});
+    setTimeout(function(){fin(null);},14000);
+  });
+}
+// Saved places within reach of where the device is, nearest first. Job sites are large, so a
+// job counts as "here" within 1,000 m (more if the location fix itself is loose).
+function tlNear(pos){
+  if(!pos||pos.acc>1500)return [];
+  const c=tlLocCache(),mem=tlMem(),out=[];const reach=Math.max(1000,pos.acc*1.5);
+  Object.keys(c.loc||{}).forEach(function(j){const l=c.loc[j];if(!l||typeof l.lat!=='number')return;const d=tlDist(pos.lat,pos.lng,l.lat,l.lng);if(d<=reach)out.push({job:j,label:tlLabel(j),d:d});});
+  if(mem.home&&typeof mem.home.lat==='number'){const d=tlDist(pos.lat,pos.lng,mem.home.lat,mem.home.lng);if(d<=Math.max(300,pos.acc*1.5))out.push({job:mem.home.code,label:'Home ('+mem.home.code+')',d:d});}
+  return out.sort(function(a,b){return a.d-b.d;});
+}
+function tlJobList(){
+  const seen={},out=[];const add=function(j){j=String(j||'').trim();if(!j||seen[j])return;seen[j]=1;out.push(j);};
+  const mem=tlMem();
+  try{Object.keys(wdMyJobs()).forEach(add);}catch(e){}
+  (mem.recent||[]).forEach(add);
+  String((S.settings&&S.settings.activeJobs)||'').split(/\r?\n/).forEach(function(l){const m=/^\s*([A-Za-z0-9-]+)/.exec(l);if(m)add(m[1]);});
+  Object.keys(tlLocCache().names||{}).sort().forEach(add);
+  return out;
+}
+function tlPanel(body){
+  let el=document.getElementById('tl-sheet');if(!el){el=document.createElement('div');el.id='tl-sheet';document.body.appendChild(el);}
+  const sc=el.querySelector('#tl-scroll');const top=sc?sc.scrollTop:0;
+  el.innerHTML='<div style="position:fixed;inset:0;background:var(--bg);z-index:150;display:flex;flex-direction:column">'+
+    '<div style="display:flex;align-items:center;gap:8px;padding:calc(10px + env(safe-area-inset-top)) 12px 10px;border-bottom:0.5px solid var(--border)">'+
+      '<button onclick="tlClose()" style="background:none;border:none;color:inherit;font-size:22px;padding:4px 8px;cursor:pointer"><i class="ti ti-x"></i></button>'+
+      '<strong style="flex:1;font-size:17px">Trip log</strong><span style="font-size:12.5px;color:var(--text2)">'+fw(S.currentWeek)+'</span></div>'+
+    '<div id="tl-scroll" style="flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:14px 16px calc(24px + env(safe-area-inset-bottom));max-width:640px;width:100%;margin:0 auto;box-sizing:border-box">'+body+'</div></div>';
+  const s2=el.querySelector('#tl-scroll');if(s2)s2.scrollTop=top;
+}
+function tlOpen(){
+  if(!tlWk()){toast('Open your timesheet for the week first.','error');return;}
+  window.__tl={stage:'idle',f:null,pick:null};
+  tlDraw();
+  tlLoadShared().then(function(){if(window.__tl&&!window.__tl.pick&&window.__tl.stage==='idle')tlDraw();});
+}
+function tlClose(){const el=document.getElementById('tl-sheet');if(el)el.remove();window.__tl=null;}
+function tlTruck(v){const m=tlMem();m.truck=String(v||'').trim();tlMemSave(m);}
+function tlRead(){
+  const t=window.__tl;if(!t||!t.f)return;const g=function(id){const e=document.getElementById(id);return e?e.value:null;};
+  const d=g('tl-date');if(d!=null)t.f.date=d;const b=g('tl-begin');if(b!=null)t.f.begin=b;const e=g('tl-end');if(e!=null)t.f.end=e;const h=g('tl-hrs');if(h!=null)t.f.hours=h;
+}
+function tlFormHtml(f,inp,lbl){
+  const days=wd(S.currentWeek);const pk='min-height:48px;justify-content:flex-start;text-align:left;font-size:15px';
+  let h='<div style="border:1.5px solid var(--border);border-radius:14px;padding:12px;margin-bottom:12px">';
+  h+='<div style="font-weight:700;font-size:15.5px">'+(f.id?'Edit trip':(f.manual?'Add a trip':'Finish trip'))+'</div>';
+  if(f.hint)h+='<div style="font-size:12.5px;color:#16a34a;margin-top:4px"><i class="ti ti-map-pin"></i> '+wdEsc(f.hint)+'</div>';
+  h+='<span style="'+lbl+'">Date</span><select id="tl-date" style="'+inp+'">'+days.map(function(d,i){return '<option value="'+d+'"'+(d===f.date?' selected':'')+'>'+DAYS[i]+' '+fs(d)+'</option>';}).join('')+'</select>';
+  h+='<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px"><div><span style="'+lbl+'">From</span><button class="btn btn-bl" style="'+pk+'" onclick="tlPickJob(\'from\')">'+(f.from?wdEsc(tlLabel(f.from)):'Pick')+'</button></div>'+
+     '<div><span style="'+lbl+'">To</span><button class="btn btn-bl" style="'+pk+'" onclick="tlPickJob(\'to\')">'+(f.to?wdEsc(tlLabel(f.to)):'Pick')+'</button></div></div>';
+  h+='<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px"><div><span style="'+lbl+'">Beginning miles</span><input id="tl-begin" inputmode="decimal" style="'+inp+'" value="'+wdEsc(f.begin)+'"/></div>'+
+     '<div><span style="'+lbl+'">Ending miles</span><input id="tl-end" inputmode="decimal" style="'+inp+'" value="'+wdEsc(f.end)+'"/></div>'+
+     '<div><span style="'+lbl+'">Hours</span><input id="tl-hrs" inputmode="decimal" style="'+inp+'" value="'+wdEsc(f.hours)+'"/></div></div>';
+  h+='<span style="'+lbl+'">What you hauled</span><div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">'+TL_SHORT.map(function(s,i){return '<button class="btn'+(f.svc===i+1?' btn-p':'')+'" style="min-height:46px;justify-content:center;font-size:14px" onclick="tlSvc('+(i+1)+')">'+s+'</button>';}).join('')+'</div>';
+  h+='<div id="tl-err" style="color:#dc2626;font-size:13.5px;min-height:20px;margin-top:8px"></div>';
+  h+='<div style="display:flex;gap:8px"><button class="btn btn-p" style="flex:1;min-height:52px;justify-content:center;font-size:16px" onclick="tlSave()"><i class="ti ti-check"></i> Save trip</button>'+(f.id?'<button class="btn" style="color:#dc2626" onclick="tlDelete()"><i class="ti ti-trash"></i></button>':'')+'<button class="btn" onclick="tlCancel()">Cancel</button></div></div>';
+  return h;
+}
+function tlDraw(){
+  const t=window.__tl;if(!t)return;const mem=tlMem();const can=tlEditable();
+  const inp='width:100%;font-size:17px;padding:12px;border-radius:10px;border:1px solid var(--border);background:var(--bg);color:inherit;box-sizing:border-box';
+  const lbl='font-size:12px;font-weight:600;color:var(--text2);display:block;margin:10px 0 5px';
+  const big='width:100%;min-height:58px;font-size:17px;justify-content:center';
+  const trips=tlSorted();let th=0,tm=0;trips.forEach(function(x){th+=(+x.hours||0);if(+x.end>+x.begin)tm+=(+x.end)-(+x.begin);});
+  let h='<div style="display:grid;grid-template-columns:1fr 1.4fr;gap:10px;margin-bottom:14px"><div><span style="'+lbl+';margin-top:0">Truck #</span><input id="tl-truck" style="'+inp+'" value="'+wdEsc(mem.truck||'')+'" onchange="tlTruck(this.value)"/></div>'+
+    '<div style="background:var(--bg2);border-radius:12px;padding:10px 12px"><div style="font-size:12px;color:var(--text2)">This week</div><div style="font-size:18px;font-weight:700">'+(Math.round(th*100)/100)+' h \u00b7 '+Math.round(tm)+' mi</div></div></div>';
+  if(!can){h+='<div class="ib"><i class="ti ti-lock"></i><span>This week has been turned in, so its trip log can no longer be changed.</span></div>';}
+  else if(t.stage==='form'&&t.f){h+=tlFormHtml(t.f,inp,lbl);}
+  else if(mem.open){
+    const o=mem.open;const st=new Date(o.startedAt);const old=(Date.now()-st.getTime())>12*3600000;
+    const when=st.toLocaleDateString(undefined,{weekday:'short'})+' '+st.toLocaleTimeString(undefined,{hour:'numeric',minute:'2-digit'});
+    h+='<div style="border:1.5px solid var(--accent);border-radius:14px;padding:12px;margin-bottom:12px">'+(old?'<div style="color:#dc2626;font-weight:700;font-size:13.5px;margin-bottom:6px">This trip was started '+when+' and never finished. Finish it or discard it.</div>':'')+
+      '<div style="font-size:12.5px;color:var(--text2)">Trip running since '+when+(o.hint?' \u00b7 '+wdEsc(o.hint):'')+'</div><div style="font-size:17px;font-weight:700;margin:2px 0 10px">From '+wdEsc(tlLabel(o.from))+'</div>'+
+      '<button class="btn btn-p" style="'+big+'" onclick="tlArrive()"><i class="ti ti-flag"></i> Arrived</button>'+
+      '<div style="display:flex;gap:8px;margin-top:8px"><button class="btn btn-sm" onclick="tlPickJob(\'openfrom\')">Change where it started</button><button class="btn btn-sm" style="color:#dc2626;margin-left:auto" onclick="tlDiscardOpen()">Discard trip</button></div></div>';
+  }else{
+    h+='<button class="btn btn-p" style="'+big+'" onclick="tlStart()"><i class="ti ti-player-play"></i> Start trip</button><div style="font-size:12.5px;color:var(--text2);margin:6px 0 10px">Tap when you pull out. The app reads where you are and fills in the job.</div>'+
+       '<button class="btn btn-bl" style="min-height:48px;justify-content:center" onclick="tlManual()"><i class="ti ti-plus"></i> Add a trip by hand</button>';
+  }
+  h+='<div style="font-size:13px;font-weight:700;color:var(--text2);margin:18px 0 4px">Trips this week</div>';
+  if(!trips.length)h+='<div style="color:var(--text2);font-size:13.5px;padding:10px 0">No trips yet.</div>';
+  const days=wd(S.currentWeek);
+  trips.slice().reverse().forEach(function(x){
+    const mi=(+x.end>+x.begin)?Math.round(((+x.end)-(+x.begin))*10)/10:0;const di=days.indexOf(x.date);
+    h+='<div '+(can?'onclick="tlEdit(\''+x.id+'\')" ':'')+'style="padding:10px 0;border-top:1px solid var(--border);'+(can?'cursor:pointer':'')+'"><div style="display:flex;gap:8px;font-size:15px"><span style="flex:1;font-weight:700">'+wdEsc(x.from)+' <i class="ti ti-arrow-right" style="font-size:14px"></i> '+wdEsc(x.to)+'</span><span>'+(+x.hours||0)+' h</span></div>'+
+       '<div style="font-size:12.5px;color:var(--text2)">'+(di>=0?DAYS[di]+' ':'')+fs(x.date)+' \u00b7 '+mi+' mi \u00b7 '+(TL_SHORT[(x.svc||0)-1]||'')+(x.truck?' \u00b7 truck '+wdEsc(x.truck):'')+'</div></div>';
+  });
+  h+='<div style="font-size:12.5px;color:var(--text2);margin-top:16px">Your trip log is turned in with your timesheet when you submit the week.</div>';
+  tlPanel(h);
+}
+async function tlStart(){
+  const t=window.__tl;if(!t)return;
+  if(!String(tlMem().truck||'').trim()){toast('Enter your truck number first.','error');const e=document.getElementById('tl-truck');if(e)e.focus();return;}
+  toast('Finding where you are\u2026','');
+  const pos=await tlGps();if(!window.__tl)return;
+  const near=tlNear(pos);
+  const begin=function(job,hint){const m=tlMem();m.open={from:job,startedAt:new Date().toISOString(),hint:hint||''};tlMemSave(m);tlDraw();};
+  if(near.length===1){begin(near[0].job,'found by your location');toast('Trip started from '+near[0].label+'.','success');return;}
+  tlPickJob('start',near,pos,function(job){begin(job,'');});
+}
+async function tlArrive(){
+  const t=window.__tl;const mem=tlMem();if(!t||!mem.open)return;
+  toast('Finding where you are\u2026','');
+  const pos=await tlGps();if(!window.__tl)return;
+  const near=tlNear(pos).filter(function(n){return n.job!==mem.open.from;});
+  const st=new Date(mem.open.startedAt);const hrs=Math.max(0.25,Math.round(((Date.now()-st.getTime())/3600000)*4)/4);
+  const iso=new Date(st.getTime()-st.getTimezoneOffset()*60000).toISOString().slice(0,10);
+  const days=wd(S.currentWeek);
+  const f={date:days.indexOf(iso)>=0?iso:days[days.length-1],from:mem.open.from,to:'',begin:tlLastEnd()||'',end:'',hours:hrs>16?'':hrs,svc:0,manual:false,fromOpen:true,hint:''};
+  const go=function(){t.stage='form';t.f=f;tlDraw();};
+  if(near.length===1){f.to=near[0].job;f.hint='Arrived at '+near[0].label+', found by your location';go();return;}
+  tlPickJob('arrive',near,pos,function(job){f.to=job;go();});
+}
+function tlManual(){const t=window.__tl;const days=wd(S.currentWeek);const td=wdToday();t.stage='form';t.f={date:days.indexOf(td)>=0?td:days[days.length-1],from:'',to:'',begin:tlLastEnd()||'',end:'',hours:'',svc:0,manual:true};tlDraw();}
+function tlEdit(id){const t=window.__tl;const x=tlTrips().find(function(y){return y.id===id;});if(!t||!x||!tlEditable())return;t.stage='form';t.f={id:x.id,date:x.date,from:x.from,to:x.to,begin:x.begin,end:x.end,hours:x.hours,svc:x.svc,manual:true};tlDraw();}
+function tlSvc(n){tlRead();window.__tl.f.svc=n;tlDraw();}
+function tlCancel(){const t=window.__tl;t.stage='idle';t.f=null;tlDraw();}
+function tlDiscardOpen(){if(!confirm('Discard this unfinished trip?'))return;const m=tlMem();delete m.open;tlMemSave(m);tlDraw();}
+function tlDelete(){const t=window.__tl;if(!t.f||!t.f.id||!confirm('Delete this trip?'))return;const wk=tlWk();wk.trips=tlTrips().filter(function(x){return x.id!==t.f.id;});saveDraftSilent();t.stage='idle';t.f=null;tlDraw();}
+function tlSave(){
+  tlRead();const t=window.__tl,f=t.f;const err=function(m){const e=document.getElementById('tl-err');if(e)e.textContent=m;};
+  const b=tlNum(f.begin),e=tlNum(f.end),h=tlNum(f.hours);
+  if(!f.from||!f.to){err('Pick where the trip started and where it ended.');return;}
+  if(!(b>=0)){err('Enter the beginning miles.');return;}
+  if(!(e>b)){err('Ending miles must be more than the beginning miles.');return;}
+  if(!(h>0)){err('Enter the hours.');return;}
+  if(!f.svc){err('Pick what you hauled.');return;}
+  if(e-b>600&&!confirm('That is '+Math.round(e-b)+' miles for one trip. Is that right?'))return;
+  const mem=tlMem();
+  const rec={id:f.id||wdId(),date:f.date,truck:String(mem.truck||''),from:f.from,to:f.to,begin:b,end:e,hours:h,svc:f.svc,manual:!!f.manual,at:new Date().toISOString()};
+  const wk=tlWk();const list=tlTrips().filter(function(x){return x.id!==rec.id;});list.push(rec);wk.trips=list;
+  if(f.fromOpen)delete mem.open;
+  mem.lastEnd=Math.max(+mem.lastEnd||0,e);
+  mem.recent=[f.to,f.from].concat(mem.recent||[]).filter(function(x,i,a){return x&&a.indexOf(x)===i&&!(mem.home&&mem.home.code===x);}).slice(0,8);
+  tlMemSave(mem);saveDraftSilent();t.stage='idle';t.f=null;tlDraw();toast('Trip saved.','success');
+}
+// Pick a job by hand: nearby jobs first, then a box to type any number (T&M), Home, then the list.
+function tlPickJob(mode,near,pos,cb){
+  const t=window.__tl;if(!t)return;if(t.stage==='form')tlRead();
+  t.pick={mode:mode,pos:pos||null,cb:cb||null};
+  const mem=tlMem();
+  const row=function(job,label,sub){return '<button class="btn btn-bl" style="justify-content:flex-start;text-align:left;min-height:52px;margin-bottom:8px" onclick="tlPicked(\''+String(job).replace(/[^A-Za-z0-9-]/g,'')+'\')"><span style="flex:1"><strong style="font-size:15.5px;display:block">'+wdEsc(label)+'</strong>'+(sub?'<span style="font-size:12.5px;color:#16a34a;font-weight:400">'+sub+'</span>':'')+'</span></button>';};
+  const from=(mode==='start'||mode==='from'||mode==='openfrom');
+  let h='<div class="mh"></div><h2>'+(from?'Where from?':'Where to?')+'</h2>';
+  if(near&&near.length>1)h+='<p>You are close to more than one job. Pick the right one.</p>';
+  else if(mode==='start'||mode==='arrive')h+='<p>'+(pos?'No saved job location matches where you are.':'Could not get your location.')+' Pick the job.</p>';
+  (near||[]).forEach(function(n){h+=row(n.job,n.label,'Nearby, about '+(n.d<1000?(Math.round(n.d/10)*10)+' m':(Math.round(n.d/100)/10)+' km')+' away');});
+  h+='<div style="display:flex;gap:8px;margin:6px 0 12px"><input id="tl-type" placeholder="Type a job number (T&amp;M or other)" autocapitalize="characters" autocomplete="off" style="flex:1;min-width:0;font-size:16px;padding:11px;border-radius:10px;border:1px solid var(--border);background:var(--bg);color:inherit"/><button class="btn btn-p" onclick="tlTyped()">Use</button></div>';
+  if(mem.home)h+=row(mem.home.code,'Home ('+mem.home.code+')','');
+  h+='<button class="btn btn-sm" style="margin-bottom:12px" onclick="tlSetHome()"><i class="ti ti-home"></i> '+(mem.home?'Change my home':'Set my home')+'</button>';
+  const skip={};(near||[]).forEach(function(n){skip[n.job]=1;});if(mem.home)skip[mem.home.code]=1;
+  tlJobList().filter(function(j){return !skip[j];}).forEach(function(j){h+=row(j,tlLabel(j),'');});
+  h+='<div class="mf"><button class="btn btn-bl" onclick="closeM()">Cancel</button></div>';
+  showM(h,'tlpk');
+}
+function tlTyped(){const v=String((document.getElementById('tl-type')||{}).value||'').trim().toUpperCase().replace(/[^A-Z0-9-]/g,'');if(!v){toast('Type the job number.','error');return;}tlPicked(v);}
+function tlPicked(job){
+  const t=window.__tl;if(!t||!t.pick)return;const p=t.pick;t.pick=null;closeM();
+  const mem=tlMem();const isHome=!!(mem.home&&mem.home.code===job);const here=(p.mode==='start'||p.mode==='arrive')&&p.pos&&p.pos.acc<=150;
+  // The driver is standing at a place the app does not know yet: offer to remember it.
+  if(here&&isHome&&typeof mem.home.lat!=='number'){
+    if(confirm('Save this spot as your home? It stays on this device only.')){mem.home.lat=p.pos.lat;mem.home.lng=p.pos.lng;tlMemSave(mem);}
+  }else if(here&&!isHome&&!((tlLocCache().loc||{})[job])&&(tlLocCache().names||{})[job]){
+    if(confirm('Save this spot as the location of '+tlLabel(job)+'? After that the app finds this job on its own, for every driver.')){
+      tlSaveLoc(job,p.pos.lat,p.pos.lng).then(function(ok){toast(ok?('Location saved for '+job+'.'):'Could not save the location. Try again with signal.',ok?'success':'error');});}
+  }
+  if(p.cb){p.cb(job);return;}
+  if(p.mode==='openfrom'){const m=tlMem();if(m.open){m.open.from=job;m.open.hint='';tlMemSave(m);}tlDraw();return;}
+  if(t.f){if(p.mode==='from')t.f.from=job;else t.f.to=job;}
+  tlDraw();
+}
+async function tlSetHome(){
+  const t=window.__tl;const p=t&&t.pick;const mem=tlMem();
+  const code=String(prompt('What job number or code should trips to and from home be logged under?',(mem.home&&mem.home.code)||'')||'').trim().toUpperCase().replace(/[^A-Z0-9-]/g,'');
+  if(!code)return;
+  mem.home={code:code};
+  if(confirm('Are you at home right now? Tap OK to save this spot as home so the app recognises it. Tap Cancel to set the spot another time.')){
+    const pos=await tlGps();
+    if(pos&&pos.acc<=200){mem.home.lat=pos.lat;mem.home.lng=pos.lng;toast('Home saved on this device.','success');}
+    else toast('Could not get a good location. The home code is saved; the spot can be set later.','');
+  }
+  tlMemSave(mem);
+  if(window.__tl&&p){closeM();tlPickJob(p.mode,null,p.pos,p.cb);}
 }
 async function openMarkup(entryId){
   const wk=S.weeks[S.currentWeek];
@@ -3446,6 +3686,18 @@ async function tsfBuild(X,wk,iso,who,statusLine){
   [14,10,12,60].forEach(function(w,i){wj.getColumn(i+1).width=w;});
   banner(wj,4,title);head(wj,4,['Job','Phase','Hours','People']);
   Object.keys(byJob).sort().forEach(function(k,i){const j=byJob[k];body(wj,5+i,[j.job,j.phase,j.hrs,Object.keys(j.who).join(', ')],{band:i%2===1,wrap:{3:1}});});
+  // ---- the driver trip log, laid out like the paper form
+  if(Array.isArray(wk.trips)&&wk.trips.length){
+    const wt=wb.addWorksheet('Trip Log',{views:[{showGridLines:false}],pageSetup:{orientation:'landscape',fitToPage:true,fitToWidth:1,fitToHeight:0}});
+    [13,12,14,14,14,14,9,40].forEach(function(w,i){wt.getColumn(i+1).width=w;});
+    banner(wt,8,'Driver trip log \u00b7 '+who+' \u00b7 week ending '+fs(dates[dates.length-1])+'/'+String(iso).slice(0,4));
+    head(wt,4,['Date','Truck Number','Beginning Miles','Ending Miles','Job # From','Job # To','Hours','Transportation Services Provided']);
+    const tr=wk.trips.slice().sort(function(a,b){return String(a.date).localeCompare(String(b.date))||((+a.begin||0)-(+b.begin||0));});
+    let hh=0,mm=0;
+    tr.forEach(function(x,i){hh+=(+x.hours||0);mm+=Math.max(0,(+x.end||0)-(+x.begin||0));
+      body(wt,5+i,[x.date,String(x.truck||''),+x.begin,+x.end,String(x.from||''),String(x.to||''),+x.hours,(x.svc?x.svc+'. '+(TL_SVC[x.svc-1]||''):'')],{band:i%2===1});});
+    body(wt,5+tr.length,['Total','','','','','',hh,(Math.round(mm*10)/10)+' miles driven'],{bold:true,top:true});
+  }
   wb.eachSheet(function(w){w.eachRow(function(row){row.eachCell(function(c){c.font=Object.assign({name:'Calibri'},c.font||{});});});});
   return wb;
 }
