@@ -648,7 +648,7 @@ async function initApp(){
   }catch(e){console.warn(e);}
   initWeeks();updUC();updNav();render();updBadge();
 }
-const VH_BUILD='2026-11-23.28-test';
+const VH_BUILD='2026-11-23.29-test';
 console.log('[VH] Timesheets build',VH_BUILD);
 let __vhAuthToastAt=0;
 // interactive=true only from a user-initiated action: saves drafts, then allows the MSAL
@@ -2447,7 +2447,7 @@ function upAdd(){
 }
 function upDraw(){
   const u=window.__up;if(!u)return;
-  const RS=['Weather','Waiting on material','Locates or inspection','Equipment down','Rock','Dewatering','Moving or setup','Other'];
+  const RS=['Weather','Waiting on material','Unloading materials','Locates or inspection','Equipment down','Rock','Dewatering','Bench walls','Collars','Moving or setup','Other'];
   const inp='width:100%;font-size:17px;padding:12px;border-radius:10px;border:1px solid var(--border);background:var(--bg);color:inherit;box-sizing:border-box';
   const lbl='font-size:12.5px;color:var(--text2);display:block;margin:12px 0 5px';
   const name=u.ph==='400'?'Storm':'Sanitary';const di=wd(S.currentWeek).indexOf(u.dt);
