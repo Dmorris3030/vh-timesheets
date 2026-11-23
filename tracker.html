@@ -139,7 +139,7 @@ const FALLBACK_ADMINS=['dmorris@valentiheld.com','abewley@valentiheld.com','jroe
 const SCOPE_LIST_NAME='JobScope';
 const STATUS_LIST_NAME='TrackerStatus';
 const PHASE_LABELS={'300':'Earth — Mass','310':'Earth — Finish','400':'Storm','450':'Storm — Other','500':'Sanitary','600':'Water'};
-const VH_TRK_BUILD='2026-11-23.31';
+const VH_TRK_BUILD='2026-11-23.32';
 const VH_BG=/[?&]autosave=1/.test(location.search); // loaded hidden by the time app, only to refresh the Excel trackers
 console.log('[VH] Job Trackers build',VH_TRK_BUILD);
 
@@ -391,10 +391,35 @@ function effPct(job,r){
   }
   return Math.max(man,Math.round(auto*10)/10);
 }
+// ===== FOOTAGE THAT IS NOT TIED TO A RUN ======================================
+// Most production reports give the feet laid but not which run. That footage is real work, so a
+// utility's progress is the HIGHER of two measures:
+//   by runs    : bid hours of the runs and lots marked or reported complete
+//   by footage : all feet reported for the utility, as a share of its bid feet
+// Taking the higher one (not the sum) means work is never counted twice.
+function phEarn(job,ph,rows){
+  let bid=0,er=0,bidLF=0;const ids={};
+  rows.forEach(function(r){const p=effPct(job,r);bid+=r.BidHrs;er+=r.BidHrs*p/100;if(r.BidQty>0)bidLF+=r.BidQty;ids[nid(r.ItemID)]=1;});
+  let repF=0,un=0;
+  S.prod.forEach(function(l){
+    if(String(l.Jobnumber||'').trim()!==job||String(l.Phase||'').trim()!==ph)return;
+    const q=parseFloat(String(l['Yardage_x002f_production']||'').replace(/,/g,''));if(!(q>0))return;
+    repF+=q;const id=nid(l['STR_x0020_ID']);if(!id||!ids[id])un+=q;});
+  // only estimate from footage when some of it has no run; if every foot is on a run, the runs are exact
+  const ef=(un>0.5&&bidLF>0)?bid*Math.min(1,repF/bidLF):0;
+  return {bid:bid,earnedRuns:er,earnedFt:ef,earned:Math.max(er,ef),byFt:ef>er+0.05,bidLF:bidLF,rep:repF,un:un};
+}
+function phFootNote(pe){
+  if(!(pe.rep>0)||!(pe.bidLF>0))return '';
+  const pct=Math.round(Math.min(1,pe.rep/pe.bidLF)*100);
+  return '<p class="note" style="margin:6px 0 8px"><i class="ti ti-ruler-measure"></i> Footage reported: <b>'+fmt0(pe.rep)+'</b> of '+fmt0(pe.bidLF)+' ft ('+pct+'%).'+
+    (pe.un>0.5?' <span style="color:var(--amber,#d97706)"><b>'+fmt0(pe.un)+' ft</b> was reported without a run the tracker recognises, so it shows in the totals but not against any run below.</span>':'')+
+    (pe.byFt?' Earned hours here are estimated from the footage, because that is ahead of what the runs show.':'')+'</p>';
+}
 function jobSummary(job){
   const rows=S.scope.filter(r=>r.JobNum===job);
   let bid=0,earned=0;
-  rows.forEach(r=>{bid+=r.BidHrs;earned+=r.BidHrs*effPct(job,r)/100;});
+  [...new Set(rows.map(r=>r.Phase))].forEach(p=>{const e=phEarn(job,p,rows.filter(r=>r.Phase===p));bid+=e.bid;earned+=e.earned;});
   const act=actualByJobPhase(job);
   const actual=Object.values(act).reduce((a,b)=>a+b,0);
   return {bid,earned,actual,pct:bid?earned/bid*100:0,items:rows.length};
@@ -509,8 +534,7 @@ function renderJob(){
     ${actItem?'':'<p class="note" style="margin-top:4px"><i class="ti ti-info-circle"></i> Burned hours shown per phase only — per-run burn appears once daily production reports carry an STR ID for this job.</p>'}`;
 }
 function renderPhase(job,rows,phase,actual,actItem){
-  let bid=0,earned=0;
-  rows.forEach(r=>{bid+=r.BidHrs;earned+=r.BidHrs*effPct(job,r)/100;});
+  const pe=phEarn(job,phase,rows);const bid=pe.bid,earned=pe.earned;
   const varr=actual-earned;
   const lots=rows.filter(r=>r.ItemType==='lot'||r.ItemType==='lateral')
     .sort((a,b)=>String(a.ItemID).localeCompare(String(b.ItemID),undefined,{numeric:true})); // lot 2 before lot 10
@@ -536,7 +560,7 @@ function renderPhase(job,rows,phase,actual,actItem){
       <span>Burned <b class="${varr>0.5?'ov':''}">${fmt0(actual)}</b></span>
       <span>Remaining <b>${fmt0(bid-earned)}</b></span>
       <span>Variance <b class="${varr>0.5?'ov':(varr<-0.5?'un':'')}">${varr>0?'+':''}${fmt0(varr)}</b></span>
-    </div>${runHtml}${lotHtml}</div>`;
+    </div>${phFootNote(pe)}${runHtml}${lotHtml}</div>`;
 }
 // ===== TESTING STATUS ==========================================================
 // Test results come from each job's Testing/tests.json (written by the time app's Testing form).
@@ -825,6 +849,7 @@ function xlModel(job){
   const sum={};
   rows.forEach(function(r){const k=r.JobNum+'|'+r.Phase;const o=sum[k]=sum[k]||{job:r.JobNum,ph:r.Phase,bid:0,earn:0,items:0,done:0};
     const pct=effPct(r.JobNum,r);o.bid+=r.BidHrs;o.earn+=r.BidHrs*pct/100;o.items++;if(pct>=100)o.done++;});
+  Object.values(sum).forEach(function(o){const e=phEarn(o.job,o.ph,rows.filter(function(r){return r.JobNum===o.job&&r.Phase===o.ph;}));o.earn=e.earned;});
   const util=Object.values(sum).sort(function(a,b){return a.job.localeCompare(b.job)||a.ph.localeCompare(b.ph);}).map(function(o){
     const act=(actualByJobPhase(o.job)[o.ph])||0;
     return {job:o.job,label:(PHASE_LABELS[o.ph]||'Phase')+' ('+o.ph+')',bid:r1(o.bid),earn:r1(o.earn),act:r1(act),rem:r1(o.bid-o.earn),vari:r1(act-o.earn),pct:o.bid?o.earn/o.bid:0,items:o.items,done:o.done};});
