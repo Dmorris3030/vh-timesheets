@@ -139,7 +139,7 @@ const FALLBACK_ADMINS=['dmorris@valentiheld.com','abewley@valentiheld.com','jroe
 const SCOPE_LIST_NAME='JobScope';
 const STATUS_LIST_NAME='TrackerStatus';
 const PHASE_LABELS={'300':'Earth — Mass','310':'Earth — Finish','400':'Storm','450':'Storm — Other','500':'Sanitary','600':'Water'};
-const VH_TRK_BUILD='2026-11-23.34';
+const VH_TRK_BUILD='2026-11-23.35';
 const VH_BG=/[?&]autosave=1/.test(location.search); // loaded hidden by the time app, only to refresh the Excel trackers
 console.log('[VH] Job Trackers build',VH_TRK_BUILD);
 
@@ -1309,6 +1309,21 @@ function pkParseEarth(wb){
       else if(/^BID SY/.test(s))out.bidSY=Math.round(left());
       else if(/^BID COST:?$/.test(s.trim()))costs.push(right());});});
     if(costs[0])out.bidCost=Math.round(costs[0]);if(costs[1])out.bidCostFG=Math.round(costs[1]);}
+  // Bid cost is our field cost: ACT $ (equipment and labor) on the EARTH BID tab. It is never the
+  // marked-up task price, and it leaves out materials and labor benefits, so it compares like for
+  // like with the cost the tracker works out from timesheet hours and the rate sheet.
+  const eb=sheet(/earth\s*bid/i);
+  if(eb){
+    let cA=9;for(let i=0;i<8;i++){const r=eb[i]||[];const k=r.findIndex(v=>typeof v==='string'&&/^ACT\s*\$/i.test(v.trim()));if(k>=0){cA=k;break;}}
+    const sec={'300':0,'310':0},seen={};let cur='';
+    eb.forEach(r=>{if(!r)return;const c=r[2];if(typeof c!=='string')return;const s=c.trim();
+      if(/^#?\s*\d{4}\s*[-\u2013]?\s*\S/.test(s)&&!/^(MATERIALS|AGGREGATE|SUBCONTRACT|OTHER)/i.test(s)){cur=/0?300\b/.test(s)&&/MASS|EARTH/i.test(s)?'300':(/0?310\b/.test(s)&&/FIN|GRAD/i.test(s)?'310':'');return;}
+      if(!cur||/^(TASK|MATERIALS|AGGREGATE|SUBCONTRACT|OTHER|COMMENTS|CHECK SUM|TOTAL)/i.test(s))return;
+      const q=pkNum(r[5]),a=pkNum(r[cA]);if(q>0&&a>0){sec[cur]+=q*a;seen[cur]=1;}});
+    if(seen['300'])out.bidCost=Math.round(sec['300']);
+    if(seen['310'])out.bidCostFG=Math.round(sec['310']);
+    if(seen['300']||seen['310'])out.costBasis='act';
+  }
   const rs=sheet(/rate\s*sheet/i);
   if(rs){const rates={};const norm=x=>String(x||'').toUpperCase().replace(/\s+/g,' ').trim();
     const all=EW_MACH.concat(EW_LAB);
@@ -1436,7 +1451,7 @@ async function pkWrite(tok,j,parsed){
       if(mr.status!==404&&mr.ok){etag=(await mr.json()).eTag;const cr=await fetch(ewUrl()+':/content',{headers:H});if(cr.ok){const d=await cr.json();if(d&&typeof d==='object')cur=Object.assign(cur,d);}}
       cur.jobs=cur.jobs||{};
       if(!cur.jobs[j.job]){
-        cur.jobs[j.job]={name:j.name,bidCY:e.bidCY||0,bidCost:e.bidCost||0,bidSY:e.bidSY||0,bidCostFG:e.bidCostFG||0,rates:e.rates||{},fromPacket:true};
+        cur.jobs[j.job]={name:j.name,bidCY:e.bidCY||0,bidCost:e.bidCost||0,bidSY:e.bidSY||0,bidCostFG:e.bidCostFG||0,rates:e.rates||{},fromPacket:true,costBasis:e.costBasis||''};
         const PH={Authorization:'Bearer '+tok,'Content-Type':'application/json'};if(etag)PH['If-Match']=etag;
         await fetch(ewUrl()+':/content',{method:'PUT',headers:PH,body:JSON.stringify(cur)});
         if(S.earth)S.earth.setup=cur;
@@ -1541,9 +1556,16 @@ async function ewRatesApply(tok,up){
     cur.jobs=cur.jobs||{};let n=0;
     jobs.forEach(function(job){
       const e=up[job].e,pr=e.rates||{};const c=cur.jobs[job];
-      if(!c){cur.jobs[job]={name:up[job].name,bidCY:e.bidCY||0,bidCost:e.bidCost||0,bidSY:e.bidSY||0,bidCostFG:e.bidCostFG||0,rates:Object.assign({},pr),fromPacket:true};n++;return;}
+      if(!c){cur.jobs[job]={name:up[job].name,bidCY:e.bidCY||0,bidCost:e.bidCost||0,bidSY:e.bidSY||0,bidCostFG:e.bidCostFG||0,rates:Object.assign({},pr),fromPacket:true,costBasis:e.costBasis||''};n++;return;}
       c.rates=c.rates||{};
       Object.keys(pr).forEach(function(k){if(c.fromPacket?(c.rates[k]!==pr[k]):(c.rates[k]==null)){c.rates[k]=pr[k];n++;}});
+      // bid cost follows ACT $. A job loaded from its packet follows the packet; a job set up by hand is
+      // corrected once, and after that whatever is typed in Setup is left alone.
+      if(e.costBasis==='act'&&c.costBasis!=='hand'){
+        if(c.fromPacket)['bidCY','bidCost','bidSY','bidCostFG'].forEach(function(k){if(e[k]>0&&c[k]!==e[k]){c[k]=e[k];n++;}});
+        else if(c.costBasis!=='act')['bidCost','bidCostFG'].forEach(function(k){if(e[k]>0&&c[k]!==e[k]){c[k]=e[k];n++;}});
+        if(c.costBasis!=='act'){c.costBasis='act';n++;}
+      }
     });
     if(!n)return 0;
     const PH={Authorization:'Bearer '+tok,'Content-Type':'application/json'};if(etag)PH['If-Match']=etag;
@@ -1564,7 +1586,7 @@ async function pkVerify(manual){
       if(!j.file)continue;
       try{
         const parsed=await pkLoadPacket(tok,j);
-        if(parsed.earth&&parsed.earth.rates)rateUp[j.job]={name:j.name,e:parsed.earth};
+        if(parsed.earth&&(parsed.earth.rates||parsed.earth.bidCost))rateUp[j.job]={name:j.name,e:parsed.earth};
         if(!parsed.rows.length){out.jobs[j.job]={name:j.name,file:j.file.name,err:'No takeoff rows the tracker can read'};continue;}
         const groups=pkCompare(j.job,parsed);
         out.jobs[j.job]={name:j.name,file:j.file.name,modified:j.file.modified,groups:groups,diff:groups.reduce(function(a,x){return a+x.diff;},0)};
@@ -1858,7 +1880,7 @@ function ewSetupForm(job,d){
 }
 async function ewSave(job){
   const num=id=>{const v=parseFloat(String(document.getElementById(id).value).replace(/[$,]/g,''));return isFinite(v)?v:0;};
-  const cfg={name:document.getElementById('ew-name').value.trim(),bidCY:num('ew-bidCY'),bidCost:num('ew-bidCost'),bidSY:num('ew-bidSY'),bidCostFG:num('ew-bidCostFG'),rates:{}};
+  const cfg={name:document.getElementById('ew-name').value.trim(),bidCY:num('ew-bidCY'),bidCost:num('ew-bidCost'),bidSY:num('ew-bidSY'),bidCostFG:num('ew-bidCostFG'),rates:{},costBasis:'hand'};
   document.querySelectorAll('.ew-rate').forEach(i=>{const v=parseFloat(String(i.value).replace(/[$,]/g,''));if(isFinite(v))cfg.rates[i.dataset.c]=v;});
   const eqm={};document.querySelectorAll('.ew-eq').forEach(s=>{if(s.value)eqm[s.dataset.n]=s.value;});
   const tok=await getToken(true);if(!tok)return;
