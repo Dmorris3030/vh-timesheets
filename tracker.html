@@ -139,7 +139,7 @@ const FALLBACK_ADMINS=['dmorris@valentiheld.com','abewley@valentiheld.com','jroe
 const SCOPE_LIST_NAME='JobScope';
 const STATUS_LIST_NAME='TrackerStatus';
 const PHASE_LABELS={'300':'Earth — Mass','310':'Earth — Finish','400':'Storm','450':'Storm — Other','500':'Sanitary','600':'Water'};
-const VH_TRK_BUILD='2026-11-23.32';
+const VH_TRK_BUILD='2026-11-23.33';
 const VH_BG=/[?&]autosave=1/.test(location.search); // loaded hidden by the time app, only to refresh the Excel trackers
 console.log('[VH] Job Trackers build',VH_TRK_BUILD);
 
@@ -372,7 +372,7 @@ function autoQtyByItem(job){ // installed quantity reported on the crews' produc
   const m={};
   S.prod.forEach(l=>{
     if(String(l.Jobnumber||'').trim()!==job)return;
-    const id=nid(l['STR_x0020_ID']);if(!id)return;
+    const id=nid(l['STR_x0020_ID']);if(!id)return;m['\u00a7'+id]=1;
     const q=parseFloat(String(l['Yardage_x002f_production']||'').replace(/,/g,''));
     if(q>0)m[id]=(m[id]||0)+q;
   });
@@ -389,6 +389,7 @@ function effPct(job,r){
     const q=autoQtyByItem(job)[nid(r.ItemID)]||0;
     if(q>0)auto=Math.min(100,q/r.BidQty*100);
   }
+  else if(r.ItemType==='structure'&&autoQtyByItem(job)['\u00a7'+nid(r.ItemID)])auto=100; // a production report names this structure
   return Math.max(man,Math.round(auto*10)/10);
 }
 // ===== FOOTAGE THAT IS NOT TIED TO A RUN ======================================
@@ -398,16 +399,36 @@ function effPct(job,r){
 //   by footage : all feet reported for the utility, as a share of its bid feet
 // Taking the higher one (not the sum) means work is never counted twice.
 function phEarn(job,ph,rows){
-  let bid=0,er=0,bidLF=0;const ids={};
-  rows.forEach(function(r){const p=effPct(job,r);bid+=r.BidHrs;er+=r.BidHrs*p/100;if(r.BidQty>0)bidLF+=r.BidQty;ids[nid(r.ItemID)]=1;});
+  let bid=0,bidP=0,erP=0,erS=0,bidLF=0;const ids={};
+  rows.forEach(function(r){const p=effPct(job,r);bid+=r.BidHrs;
+    if(r.ItemType==='structure'){erS+=r.BidHrs*p/100;}
+    else{bidP+=r.BidHrs;erP+=r.BidHrs*p/100;if(r.BidQty>0)bidLF+=r.BidQty;}
+    ids[nid(r.ItemID)]=1;});
   let repF=0,un=0;
   S.prod.forEach(function(l){
     if(String(l.Jobnumber||'').trim()!==job||String(l.Phase||'').trim()!==ph)return;
     const q=parseFloat(String(l['Yardage_x002f_production']||'').replace(/,/g,''));if(!(q>0))return;
     repF+=q;const id=nid(l['STR_x0020_ID']);if(!id||!ids[id])un+=q;});
-  // only estimate from footage when some of it has no run; if every foot is on a run, the runs are exact
-  const ef=(un>0.5&&bidLF>0)?bid*Math.min(1,repF/bidLF):0;
-  return {bid:bid,earnedRuns:er,earnedFt:ef,earned:Math.max(er,ef),byFt:ef>er+0.05,bidLF:bidLF,rep:repF,un:un};
+  // Footage only speaks for pipe. Structures count when they are marked or reported set.
+  // Only estimate from footage when some of it has no run; if every foot is on a run, the runs are exact.
+  const ef=(un>0.5&&bidLF>0)?bidP*Math.min(1,repF/bidLF):0;
+  return {bid:bid,earnedRuns:erP+erS,earnedFt:ef+erS,earned:Math.max(erP,ef)+erS,byFt:ef>erP+0.05,bidLF:bidLF,rep:repF,un:un};
+}
+// ===== PLAIN-LANGUAGE PROGRESS ================================================
+// "Hours gained" = bid hours for the work that is done, minus the hours it took.
+// Plus means the crew is ahead of the bid. Minus means behind.
+function gainTxt(g){const a=Math.abs(g);if(a<0.5)return 'on pace';return (g>0?'+':'\u2212')+fmt0(a)+' hrs';}
+function gainCol(g){return Math.abs(g)<0.5?'var(--text2)':(g>0?'var(--green)':'var(--red)');}
+function gainTag(earned,used){const g=earned-used;const flat=Math.abs(g)<0.5;return '<span style="font-size:12px;font-weight:700;padding:3px 10px;border-radius:12px;white-space:nowrap;color:#fff;background:'+(flat?'#6b7280':(g>0?'var(--green)':'var(--red)'))+'">'+(flat?'On pace':gainTxt(g)+(g>0?' gained':' lost'))+'</span>';}
+function verdictHtml(bid,earned,used){
+  const pct=bid?earned/bid*100:0,up=bid?used/bid*100:0,g=earned-used;
+  const bar=function(p,col){return '<div style="flex:1;height:12px;background:var(--card);border-radius:6px;overflow:hidden;border:1px solid var(--border)"><div style="width:'+Math.max(0,Math.min(100,p))+'%;height:100%;background:'+col+'"></div></div>';};
+  const cell=function(l,v,c){return '<div><div style="font-size:11px;color:var(--text2)">'+l+'</div><div style="font-size:16px;font-weight:700'+(c?';color:'+c:'')+'">'+v+'</div></div>';};
+  return '<div style="background:var(--bg2);border-radius:8px;padding:10px 12px;margin-bottom:10px">'+
+    '<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px"><span style="flex:1;font-size:13px">'+(bid?('<b>'+fmt0(pct)+'%</b> of the work is done. It was bid at <b>'+fmt0(earned)+'</b> crew hours and has taken <b>'+fmt0(used)+'</b>.'):'No bid hours are loaded.')+'</span>'+gainTag(earned,used)+'</div>'+
+    '<div style="display:flex;align-items:center;gap:8px;margin-bottom:4px"><span style="font-size:11.5px;color:var(--text2);width:98px">Work done</span>'+bar(pct,'var(--green)')+'<span style="font-size:12px;font-weight:700;width:40px;text-align:right">'+fmt0(pct)+'%</span></div>'+
+    '<div style="display:flex;align-items:center;gap:8px;margin-bottom:10px"><span style="font-size:11.5px;color:var(--text2);width:98px">Bid hours used</span>'+bar(up,up>pct+0.5?'var(--red)':'var(--amber,#d97706)')+'<span style="font-size:12px;font-weight:700;width:40px;text-align:right">'+fmt0(up)+'%</span></div>'+
+    '<div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px">'+cell('Hours in the bid',fmt0(bid))+cell('Hours used',fmt0(used))+cell('Hours left',fmt0(bid-used),(bid-used)<0?'var(--red)':'')+cell('Hours gained',Math.abs(g)<0.5?'0':gainTxt(g).replace(' hrs',''),gainCol(g))+'</div></div>';
 }
 function phFootNote(pe){
   if(!(pe.rep>0)||!(pe.bidLF>0))return '';
@@ -494,8 +515,8 @@ function renderPortfolio(){
     const over=s.actual>s.earned+0.5;
     return `<button class="jcard" onclick="S.view='job';S.job='${esc(j)}';S.phase='ALL';render()">
       <div class="jtop"><span class="jname">${esc(j)}</span><span class="jpct">${fmt0(s.pct)}%</span></div>
-      <div class="jmeta"><span>Bid <b class="num">${fmt0(s.bid)}</b> hrs</span><span>Earned <b class="num">${fmt0(s.earned)}</b></span>
-      <span>Burned <b class="num" style="color:${over?'var(--red)':'inherit'}">${fmt0(s.actual)}</b></span><span>${s.items} items</span></div>
+      <div class="jmeta"><span>Bid <b class="num">${fmt0(s.bid)}</b> hrs</span><span>Work done is worth <b class="num">${fmt0(s.earned)}</b></span>
+      <span>Used <b class="num">${fmt0(s.actual)}</b></span><span>${gainTag(s.earned,s.actual)}</span></div>
       <div class="pbar"><div class="pbarfill${s.pct>=99.5?' done':''}" style="width:${Math.min(100,s.pct)}%"></div></div>
     </button>`;
   }).join('');
@@ -503,9 +524,10 @@ function renderPortfolio(){
   return `<div class="kg">
       <div class="k"><div class="lbl">Jobs</div><div class="val">${jobs.length}</div></div>
       <div class="k"><div class="lbl">Bid hrs</div><div class="val">${fmt0(tot.bid)}</div></div>
-      <div class="k"><div class="lbl">Earned</div><div class="val">${fmt0(tot.earned)}</div></div>
-      <div class="k"><div class="lbl">Burned</div><div class="val${tot.actual>tot.earned+0.5?' bad':''}">${fmt0(tot.actual)}</div></div>
-      <div class="k"><div class="lbl">Portfolio</div><div class="val">${fmt0(ppct)}%</div><div class="sub">earned / bid</div></div>
+      <div class="k"><div class="lbl">Work done is worth</div><div class="val">${fmt0(tot.earned)}</div><div class="sub">bid hours</div></div>
+      <div class="k"><div class="lbl">Hours used</div><div class="val">${fmt0(tot.actual)}</div></div>
+      <div class="k"><div class="lbl">Hours gained</div><div class="val" style="color:${gainCol(tot.earned-tot.actual)}">${Math.abs(tot.earned-tot.actual)<0.5?'0':gainTxt(tot.earned-tot.actual).replace(' hrs','')}</div><div class="sub">plus is ahead</div></div>
+      <div class="k"><div class="lbl">All jobs</div><div class="val">${fmt0(ppct)}%</div><div class="sub">of the work done</div></div>
     </div>${cards}`;
 }
 function renderJob(){
@@ -524,13 +546,7 @@ function renderJob(){
   return `<div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
       <button class="btn btn-sm" onclick="S.view='portfolio';S.job='';render()"><i class="ti ti-arrow-left"></i></button>
       <h2 style="font-size:17px;font-weight:800;letter-spacing:-.3px">${esc(job)}</h2></div>
-    <div class="kg">
-      <div class="k"><div class="lbl">Bid hrs</div><div class="val">${fmt0(s.bid)}</div></div>
-      <div class="k"><div class="lbl">Earned</div><div class="val">${fmt0(s.earned)}</div></div>
-      <div class="k"><div class="lbl">Burned</div><div class="val${over?' bad':''}">${fmt0(s.actual)}</div><div class="sub">production hrs</div></div>
-      <div class="k"><div class="lbl">Remaining</div><div class="val">${fmt0(s.bid-s.earned)}</div></div>
-      <div class="k"><div class="lbl">Complete</div><div class="val${s.pct>=99.5?' good':''}">${fmt0(s.pct)}%</div></div>
-    </div>${tsJobCard(job)}${chips}${secs}${utDaily(job)}
+    ${verdictHtml(s.bid,s.earned,s.actual)}${tsJobCard(job)}${chips}${secs}${utDaily(job)}
     ${actItem?'':'<p class="note" style="margin-top:4px"><i class="ti ti-info-circle"></i> Burned hours shown per phase only — per-run burn appears once daily production reports carry an STR ID for this job.</p>'}`;
 }
 function renderPhase(job,rows,phase,actual,actItem){
@@ -538,7 +554,8 @@ function renderPhase(job,rows,phase,actual,actItem){
   const varr=actual-earned;
   const lots=rows.filter(r=>r.ItemType==='lot'||r.ItemType==='lateral')
     .sort((a,b)=>String(a.ItemID).localeCompare(String(b.ItemID),undefined,{numeric:true})); // lot 2 before lot 10
-  const runs=rows.filter(r=>!(r.ItemType==='lot'||r.ItemType==='lateral'));
+  const structs=rows.filter(r=>r.ItemType==='structure').sort((a,b)=>String(a.ItemID).localeCompare(String(b.ItemID),undefined,{numeric:true}));
+  const runs=rows.filter(r=>!(r.ItemType==='lot'||r.ItemType==='lateral'||r.ItemType==='structure'));
   // group runs by Area
   const areas={};runs.forEach(r=>{(areas[r.Area||'']=areas[r.Area||'']||[]).push(r);});
   const areaKeys=Object.keys(areas).sort();
@@ -554,13 +571,9 @@ function renderPhase(job,rows,phase,actual,actItem){
       const done=effPct(job,r)>=100;
       return `<button class="lot${done?' done':''}" onclick="setPct('${esc(job)}','${esc(r.ItemID)}',${done?0:100})" title="${esc(r.Descr)}">${esc(r.ItemID.replace(/^LOT-?/i,''))}</button>`;
     }).join('')}</div>`:'';
+  const strHtml=structs.length?`<div class="area-h"><span>${phase==='400'?'Structures':'Manholes'} — tap when set</span><span class="ah-num">${structs.filter(r=>effPct(job,r)>=100).length} / ${structs.length} set</span></div><div class="lots">${structs.map(r=>{const done=effPct(job,r)>=100;return `<button class="lot${done?' done':''}" onclick="setPct('${esc(job)}','${esc(r.ItemID)}',${done?0:100})" title="${esc(r.Descr)} · bid ${fmt(r.BidHrs)} h">${esc(String(r.ItemID).replace(/^STR /,''))}</button>`;}).join('')}</div>`:'';
   return `<div class="sec"><h2>${esc(PHASE_LABELS[phase]||('Phase '+phase))} <span class="h2-sub">phase ${esc(phase)} · ${rows.length} items</span></h2>
-    <div class="pstrip">
-      <span>Bid <b>${fmt0(bid)}</b></span><span>Earned <b>${fmt0(earned)}</b></span>
-      <span>Burned <b class="${varr>0.5?'ov':''}">${fmt0(actual)}</b></span>
-      <span>Remaining <b>${fmt0(bid-earned)}</b></span>
-      <span>Variance <b class="${varr>0.5?'ov':(varr<-0.5?'un':'')}">${varr>0?'+':''}${fmt0(varr)}</b></span>
-    </div>${phFootNote(pe)}${runHtml}${lotHtml}</div>`;
+    ${verdictHtml(bid,earned,actual)}${phFootNote(pe)}${runHtml}${strHtml}${lotHtml}</div>`;
 }
 // ===== TESTING STATUS ==========================================================
 // Test results come from each job's Testing/tests.json (written by the time app's Testing form).
@@ -580,7 +593,7 @@ async function loadTests(){
   finally{S.testsLoading=false;}
 }
 function tsRun(job,r){
-  const req=TS_REQ[r.Phase];if(!req||r.ItemType==='lateral'||r.ItemType==='lot')return null;
+  const req=TS_REQ[r.Phase];if(!req||r.ItemType==='lateral'||r.ItemType==='lot'||r.ItemType==='structure')return null;
   const rows=((S.tests||{})[String(job).toUpperCase()]||[]).filter(function(x){return nid(x.run)===nid(r.ItemID);});
   const last={};
   rows.forEach(function(x){const key=String(x.date||'')+String(x.at||'');if(!last[x.test]||key>last[x.test].k)last[x.test]={k:key,result:x.result};});
@@ -852,7 +865,7 @@ function xlModel(job){
   Object.values(sum).forEach(function(o){const e=phEarn(o.job,o.ph,rows.filter(function(r){return r.JobNum===o.job&&r.Phase===o.ph;}));o.earn=e.earned;});
   const util=Object.values(sum).sort(function(a,b){return a.job.localeCompare(b.job)||a.ph.localeCompare(b.ph);}).map(function(o){
     const act=(actualByJobPhase(o.job)[o.ph])||0;
-    return {job:o.job,label:(PHASE_LABELS[o.ph]||'Phase')+' ('+o.ph+')',bid:r1(o.bid),earn:r1(o.earn),act:r1(act),rem:r1(o.bid-o.earn),vari:r1(act-o.earn),pct:o.bid?o.earn/o.bid:0,items:o.items,done:o.done};});
+    return {job:o.job,label:(PHASE_LABELS[o.ph]||'Phase')+' ('+o.ph+')',bid:r1(o.bid),earn:r1(o.earn),act:r1(act),rem:r1(o.bid-o.earn),vari:r1(o.earn-act),pct:o.bid?o.earn/o.bid:0,items:o.items,done:o.done};});
   const ai={};
   const runs=rows.slice().sort(function(a,b){return a.JobNum.localeCompare(b.JobNum)||a.Phase.localeCompare(b.Phase)||String(a.Area).localeCompare(String(b.Area))||String(a.ItemID).localeCompare(String(b.ItemID),undefined,{numeric:true});}).map(function(r){
     if(!(r.JobNum in ai))ai[r.JobNum]=actualByItem(r.JobNum)||{};
@@ -917,8 +930,8 @@ async function xlBuild(X,m){
   const widths=function(ws,cols){cols.forEach(function(c,i){const col=ws.getColumn(i+1);if(!col.width||col.width<c.w)col.width=c.w;});};
   const overUnder=function(v){return v<0?RED:GREEN;};
   const J=all?[{h:'Job',key:'job',w:10}]:[];
-  const cUtil=J.concat([{h:'Utility',key:'label',w:24},{h:'% Complete',key:'pct',w:16,fmt:'0%',bar:'FF63BE7B',align:'center'},{h:'Bid Hrs',key:'bid',w:12,fmt:'#,##0.0'},{h:'Earned Hrs',key:'earn',w:12,fmt:'#,##0.0'},
-    {h:'Burned Hrs',key:'act',w:12,fmt:'#,##0.0'},{h:'Remaining Hrs',key:'rem',w:13,fmt:'#,##0.0'},{h:'Burned vs Earned',key:'vari',w:13,fmt:'+#,##0.0;-#,##0.0;0',color:function(v){return v>0.5?RED:(v<-0.5?GREEN:null);}},
+  const cUtil=J.concat([{h:'Utility',key:'label',w:24},{h:'% Complete',key:'pct',w:16,fmt:'0%',bar:'FF63BE7B',align:'center'},{h:'Bid Hrs',key:'bid',w:12,fmt:'#,##0.0'},{h:'Bid Hrs For Work Done',key:'earn',w:12,fmt:'#,##0.0'},
+    {h:'Hours Used',key:'act',w:12,fmt:'#,##0.0'},{h:'Remaining Hrs',key:'rem',w:13,fmt:'#,##0.0'},{h:'Hours Gained (+) / Lost (-)',key:'vari',w:14,fmt:'+#,##0.0;-#,##0.0;0',color:function(v){return v>0.5?GREEN:(v<-0.5?RED:null);}},
     {h:'Runs / Lots',key:'items',w:11,fmt:'#,##0'},{h:'Done',key:'done',w:9,fmt:'#,##0'}]);
   const cEarth=J.concat([{h:'Earthwork',key:'work',w:24},{h:'% Complete',key:'pct',w:16,fmt:'0%',bar:'FFE0A458',align:'center'},{h:'Bid Qty',key:'bidQ',w:12,fmt:'#,##0'},{h:'Actual Qty',key:'qty',w:12,fmt:'#,##0'},{h:'Unit',key:'unit',w:12,align:'center'},
     {h:'Bid Cost',key:'bidC',w:13,fmt:'$#,##0'},{h:'Cost To Date',key:'cost',w:13,fmt:'$#,##0'},{h:'Bid $ / Unit',key:'bidU',w:11,fmt:'$#,##0.00'},{h:'Actual $ / Unit',key:'actU',w:11,fmt:'$#,##0.00',color:function(v,r){return r.bidU!=null?(v>r.bidU?RED:GREEN):null;}},
@@ -928,7 +941,7 @@ async function xlBuild(X,m){
   const cEDaily=J.concat([{h:'Date',key:'date',w:14},{h:'Entered By',key:'who',w:22},{h:'Work',key:'work',w:16},{h:'Quantity',key:'qty',w:12,fmt:'#,##0'},{h:'Unit',key:'unit',w:8,align:'center'},{h:'Machine Hrs',key:'mach',w:12,fmt:'#,##0.0'},
     {h:'Labor Hrs',key:'lab',w:11,fmt:'#,##0.0'},{h:'Cost',key:'cost',w:12,fmt:'$#,##0'},{h:'$ / Unit',key:'per',w:11,fmt:'$#,##0.00',color:function(v,r){return r.bidU!=null?(v>r.bidU?RED:GREEN):null;}}]);
   const cRuns=J.concat([{h:'Run / Lot',key:'id',w:16},{h:'% Done',key:'pct',w:14,fmt:'0%',bar:'FF63BE7B',align:'center'},{h:'Phase',key:'phase',w:8,align:'center'},{h:'Plan Sheet',key:'area',w:11,align:'center'},{h:'Type',key:'type',w:9,align:'center'},{h:'Description',key:'descr',w:28},
-    {h:'Bid Qty',key:'qty',w:10,fmt:'#,##0.#'},{h:'Installed',key:'inst',w:10,fmt:'#,##0.#'},{h:'Unit',key:'unit',w:7,align:'center'},{h:'Bid Hrs',key:'bid',w:10,fmt:'#,##0.0'},{h:'Earned Hrs',key:'earn',w:11,fmt:'#,##0.0'},{h:'Remaining Hrs',key:'rem',w:12,fmt:'#,##0.0'},{h:'Burned Hrs',key:'burn',w:11,fmt:'#,##0.0',color:function(v,r){return (v>r.bid+0.05&&r.bid>0)?RED:null;}}]);
+    {h:'Bid Qty',key:'qty',w:10,fmt:'#,##0.#'},{h:'Installed',key:'inst',w:10,fmt:'#,##0.#'},{h:'Unit',key:'unit',w:7,align:'center'},{h:'Bid Hrs',key:'bid',w:10,fmt:'#,##0.0'},{h:'Bid Hrs For Work Done',key:'earn',w:11,fmt:'#,##0.0'},{h:'Remaining Hrs',key:'rem',w:12,fmt:'#,##0.0'},{h:'Hours Used',key:'burn',w:11,fmt:'#,##0.0',color:function(v,r){return (v>r.bid+0.05&&r.bid>0)?RED:null;}}]);
   const cTsum=J.concat([{h:'Utility',key:'label',w:24},{h:'Installed Runs',key:'inst',w:16,fmt:'#,##0',align:'center'},{h:'All Tests Passed',key:'ok',w:12,fmt:'#,##0',color:function(v){return v>0?GREEN:null;}},{h:'Waiting On Tests',key:'wait',w:12,fmt:'#,##0'},{h:'Failed, Needs Retest',key:'fail',w:12,fmt:'#,##0',color:function(v){return v>0?RED:null;}}]);
   const cTests=J.concat([{h:'Date',key:'date',w:13},{h:'Result',key:'result',w:10,align:'center',color:function(v){return v==='Fail'?RED:(v==='Pass'?GREEN:null);}},{h:'Utility',key:'util',w:12},{h:'Test',key:'test',w:20},{h:'Run / Structure',key:'run',w:16},{h:'Readings',key:'readings',w:38,wrap:true},{h:'Witnessed By',key:'witness',w:18},{h:'Tested By',key:'by',w:18},{h:'Notes',key:'notes',w:40,wrap:true}]);
   const cClose=J.concat([{h:'Run',key:'id',w:16},{h:'% Installed',key:'pct',w:14,fmt:'0%',bar:'FF63BE7B',align:'center'},{h:'Utility',key:'label',w:14},{h:'Plan Sheet',key:'area',w:11,align:'center'},{h:'Tests Passed',key:'passed',w:13,align:'center'},{h:'Failed, Needs Retest',key:'failed',w:26,color:function(){return RED;}},{h:'Still Needed',key:'need',w:40}]);
@@ -936,7 +949,7 @@ async function xlBuild(X,m){
   const NC=11+(all?1:0);
   let ws=wb.addWorksheet('Overview',{views:[{showGridLines:false}],pageSetup:{orientation:'landscape',fitToPage:true,fitToWidth:1,fitToHeight:0}});
   title(ws,NC);let r=4;
-  section(ws,r,'Utilities: bid hours vs earned and burned',NC);r++;
+  section(ws,r,'Utilities: work done against hours used (plus means hours gained)',NC);r++;
   if(m.util.length){r=table(ws,r,cUtil,m.util);widths(ws,cUtil);}else{note(ws,r,'No utility scope loaded for this job yet.',NC);}
   if(m.tsum&&m.tsum.length){r+=2;section(ws,r,'Testing: a run is complete when every required test has passed',NC);r++;r=table(ws,r,cTsum,m.tsum);widths(ws,cTsum);}
   r+=2;section(ws,r,'Earthwork: yards and cost vs bid',NC);r++;
@@ -1290,6 +1303,62 @@ function pkParseEarth(wb){
     if(Object.keys(rates).length)out.rates=rates;}
   return out;
 }
+// Structures (storm structures, sanitary manholes) sit in a block under the pipe runs on the
+// STORM T-OFF and SAN T-OFF tabs: STR # or M.H. #, depth, and production hours.
+function pkParseStructs(rows,job,phase,titleRe){
+  const out=[];let ti=-1;
+  for(let i=0;i<rows.length;i++){if((rows[i]||[]).some(function(v){return typeof v==='string'&&titleRe.test(v);})){ti=i;break;}}
+  if(ti<0)return out;
+  let hi=-1,cId=-1,cH=-1,cD=-1;
+  for(let i=ti;i<Math.min(rows.length,ti+4);i++){const r=rows[i]||[];const k=r.findIndex(function(v){return typeof v==='string'&&/^(STR|M\.?\s*H\.?)\s*#$/i.test(v.trim());});
+    if(k>=0){hi=i;cId=k;r.forEach(function(v,c){if(typeof v!=='string')return;const s=v.trim();if(/^(prod\.?\s*)?h(ou)?rs\.?$/i.test(s)&&cH<0)cH=c;if(/^depth$/i.test(s)&&cD<0)cD=c;});break;}}
+  if(hi<0||cH<0)return out;
+  let area='',blank=0;const seen={};
+  for(let i=hi+1;i<rows.length;i++){
+    const r=rows[i]||[];const v=r[cId];const s=(v==null?'':String(v)).trim();
+    if(!s){if(++blank>4)break;continue;}blank=0;
+    const h=pkNum(r[cH]);
+    if(h>24||/prod\s*qty|extra pipe|# of runs|total|casting|inlet|summary/i.test(s))break; // past the last structure: summary tables follow
+    if(/^[A-Z]{1,2}-?\d{1,2}[.\-]\d{1,2}$/i.test(s)&&!(h>0)){area=s;continue;}
+    if(!(h>0))continue;
+    const key=s.toUpperCase().replace(/\s+/g,'');if(seen[key])continue;seen[key]=1;
+    const d=cD>=0?pkNum(r[cD]):0;
+    out.push({Title:'STR '+s,JobNum:job,Phase:phase,ItemType:'structure',Descr:(phase==='400'?'Structure':'Manhole')+(d>0?', '+(Math.round(d*10)/10)+' ft deep':''),BidHrs:Math.round(h*100)/100,BidQty:0,Unit:'EA',Area:area});
+  }
+  return out;
+}
+// Add any structures the tracker is missing, for every job. Never touches runs or laterals.
+async function pkAddStructs(manual){
+  if(!auth.isAdmin||S.pkStructBusy||!S.pk||!S.pk.jobs)return null;
+  S.pkStructBusy=true;if(manual)toast('Loading structures from the field packets. This takes a minute.');
+  let added=0,jobs=0;const errs=[],per=[];
+  try{
+    const tok=await getToken(manual);if(!tok)return null;
+    for(const j of S.pk.jobs){
+      if(!j.file)continue;
+      try{
+        const parsed=await pkLoadPacket(tok,j);
+        const st=parsed.rows.filter(function(r){return r.ItemType==='structure';});if(!st.length){per.push(j.job+': none in packet');continue;}
+        const mine=S.scope.filter(function(r){return r.JobNum===j.job;});
+        const have={};mine.forEach(function(r){if(r.ItemType==='structure')have[r.Phase+'|'+nid(r.ItemID)]=1;});
+        const add=st.filter(function(r){return !have[r.Phase+'|'+nid(r.Title)];});
+        // a structure an older import loaded as a zero-length "run" is replaced by the real one
+        const raw={};st.forEach(function(r){raw[r.Phase+'|'+nid(r.Title.replace(/^STR /,''))]=1;});
+        const dupe=mine.filter(function(r){return r.ItemType!=='structure'&&!(r.BidQty>0)&&raw[r.Phase+'|'+nid(r.ItemID)];});
+        for(const b of chunk(dupe,20))await gBatch(tok,b.map(function(v,i){return {id:String(i+1),method:'DELETE',url:'/sites/'+FD_SITE+'/lists/'+S.lists.scope+'/items/'+v.spId,headers:{'If-Match':'*'}};}));
+        for(const b of chunk(add,20)){
+          const resp=await gBatch(tok,b.map(function(row,i){return {id:String(i+1),method:'POST',url:'/sites/'+FD_SITE+'/lists/'+S.lists.scope+'/items',headers:{'Content-Type':'application/json'},body:{fields:packFields('scope',row)}};}));
+          const bad=resp.filter(function(r){return r.status>=400;});if(bad.length)throw new Error(bad.length+' rows failed (HTTP '+bad[0].status+')');
+        }
+        per.push(j.job+': added '+add.length+' of '+st.length+(dupe.length?' (replaced '+dupe.length+' mis-loaded row)':''));
+        if(add.length){added+=add.length;jobs++;}
+      }catch(e){errs.push(j.job+': '+((e&&e.message)||e));}
+    }
+    if(added)await loadAll();
+    if(manual||added)toast(added?('Loaded '+added+' structures on '+jobs+' job'+(jobs===1?'':'s')+(errs.length?'. '+errs.length+' job(s) had errors':'')):('No structures were missing'+(errs.length?' ('+errs.length+' job(s) had errors)':'')),errs.length?'err':'');
+    return {added:added,jobs:jobs,per:per,errs:errs};
+  }finally{S.pkStructBusy=false;}
+}
 function pkParse(wb,job){
   const sheet=re=>{const n=wb.SheetNames.find(x=>re.test(x.trim()));return n?XLSX.utils.sheet_to_json(wb.Sheets[n],{header:1,raw:true,defval:null}):null;};
   const st=sheet(/^STORM\s*T-?\s*OFF/i),sa=sheet(/^SAN(ITARY)?\s*T-?\s*OFF/i),sl=sheet(/^SAN(ITARY)?\s*LAT.*T-?\s*OFF/i);
@@ -1297,6 +1366,8 @@ function pkParse(wb,job){
   if(st)rows=rows.concat(pkParseRuns(st,job,'400'));
   if(sa)rows=rows.concat(pkParseRuns(sa,job,'500'));
   if(sl)rows=rows.concat(pkParseLats(sl,job));
+  if(st)rows=rows.concat(pkParseStructs(st,job,'400',/storm\s*manholes/i));
+  if(sa)rows=rows.concat(pkParseStructs(sa,job,'500',/sanitary\s*manholes/i));
   return {rows,earth:pkParseEarth(wb)};
 }
 function pkTotals(rows){const o={};rows.forEach(r=>{const k=r.Phase+'|'+r.ItemType;const x=o[k]=o[k]||{phase:r.Phase,type:r.ItemType,n:0,lf:0,hrs:0};x.n++;x.lf+=r.BidQty;x.hrs+=r.BidHrs;});return Object.values(o);}
@@ -1516,7 +1587,7 @@ function renderPackets(){
     nopacket:['No field packet in the folder','#d97706'],empty:['Packet has no takeoff rows the tracker can read','var(--red)'],error:['Import failed','var(--red)']};
   let h=`<div class="sec"><h2>Field packets <span class="h2-sub">Field / Jobs</span></h2>
     <p class="note">Every job folder under Field\\Jobs\\{year} is checked for a field packet. A job with no scope yet is imported automatically. A job that already has scope is only replaced when you press Re-sync.</p>
-    <button class="btn btn-sm" onclick="S.pk=null;sessionStorage.removeItem('vhtrk_pk_scan');render()"><i class="ti ti-refresh"></i> Scan again</button> <button class="btn btn-sm" onclick="pkVerify(true)"><i class="ti ti-checks"></i> Check packets against tracker now</button>
+    <button class="btn btn-sm" onclick="S.pk=null;sessionStorage.removeItem('vhtrk_pk_scan');render()"><i class="ti ti-refresh"></i> Scan again</button> <button class="btn btn-sm" onclick="pkVerify(true)"><i class="ti ti-checks"></i> Check packets against tracker now</button> <button class="btn btn-sm" onclick="pkAddStructs(true)"><i class="ti ti-circle-dot"></i> Load structures</button>
     <p class="note" style="margin-top:8px">${S.pkCheck?'Last full bid pack check: '+esc(String(S.pkCheck.at).slice(0,10))+(S.pkCheck.by?' by '+esc(S.pkCheck.by):'')+'.':'No bid pack check has run yet.'} It runs by itself once a week when an admin opens the tracker.${S.pkChecking?' <b>Checking now…</b>':''}</p></div>`;
   if(S.pk.err)h+=`<div class="sec" style="border-color:var(--red)">Scan failed: ${esc(S.pk.err)}</div>`;
   (S.pk.jobs||[]).forEach(j=>{const L=lab[j.status]||[j.status,'inherit'];
