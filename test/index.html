@@ -648,7 +648,7 @@ async function initApp(){
   }catch(e){console.warn(e);}
   initWeeks();updUC();updNav();render();updBadge();
 }
-const VH_BUILD='2026-11-23.30-test';
+const VH_BUILD='2026-11-23.31-test';
 console.log('[VH] Timesheets build',VH_BUILD);
 let __vhAuthToastAt=0;
 // interactive=true only from a user-initiated action: saves drafts, then allows the MSAL
@@ -2403,7 +2403,7 @@ function upUsed(u,k){const wk=S.weeks[S.currentWeek];let ft=0,hit=false;Object.k
 function upOpen(dt,ph,job){
   const wk=S.weeks[S.currentWeek];if(!wk){toast('Open your timesheet for the week first.','error');return;}
   window.__up={dt:dt,ph:ph,job:String(job||'').trim(),view:'day',sel:null,pick:{}};
-  const c=vhScopeCache();if(!c||!c.rows||!c.rows.length||c.rows[0].q===undefined)vhLoadScope(true).then(function(){if(window.__up)upDraw();});
+  const c=vhScopeCache();if(!c||!c.rows||!c.rows.length||c.rows[0].bh===undefined)vhLoadScope(true).then(function(){if(window.__up)upDraw();});
   upLoadStructs().then(function(){if(window.__up)upDraw();});
   upDraw();
 }
@@ -2433,17 +2433,29 @@ function upAdd(){
     if(!ft){err('Enter the feet, or tap Finished it.');return;}
     if(r.q>0&&ft>left+0.5){err('Only '+left+' ft are left on this run.');return;}
     if(!hr){err('Enter the production hours.');return;}
-    d.tasks.push({k:'r:'+r.id,type:'run',id:r.id,ft:ft,h:hr,fin:r.q>0&&ft>=left-0.5});
+    d.tasks.push({k:'r:'+r.id,type:'run',id:r.id,ft:ft,h:hr,fin:r.q>0&&ft>=left-0.5,bid:(r.q>0&&r.bh>0)?upR2(r.bh*Math.min(ft,r.q)/r.q):0});
   }else if(u.view==='strf'){
     if(!hr){err('Enter the production hours.');return;}
-    d.tasks.push({k:'s:'+u.sel,type:'str',id:u.sel,h:hr});
+    d.tasks.push({k:'s:'+u.sel,type:'str',id:u.sel,h:hr,bid:upR2((upScope(u,'structure').find(function(x){return x.id===u.sel;})||{}).bh||0)});
   }else if(u.view==='lat'){
     const ls=Object.keys(u.pick).filter(function(k){return u.pick[k];});
     if(!ls.length){err('Tap at least one lot.');return;}
     if(!hr){err('Enter the production hours.');return;}
-    ls.forEach(function(l){d.tasks.push({k:'l:'+l,type:'lat',id:l,h:Math.round(hr/ls.length*100)/100});});
+    const lsc=upScope(u,'lateral');ls.forEach(function(l){d.tasks.push({k:'l:'+l,type:'lat',id:l,h:Math.round(hr/ls.length*100)/100,bid:upR2((lsc.find(function(x){return String(x.id)===String(l);})||{}).bh||0)});});
   }
   upSave();u.view='day';u.sel=null;u.pick={};upDraw();
+}
+// Hours gained = bid hours for the work, minus the hours it took. Plus means ahead of the bid.
+function upSid(x){return String(x==null?'':x).replace(/^STR /,'');}
+function upR2(n){return Math.round(n*100)/100;}
+function upGainBit(t){
+  if(!(t.bid>0))return '';const g=upR2(t.bid-upNum(t.h));
+  return '<span title="bid '+t.bid+' h" style="font-size:12.5px;font-weight:700;color:'+(g>=0?'#16a34a':'#dc2626')+'">'+(g>=0?'+':'\u2212')+Math.abs(g)+' h</span>';
+}
+function upGainLine(d){
+  let bid=0,took=0;d.tasks.forEach(function(t){if(t.bid>0){bid+=t.bid;took+=upNum(t.h);}});
+  if(!(bid>0))return '';bid=upR2(bid);took=upR2(took);const g=upR2(bid-took);
+  return '<div style="margin-top:10px;padding-top:10px;border-top:1px solid rgba(128,128,128,.35);display:flex;align-items:center;gap:10px"><div style="flex:1"><div style="font-size:13px">Today\'s work was bid at <b>'+bid+'</b> h and took <b>'+took+'</b> h.</div><div style="font-size:11.5px;opacity:.7">Hours gained. Plus means ahead of the bid.</div></div><div style="font-size:22px;font-weight:800;white-space:nowrap;color:'+(g>=0?'#15803d':'#b91c1c')+'">'+(g>=0?'+':'\u2212')+Math.abs(g)+' h</div></div>';
 }
 function upDraw(){
   const u=window.__up;if(!u)return;
@@ -2469,13 +2481,13 @@ function upDraw(){
     if(!d.tasks.length)h+='<div style="color:var(--text2);font-size:13.5px;padding:6px 0">Nothing yet.</div>';
     let on=0;
     d.tasks.forEach(function(t,i){on+=upNum(t.h);
-      const label=t.type==='run'?'Run '+t.id:(t.type==='str'?(u.ph==='400'?'Structure ':'Manhole ')+t.id:'Lateral, lot '+t.id);
-      const detail=t.type==='run'?((t.fin?'Finished, ':'')+t.ft+' ft'):(t.type==='str'?'Set':'Tied in');
-      h+='<div style="display:flex;align-items:center;gap:10px;padding:10px 0;border-top:1px solid var(--border)"><div style="flex:1;min-width:0"><div style="font-weight:700;font-size:15px">'+esc1(label)+'</div><div style="font-size:12.5px;color:var(--text2)">'+esc1(detail)+'</div></div><span style="font-size:15px;font-weight:700">'+t.h+' h</span><button class="btn btn-sm" onclick="upRemove('+i+')"><i class="ti ti-x"></i></button></div>';});
+      const label=t.type==='run'?'Run '+t.id:(t.type==='str'?(u.ph==='400'?'Structure ':'Manhole ')+upSid(t.id):'Lateral, lot '+t.id);
+      const detail=(t.type==='run'?((t.fin?'Finished, ':'')+t.ft+' ft'):(t.type==='str'?'Set':'Tied in'))+(t.bid>0?' · bid '+t.bid+' h':'');
+      h+='<div style="display:flex;align-items:center;gap:10px;padding:10px 0;border-top:1px solid var(--border)"><div style="flex:1;min-width:0"><div style="font-weight:700;font-size:15px">'+esc1(label)+'</div><div style="font-size:12.5px;color:var(--text2)">'+esc1(detail)+'</div></div><span style="text-align:right;white-space:nowrap"><span style="font-size:15px;font-weight:700;display:block">'+t.h+' h</span>'+upGainBit(t)+'</span><button class="btn btn-sm" onclick="upRemove('+i+')"><i class="ti ti-x"></i></button></div>';});
     on=Math.round(on*100)/100;const np=upNum(d.np),left=Math.round((crew-on-np)*100)/100,ok=d.tasks.length&&Math.abs(left)<0.01,over=left<-0.01;
     h+='<div style="margin-top:14px;padding:12px;border-radius:12px;background:'+(ok?'#dcfce7':(over?'#fee2e2':'var(--bg2)'))+';color:'+(ok||over?'#111':'inherit')+'"><div style="display:grid;grid-template-columns:1fr 1fr 1.2fr;gap:10px;align-items:end"><div><div style="font-size:11.5px;opacity:.7">Crew hours</div><div style="font-weight:700;font-size:19px">'+crew+'</div></div><div><div style="font-size:11.5px;opacity:.7">On tasks</div><div style="font-weight:700;font-size:19px">'+on+'</div></div><div><div style="font-size:11.5px;opacity:.7;margin-bottom:3px">Non-production</div><input inputmode="decimal" value="'+esc1(d.np)+'" placeholder="0" style="'+inp+';padding:9px" onchange="upNp(this.value)"/></div></div>'+
        '<div style="font-size:14px;font-weight:700;margin-top:8px;color:'+(ok?'#15803d':(over?'#b91c1c':'inherit'))+'">'+(!crew?'No time on your timesheet yet for '+name.toLowerCase()+' on job '+esc1(u.job)+' this day. Crew hours come from the timesheet.':(ok?'The day adds up.':(over?(-left)+' h more than the crew worked. Check the numbers.':(d.tasks.length?left+' h not accounted for yet.':'Crew hours come from your timesheet.'))))+'</div>'+
-       ((left>0.01&&d.tasks.length)?'<button class="btn btn-sm" style="margin-top:8px" onclick="upFill('+left+')">Put the '+left+' h under non-production</button>':'')+'</div>';
+       upGainLine(d)+((left>0.01&&d.tasks.length)?'<button class="btn btn-sm" style="margin-top:8px" onclick="upFill('+left+')">Put the '+left+' h under non-production</button>':'')+'</div>';
     if(np>0)h+='<div style="font-size:12.5px;color:var(--text2);margin:10px 0 5px">Why was time lost? (tap one)</div><div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">'+RS.map(function(x){return '<button class="btn'+(d.why===x?' btn-p':'')+'" style="min-height:44px;justify-content:center;font-size:13.5px" onclick="upWhy(\''+x+'\')">'+x+'</button>';}).join('')+'</div>';
     h+='<span style="'+lbl+'">Notes (water, delays, anything the office should know)</span><input style="'+inp+'" value="'+esc1(d.note||'')+'" onchange="upNote(this.value)"/>';
     h+='<div class="ib" style="margin-top:14px"><i class="ti ti-flask"></i><span>Test form. What you enter here is saved on this device only and is not sent to the tracker yet.</span></div>';
@@ -2498,18 +2510,19 @@ function upDraw(){
        '<div id="up-err" style="color:#dc2626;font-size:13.5px;min-height:20px;margin-top:8px"></div><button class="btn btn-p btn-bl" style="min-height:54px;justify-content:center;font-size:16px" onclick="upAdd()">Add to today</button>';
   }else if(u.view==='str'){
     back='day';title=u.ph==='400'?'Pick the structure':'Pick the manhole';
-    const d=upDay(u,false)||{tasks:[]};const sc=upStructCache();const list=((sc&&sc.jobs&&sc.jobs[u.job]&&sc.jobs[u.job][u.ph])||[]);
+    const d=upDay(u,false)||{tasks:[]};const list=upScope(u,'structure');
     // the ones at the ends of today's runs come first
+    const flat=function(x){return upSid(x).toUpperCase().replace(/\s+/g,'');};
     const near={};d.tasks.forEach(function(t){if(t.type==='run')String(t.id).toUpperCase().split('-').forEach(function(p){near[p.replace(/\s+/g,'')]=1;});});
     const avail=list.filter(function(s){return !upUsed(u,'s:'+s.id).hit;});
-    if(!list.length)h+='<div class="ib"><i class="ti ti-info-circle"></i><span>No structures are loaded for this job yet.</span></div>';
+    if(!list.length)h+='<div class="ib"><i class="ti ti-info-circle"></i><span>No structures are loaded for this job yet. If the list is still loading, wait a few seconds and try again.</span></div>';
     else if(!avail.length)h+='<div class="ib"><i class="ti ti-check"></i><span>Every one on the list has been reported as set.</span></div>';
-    const sorted=avail.slice().sort(function(a,b){return (near[String(b.id).toUpperCase().replace(/\s+/g,'')]?1:0)-(near[String(a.id).toUpperCase().replace(/\s+/g,'')]?1:0);});
+    const sorted=avail.slice().sort(function(a,b){return (near[flat(b.id)]?1:0)-(near[flat(a.id)]?1:0)||upSid(a.id).localeCompare(upSid(b.id),undefined,{numeric:true});});
     h+='<input id="up-find" placeholder="Type to narrow the list" autocomplete="off" style="'+inp+';margin-bottom:10px" oninput="upFilter(this.value)"/><div id="up-list" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(88px,1fr));gap:8px">';
-    sorted.forEach(function(s){const nr=near[String(s.id).toUpperCase().replace(/\s+/g,'')];h+='<button class="btn up-row" data-n="'+esc1(String(s.id).toUpperCase())+'" style="min-height:52px;justify-content:center;font-size:15px;font-weight:700;'+(nr?'border:2px solid var(--accent)':'')+'" onclick="upPick(\'str\',\''+q1(s.id)+'\')">'+esc1(s.id)+'</button>';});
+    sorted.forEach(function(s){const nr=near[flat(s.id)];h+='<button class="btn up-row" data-n="'+esc1(flat(s.id))+'" style="min-height:52px;justify-content:center;font-size:15px;font-weight:700;'+(nr?'border:2px solid var(--accent)':'')+'" onclick="upPick(\'str\',\''+q1(s.id)+'\')">'+esc1(upSid(s.id))+'</button>';});
     h+='</div>';
   }else if(u.view==='strf'){
-    back='str';title='Set '+u.sel;
+    back='str';title='Set '+upSid(u.sel);
     h+='<span style="'+lbl+'">Production hours to set this one</span><input id="up-hr" inputmode="decimal" style="'+inp+'"/><div id="up-err" style="color:#dc2626;font-size:13.5px;min-height:20px;margin-top:8px"></div><button class="btn btn-p btn-bl" style="min-height:54px;justify-content:center;font-size:16px" onclick="upAdd()">Add to today</button>';
   }else if(u.view==='lat'){
     back='day';title='Laterals tied in';
@@ -3079,12 +3092,12 @@ async function vhLoadScope(force){
     const colsR=await fetch(`https://graph.microsoft.com/v1.0/sites/${L.siteId}/lists/${L.listId}/columns?$select=name,displayName`,{headers:{Authorization:'Bearer '+tok}});
     const cols=colsR.ok?((await colsR.json()).value||[]):[];
     const col=w=>{const ex=cols.find(c=>c.name.toLowerCase()===w.toLowerCase());const dp=cols.find(c=>(c.displayName||'').toLowerCase()===w.toLowerCase());return (ex||dp||{name:w}).name;};
-    const cJob=col('JobNum'),cPh=col('Phase'),cDe=col('Descr'),cTy=col('ItemType'),cQty=col('BidQty');
+    const cJob=col('JobNum'),cPh=col('Phase'),cDe=col('Descr'),cTy=col('ItemType'),cQty=col('BidQty'),cHrs=col('BidHrs');
     const rows=[];let next=`https://graph.microsoft.com/v1.0/sites/${L.siteId}/lists/${L.listId}/items?$expand=fields&$top=999`,pages=0;
     while(next&&pages<10){
       const r=await fetch(next,{headers:{Authorization:'Bearer '+tok}});if(!r.ok)break;
       const j=await r.json();
-      (j.value||[]).forEach(it=>{const f=it.fields||{};if(f.Title)rows.push({j:String(f[cJob]||'').trim(),p:String(f[cPh]||'').trim(),id:f.Title,d:String(f[cDe]||'').slice(0,40),t:(f[cTy]||'run').toLowerCase(),q:+f[cQty]||0});});
+      (j.value||[]).forEach(it=>{const f=it.fields||{};if(f.Title)rows.push({j:String(f[cJob]||'').trim(),p:String(f[cPh]||'').trim(),id:f.Title,d:String(f[cDe]||'').slice(0,40),t:(f[cTy]||'run').toLowerCase(),q:+f[cQty]||0,bh:+f[cHrs]||0});});
       next=j['@odata.nextLink']||null;pages++;
     }
     if(rows.length){__vhScope={ts:Date.now(),rows};try{localStorage.setItem('vhts_scope',JSON.stringify(__vhScope));}catch(e){}}
