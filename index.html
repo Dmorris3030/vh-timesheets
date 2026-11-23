@@ -648,7 +648,7 @@ async function initApp(){
   }catch(e){console.warn(e);}
   initWeeks();updUC();updNav();render();updBadge();
 }
-const VH_BUILD='2026-11-23.27';
+const VH_BUILD='2026-11-23.37';
 console.log('[VH] Timesheets build',VH_BUILD);
 let __vhAuthToastAt=0;
 // interactive=true only from a user-initiated action: saves drafts, then allows the MSAL
@@ -1117,13 +1117,6 @@ function prodEntries(wk){
     Object.values(old).forEach(function(p){if(p&&p.job)wk.production.entries.push(Object.assign({id:Date.now()+Math.random(),phase:p.phase||'400'},p));});
   }
   return wk.production.entries;
-}
-
-function addProdEntry(phase,dt){
-  const wk=S.weeks[S.currentWeek];
-  const entries=prodEntries(wk);
-  entries.push({id:Date.now()+Math.random(),phase:phase,date:dt,job:'',notes:''});
-  rEntry();
 }
 
 function removeProdEntry(id){
@@ -1704,30 +1697,8 @@ function getJobSuggestions(wk,dt){
   return Array.from(jobs);
 }
 
-function buildProdField(f,entry,ro){
-  const val=(entry[f.id]||'').toString().replace(/"/g,'&quot;');
-  const id=entry.id;
-  let s='<div>';
-  s+='<span class="fl" style="font-size:10px;margin-bottom:4px;display:block">'+f.label+'</span>';
-  if(f.type==='weather'){
-    s+='<select class="di" style="font-size:14px;padding:8px 10px" '+(ro?'disabled':'')+' data-id="'+id+'" data-f="'+f.id+'" onchange="setProdField(+this.dataset.id,this.dataset.f,this.value)">';
-    s+='<option value="">Select...</option>';
-    WEATHER_OPTIONS.forEach(function(w){s+='<option value="'+w+'" '+(entry[f.id]===w?'selected':'')+'>'+w+'</option>';});
-    s+='</select>';
-  }else if(f.id==='strId'){
-    // Native datalist is unusable on phones (keyboard dismisses, 300 options unscrollable) —
-    // readonly field opens a full-screen searchable picker instead.
-    s+='<input type="text" class="di" readonly value="'+val+'" '+(ro?'disabled':'')+' placeholder="Tap to pick run / lot" style="font-size:15px;padding:8px 10px;cursor:pointer" data-id="'+id+'" data-f="strId" onclick="if(!this.disabled)vhStrPick(this)"/>';
-  }else{
-    s+='<input type="'+(f.type==='text'?'text':'number')+'" class="di" '+(f.type!=='text'?'inputmode="decimal"':'')+' value="'+val+'" '+(ro?'disabled':'')+' placeholder="'+f.label+'" style="font-size:15px;padding:8px 10px" data-id="'+id+'" data-f="'+f.id+'" oninput="setProdField(+this.dataset.id,this.dataset.f,this.value)"/>';
-  }
-  s+='</div>';
-  return s;
-}
-
 function buildProductionView(wk,dates,ro){
   const adDay=adys['_prod_day']||0;
-  const adPhase=adys['_prod_phase']||0;
   let s='';
 
   // Day tabs
@@ -1746,64 +1717,11 @@ function buildProductionView(wk,dates,ro){
   const dt=dates[adDay];
   const suggestions=getJobSuggestions(wk,dt);
   // Material tickets bar (independent of timesheet status: a delivery can be logged any time)
-  s+='<div style="display:flex;align-items:center;gap:10px;background:var(--bg2);border-radius:var(--r3);padding:10px 12px;margin-bottom:14px"><i class="ti ti-receipt" style="font-size:22px;color:var(--accent);flex-shrink:0"></i><div style="flex:1;min-width:0" onclick="tkFlush(true)"><strong style="font-size:14px">Material tickets</strong><br><span id="tk-pend" style="font-size:12px;color:var(--text2)">Stone and pipe deliveries</span></div><button class="btn btn-p btn-sm" style="flex-shrink:0;min-height:40px" data-dt="'+dt+'" data-ph="'+PROD_PHASES[adPhase]+'" data-job="'+String(suggestions[0]||'').replace(/"/g,'&quot;')+'" onclick="tkOpen(this.dataset.dt,this.dataset.ph,this.dataset.job)"><i class="ti ti-camera"></i> Add ticket</button><button class="btn btn-sm" style="flex-shrink:0;min-height:40px" data-dt="'+dt+'" data-ph="'+PROD_PHASES[adPhase]+'" data-job="'+String(suggestions[0]||'').replace(/"/g,'&quot;')+'" onclick="tkbOpen(this.dataset.dt,this.dataset.ph,this.dataset.job)"><i class="ti ti-stack-2"></i> Stack</button></div>';
+  s+='<div style="display:flex;align-items:center;gap:10px;background:var(--bg2);border-radius:var(--r3);padding:10px 12px;margin-bottom:14px"><i class="ti ti-receipt" style="font-size:22px;color:var(--accent);flex-shrink:0"></i><div style="flex:1;min-width:0" onclick="tkFlush(true)"><strong style="font-size:14px">Material tickets</strong><br><span id="tk-pend" style="font-size:12px;color:var(--text2)">Stone and pipe deliveries</span></div><button class="btn btn-p btn-sm" style="flex-shrink:0;min-height:40px" data-dt="'+dt+'" data-ph="" data-job="'+String(suggestions[0]||'').replace(/"/g,'&quot;')+'" onclick="tkOpen(this.dataset.dt,this.dataset.ph,this.dataset.job)"><i class="ti ti-camera"></i> Add ticket</button><button class="btn btn-sm" style="flex-shrink:0;min-height:40px" data-dt="'+dt+'" data-ph="" data-job="'+String(suggestions[0]||'').replace(/"/g,'&quot;')+'" onclick="tkbOpen(this.dataset.dt,this.dataset.ph,this.dataset.job)"><i class="ti ti-stack-2"></i> Stack</button></div>';
   setTimeout(tkRefreshCount,0);
 
-  // Phase tabs
-  s+='<div style="display:flex;gap:4px;margin-bottom:14px;overflow-x:auto;scrollbar-width:none;-webkit-overflow-scrolling:touch;padding-bottom:2px">';
-  PROD_PHASES.forEach(function(ph,pi){
-    const label=(S.phaseLabels&&S.phaseLabels[ph])||PHASE_TEMPLATES[ph].label;
-    const active=pi===adPhase;
-    const count=prodEntries(wk).filter(function(e){return e.date===dt&&e.phase===ph;}).length;
-    s+='<button data-pi="'+pi+'" onclick="adys[\'_prod_phase\']=+this.dataset.pi;rEntry()" style="flex-shrink:0;padding:6px 10px;border-radius:16px;border:0.5px solid '+(active?'var(--accent)':'var(--border)')+';background:'+(active?'var(--accent)':'var(--bg2)')+';color:'+(active?'#fff':'var(--text2)')+';font-size:11px;font-weight:600;cursor:pointer;white-space:nowrap">';
-    const shortLabel={'300':'Earthwork','310':'Fine Grade','400':'Storm','500':'Sanitary','600':'Watermain'};
-    s+=ph+' '+( shortLabel[ph]||label)+(count>0?' ('+count+')':'')+' </button>';
-  });
-  s+='</div>';
-
-  const phase=PROD_PHASES[adPhase];
-  const template=PHASE_TEMPLATES[phase];
-  const phaseEntries=prodEntries(wk).filter(function(e){return e.date===dt&&e.phase===phase;});
-
-  if(!phaseEntries.length){
-    s+='<div class="nd" style="padding:24px 16px"><i class="ti ti-clipboard"></i>No '+template.label+' reports for this day.<br>';
-    if(!ro)s+='<button class="btn btn-p" style="margin-top:10px" data-ph="'+phase+'" data-dt="'+dt+'" onclick="addProdEntry(this.dataset.ph,this.dataset.dt)"><i class="ti ti-plus"></i> Add report</button>';
-    s+='</div>';
-  } else {
-    phaseEntries.forEach(function(entry){
-      s+='<div class="card" style="position:relative">';
-      // Remove button
-      if(!ro)s+='<button onclick="removeProdEntry('+entry.id+')" style="position:absolute;top:10px;right:10px;background:none;border:none;color:var(--text3);font-size:18px;cursor:pointer;padding:4px">✕</button>';
-      // Job # with suggestions
-      s+='<div style="margin-bottom:10px"><span class="fl" style="font-size:10px;margin-bottom:4px;display:block">Job #</span>';
-      s+='<input type="text" class="di" list="job-suggestions-'+entry.id+'" value="'+(entry.job||'')+'" '+(ro?'disabled':'')+' placeholder="Job number" style="font-size:16px;font-weight:600;padding:10px 12px" data-id="'+entry.id+'" data-f="job" oninput="setProdField(+this.dataset.id,this.dataset.f,this.value)"/>';
-      if(suggestions.length){
-        s+='<datalist id="job-suggestions-'+entry.id+'">';
-        suggestions.forEach(function(j){s+='<option value="'+j+'">'+j+'</option>';});
-        s+='</datalist>';
-      }
-      s+='</div>';
-      // Phase fields grid
-      s+='<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px">';
-      (template.fields||[]).forEach(function(f){
-        const span=f.span===2?'grid-column:span 2':'';
-        s+='<div style="'+span+'">'+buildProdField(f,entry,ro)+'</div>';
-      });
-      s+='</div>';
-      // Notes
-      s+='<div><span class="fl" style="font-size:10px;margin-bottom:4px;display:block">Notes</span>';
-      s+='<textarea class="di" '+(ro?'disabled':'')+' placeholder="Field conditions, issues..." style="height:60px;resize:none;font-size:14px" data-id="'+entry.id+'" data-f="notes" oninput="setProdField(+this.dataset.id,this.dataset.f,this.value)">'+(entry.notes||'')+'</textarea></div>';
-      if(!ro)s+='<button class="btn btn-bl" style="margin-top:10px;width:100%;justify-content:center" data-eid="'+entry.id+'" onclick="openMarkup(+this.dataset.eid)"><i class="ti ti-highlight"></i> Mark up plan</button>';
-      s+='</div>';
-    });
-    if(!ro){
-    s+='<button class="btn btn-bl" data-ph="'+phase+'" data-dt="'+dt+'" onclick="addProdEntry(this.dataset.ph,this.dataset.dt)" style="margin-bottom:8px"><i class="ti ti-plus"></i> Add another '+template.label+' report</button>';
-    }
-  }
-
-  if(!ro){
-    s+='<div class="acts"><button class="btn btn-bl" onclick="saveDraft()"><i class="ti ti-device-floppy"></i> Save production</button></div>';
-  }
+  // One button per kind of work. Each opens that day's report.
+  s+=upLauncher(wk,dt,ro);
   return s;
 }
 
@@ -2372,6 +2290,345 @@ async function tlSetHome(){
   tlMemSave(mem);
   if(window.__tl&&p){closeM();tlPickJob(p.mode,null,p.pos,p.cb);}
 }
+// ===== NEW UTILITY PRODUCTION FORM (test site only for now) ===================
+// One screen per utility per day. Three buttons (pipe run, structure, laterals), each opening
+// only its own list. Every task carries its own production hours, and the day has to add up to
+// the crew hours on the timesheet. On the test site this saves on the device only; nothing is
+// sent to the tracker until the form is approved and switched on for the live app.
+function vhIsTest(){return /\/test\//.test(location.pathname);}
+function upKey(u){return u.job+'|'+u.ph+'|'+u.dt;}
+function upDay(u,make){const wk=S.weeks[S.currentWeek];if(!wk)return null;if(!wk.utilDays){if(!make)return null;wk.utilDays={};}const k=upKey(u);if(!wk.utilDays[k]&&make)wk.utilDays[k]={tasks:[],np:'',why:'',note:''};return wk.utilDays[k]||null;}
+function upNum(x){const n=parseFloat(String(x==null?'':x).replace(/,/g,''));return isFinite(n)&&n>0?n:0;}
+function upStructCache(){try{return JSON.parse(localStorage.getItem('vhts_structs')||'null');}catch(e){return null;}}
+async function upLoadStructs(){
+  const c=upStructCache();if(c&&c.ts&&Date.now()-c.ts<6*3600000)return c;
+  try{const tok=await getTok();if(!tok)return c;
+    const r=await fetch(tkUrl('Field/Jobs/structures.json')+':/content',{headers:{Authorization:'Bearer '+tok}});
+    if(r.ok){const j=await r.json();if(j&&j.jobs){const out={ts:Date.now(),jobs:j.jobs};localStorage.setItem('vhts_structs',JSON.stringify(out));return out;}}
+  }catch(e){}
+  return c;
+}
+// Crew hours for the day on this job and utility: the longest any one person has on it.
+function upCrewHrs(u){
+  const wk=S.weeks[S.currentWeek];let mx=0;if(!wk)return 0;
+  (wk.employees||[]).forEach(function(eid){let h=0;getJobLines(wk,eid,u.dt).forEach(function(ln){if(String(ln.job||'').trim()===u.job&&String(ln.phase||'').trim()===u.ph){const c=calcJobHours(ln);if(c&&c.total>0)h+=c.total;}});if(h>mx)mx=h;});
+  return Math.round(mx*100)/100;
+}
+function upScope(u,type){const c=vhScopeCache();return ((c&&c.rows)||[]).filter(function(r){return r.j===u.job&&r.p===u.ph&&r.t===type;});}
+// what has already been reported this week on other days (so a structure cannot be set twice)
+function upUsed(u,k){const wk=S.weeks[S.currentWeek];let ft=0,hit=false;Object.keys((wk&&wk.utilDays)||{}).forEach(function(dk){const p=dk.split('|');if(p[0]!==u.job||p[1]!==u.ph)return;((wk.utilDays[dk]||{}).tasks||[]).forEach(function(t){if(t.k===k){hit=true;ft+=upNum(t.ft);}});});return {hit:hit,ft:ft};}
+function upOpen(dt,ph,job){
+  const wk=S.weeks[S.currentWeek];if(!wk){toast('Open your timesheet for the week first.','error');return;}
+  if(wk.status!=='draft'&&wk.status!=='returned'){toast('This week has been turned in, so its reports can no longer be changed.','error');return;}
+  window.__up={dt:dt,ph:ph,job:String(job||'').trim(),view:'day',sel:null,pick:{}};
+  const c=vhScopeCache();if(!c||!c.rows||!c.rows.length||c.rows[0].bh===undefined)vhLoadScope(true).then(function(){if(window.__up)upDraw();});
+  upLoadStructs().then(function(){if(window.__up)upDraw();});
+  if(ph==='300'||ph==='310')euLoad().then(function(){if(window.__up&&window.__up.view!=='etf')upDraw();});
+  upDraw();
+}
+function upClose(){
+  const u=window.__up;if(!u)return;const d=upDay(u,false);
+  if(d&&d.tasks.length){let on=0;d.tasks.forEach(function(t){on+=upNum(t.h);});const crewNow=upCrewHrs(u);const left=crewNow>0?Math.round((crewNow-on-upNum(d.np))*100)/100:0;
+    if(Math.abs(left)>0.01&&!confirm('The day does not add up yet ('+(left>0?left+' h not accounted for':(-left)+' h more than the crew worked')+'). Close anyway?'))return;}
+  const el=document.getElementById('up-sheet');if(el)el.remove();window.__up=null;render();
+}
+function upSave(){try{upBridge(window.__up);}catch(e){console.warn('upBridge',e);}saveDraftSilent();}
+function upSetJob(j){const u=window.__up;j=String(j||'').trim();if(!j){toast('Enter the job number.','error');return;}u.job=j;upDraw();}
+function upGo(v){const u=window.__up;u.view=v;u.sel=null;u.pick={};upDraw();}
+function upPick(kind,id){const u=window.__up;u.sel=id;u.areas=[];u.form=null;u.view=kind==='run'?'runf':(kind==='et'?'etf':'strf');upDraw();}
+function upLot(id){const u=window.__up;const hv=(document.getElementById('up-hr')||{}).value||'';const fv=(document.getElementById('up-find')||{}).value||'';u.pick[id]=!u.pick[id];upDraw();const e=document.getElementById('up-hr');if(e)e.value=hv;const fe=document.getElementById('up-find');if(fe&&fv){fe.value=fv;upFilter(fv);}}
+function upFin(left){const e=document.getElementById('up-ft');if(e)e.value=left;}
+function upRemove(i){const u=window.__up;const d=upDay(u,false);if(!d)return;d.tasks.splice(i,1);upSave();upDraw();}
+function upNp(v){const u=window.__up;const d=upDay(u,true);d.np=v;if(!upNum(v))d.why='';upSave();upDraw();}
+function upWhy(w){const u=window.__up;const d=upDay(u,true);d.why=w;upSave();upDraw();}
+function upNote(v){const u=window.__up;const d=upDay(u,true);d.note=v;upSave();}
+function upFill(left){const u=window.__up;const d=upDay(u,true);d.np=String(Math.round((upNum(d.np)+left)*100)/100);upSave();upDraw();}
+function upAdd(){
+  const u=window.__up;const d=upDay(u,true);const hr=upNum((document.getElementById('up-hr')||{}).value);
+  const err=function(m){const e=document.getElementById('up-err');if(e)e.textContent=m;};
+  if(u.view==='runf'){
+    const r=upScope(u,'run').find(function(x){return x.id===u.sel;})||{id:u.sel,q:0};const done=upUsed(u,'r:'+r.id).ft;const left=r.q>0?Math.max(0,Math.round((r.q-done)*10)/10):0;
+    const ft=upNum((document.getElementById('up-ft')||{}).value);
+    if(!ft){err('Enter the feet, or tap Finished it.');return;}
+    if(r.q>0&&ft>left+0.5){err('Only '+left+' ft are left on this run.');return;}
+    if(!hr){err('Enter the production hours.');return;}
+    d.tasks.push({k:'r:'+r.id,type:'run',id:r.id,ft:ft,h:hr,fin:r.q>0&&ft>=left-0.5,bid:(r.q>0&&r.bh>0)?upR2(r.bh*Math.min(ft,r.q)/r.q):0});
+  }else if(u.view==='pipe'){
+    const ft=upNum((document.getElementById('up-ft')||{}).value);
+    if(!ft){err('Enter the feet.');return;}
+    if(!hr){err('Enter the production hours.');return;}
+    d.tasks.push({k:'p:'+Date.now(),type:'pipe',id:'Water main',ft:ft,h:hr});
+  }else if(u.view==='etf'){
+    const tk=euTasks(u).find(function(x){return x.n===u.sel;});if(!tk){err('That task is no longer on the list.');return;}
+    const q=upNum((document.getElementById('up-ft')||{}).value);const hv=document.getElementById('up-haul');const haul=hv?upNum(hv.value):0;
+    if(!q){err('Enter the quantity.');return;}
+    if(hv&&!haul){err('Enter the haul distance.');return;}
+    if(!hr){err('Enter the production hours.');return;}
+    const L=euLine(tk,haul||tk.lines[0].haul);
+    d.tasks.push({k:'e:'+tk.n.toUpperCase()+'|'+haul,type:'et',id:tk.n,u:tk.u,q:q,haul:haul,lineHaul:L.haul,p:L.p,val:upR2(q*L.p),h:hr,bid:0,areas:(u.areas&&u.areas.length)?u.areas.slice():undefined});
+  }else if(u.view==='strf'){
+    if(!hr){err('Enter the production hours.');return;}
+    d.tasks.push({k:'s:'+u.sel,type:'str',id:u.sel,h:hr,bid:upR2((upScope(u,'structure').find(function(x){return x.id===u.sel;})||{}).bh||0)});
+  }else if(u.view==='lat'){
+    const ls=Object.keys(u.pick).filter(function(k){return u.pick[k];});
+    if(!ls.length){err('Tap at least one lot.');return;}
+    if(!hr){err('Enter the production hours.');return;}
+    const lsc=upScope(u,'lateral');ls.forEach(function(l){d.tasks.push({k:'l:'+l,type:'lat',id:l,h:Math.round(hr/ls.length*100)/100,bid:upR2((lsc.find(function(x){return String(x.id)===String(l);})||{}).bh||0)});});
+  }
+  upSave();u.view='day';u.sel=null;u.pick={};u.areas=[];u.form=null;upDraw();
+}
+// Hours gained = bid hours for the work, minus the hours it took. Plus means ahead of the bid.
+function upSid(x){return String(x==null?'':x).replace(/^STR /,'');}
+function upR2(n){return Math.round(n*100)/100;}
+function upGainBit(t){
+  if(t.type==='et'){const u=window.__up;if(!(t.val>0)||!u||!(u._rate>0))return '';const g=Math.round(t.val-u._rate*upNum(t.h));return '<span style="font-size:12.5px;font-weight:700;color:'+(g>=0?'#16a34a':'#dc2626')+'">'+(g>=0?'+':'')+euMoney(g)+'</span>';}
+  if(!(t.bid>0))return '';const g=upR2(t.bid-upNum(t.h));
+  return '<span title="bid '+t.bid+' h" style="font-size:12.5px;font-weight:700;color:'+(g>=0?'#16a34a':'#dc2626')+'">'+(g>=0?'+':'\u2212')+Math.abs(g)+' h</span>';
+}
+function upGainLine(d){
+  let bid=0,took=0,val=0;d.tasks.forEach(function(t){if(t.bid>0&&t.type!=='et'){bid+=t.bid;took+=upNum(t.h);}if(t.val>0)val+=t.val;});
+  let h='';const line='margin-top:10px;padding-top:10px;border-top:1px solid rgba(128,128,128,.35);display:flex;align-items:center;gap:10px';
+  if(val>0){
+    const c=euCost(window.__up);const g=Math.round(val-c.cost);const crewH=upCrewHrs(window.__up);const lost=crewH>0?Math.round(c.cost/crewH*upNum(d.np)):0;
+    h+='<div style="'+line+'"><div style="flex:1"><div style="font-size:13px">The bid cost for today\'s work is <b>'+euMoney(val)+'</b>. The crew and machines cost <b>'+euMoney(c.cost)+'</b>'+(lost>0?', which includes <b>'+euMoney(lost)+'</b> of lost time':'')+'.</div><div style="font-size:11.5px;opacity:.7">'+(c.cost?'Dollars gained. Plus means under the bid cost.':'Cost comes from the hours and equipment on your timesheet for this job and phase.')+(c.unknown>0?' '+upR2(c.unknown)+' machine hours have no rate yet and are left out.':'')+'</div></div><div style="font-size:22px;font-weight:800;white-space:nowrap;color:'+(g>=0?'#15803d':'#b91c1c')+'">'+(g>=0?'+':'')+euMoney(g)+'</div></div>';
+  }
+  if(bid>0){
+    bid=upR2(bid);took=upR2(took);const g=upR2(bid-took);
+    h+='<div style="'+line+'"><div style="flex:1"><div style="font-size:13px">'+(val>0?'At the bid rate this work':'Today\'s work')+' was bid at <b>'+bid+'</b> h and took <b>'+took+'</b> h.</div><div style="font-size:11.5px;opacity:.7">Hours gained. Plus means ahead of the bid.</div></div><div style="font-size:'+(val>0?'17':'22')+'px;font-weight:800;white-space:nowrap;color:'+(g>=0?'#15803d':'#b91c1c')+'">'+(g>=0?'+':'\u2212')+Math.abs(g)+' h</div></div>';
+  }
+  return h;
+}
+// ----- Earthwork on the new form: bid tasks from the packet's EARTH BID tab ------------------
+// Mass earthwork (300) is in cubic yards, finish grade (310) in square yards. A task can be bid
+// at several haul distances, each with its own price: yards are priced at the bid line closest
+// to the haul the foreman enters. The day is scored in dollars: bid value against what the crew
+// and machines cost, using the same rule as the tracker (machine rates include the operator).
+const EU_RATES={'621 - SCRAPER':227,'613 - PW':238,'TS-14':170,'HAUL TRUCK':224,'D5':117,'D6':206,'D7':232,'D8':195,'TRACKHOE':214,'TRACTOR':170,'ROLLER':216,'LOADER':155,'SKID/BACKHOE':116,'MINI-EXCAVATOR':126,'TRACTOR AND PAN':306.35,'FOREMAN':45,'OPER':41,'LABOR':39.5,'SUPERVISOR':67};
+function euCat(num,desc,setup){
+  const k=String(num||'').trim();
+  if(setup.eqMap&&setup.eqMap[k])return setup.eqMap[k]==='(ignore)'?'':setup.eqMap[k];
+  const s=(k+' '+String(desc||'')).toUpperCase();
+  if(/PAN\b/.test(s))return 'TRACTOR AND PAN';
+  if(/621/.test(s))return '621 - SCRAPER';
+  if(/613/.test(s))return '613 - PW';
+  if(/TS-?\s?14/.test(s))return 'TS-14';
+  if(/HAUL|ARTIC|OFF.?ROAD|ROCK TRUCK/.test(s))return 'HAUL TRUCK';
+  const d=s.match(/\bD-?\s?([5678])/);if(d)return 'D'+d[1];
+  if(/MINI/.test(s))return 'MINI-EXCAVATOR';
+  if(/EXCAV|TRACK\s?HOE/.test(s))return 'TRACKHOE';
+  if(/ROLLER|COMPACT|SHEEPS|PAD\s?FOOT/.test(s))return 'ROLLER';
+  if(/SKID|BACKHOE/.test(s))return 'SKID/BACKHOE';
+  if(/LOADER/.test(s))return 'LOADER';
+  if(/TRACTOR/.test(s))return 'TRACTOR';
+  return null;
+}
+function euClass(title){const s=String(title||'').toUpperCase();if(/SUPER/.test(s))return 'SUPERVISOR';if(/FOREMAN|CREW\s?LEAD/.test(s))return 'FOREMAN';if(/OPER/.test(s))return 'OPER';return 'LABOR';}
+function euCache(){try{localStorage.removeItem('vhts_ewsetup');}catch(e){}try{return JSON.parse(localStorage.getItem('vhts_ewsetup2')||'null');}catch(e){return null;}}
+async function euLoad(){
+  const c=euCache();if(c&&c.ts&&Date.now()-c.ts<6*3600000)return c;
+  try{
+    const tok=await getTok();if(!tok)return c;const H={Authorization:'Bearer '+tok};
+    const out={ts:Date.now(),tasks:(c&&c.tasks)||{},setup:(c&&c.setup)||{}};
+    const a=await fetch(tkUrl('Field/Jobs/earth-tasks.json')+':/content',{headers:H});if(a.ok){const j=await a.json();if(j&&j.jobs)out.tasks=j.jobs;}
+    const b=await fetch(tkUrl('Field/Jobs/earthwork-setup.json')+':/content',{headers:H});if(b.ok){const j=await b.json();if(j&&typeof j==='object')out.setup=j;}
+    localStorage.setItem('vhts_ewsetup2',JSON.stringify(out));return out;
+  }catch(e){return c;}
+}
+// bid tasks for this job and phase, one entry per task name, with a line for each haul it was bid at
+function euTasks(u){
+  const c=euCache();const list=((c&&c.tasks&&c.tasks[u.job]&&c.tasks[u.job][u.ph])||[]);const g={},order=[];
+  list.forEach(function(x){
+    if(!(x.p>0)||x.p>40||!(x.qty>0))return; // a per-yard price only: lump sums are not yards
+    const k=String(x.n).toUpperCase();if(!g[k]){g[k]={n:x.n,u:x.u,qty:0,lines:{}};order.push(k);}
+    g[k].qty+=x.qty;const L=g[k].lines[x.haul]||(g[k].lines[x.haul]={haul:x.haul,qty:0,p:x.p,r:x.r});L.qty+=x.qty;});
+  return order.map(function(k){const o=g[k];o.lines=Object.keys(o.lines).map(function(hk){return o.lines[hk];}).sort(function(a,b){return a.haul-b.haul;});return o;});
+}
+function euLine(task,haul){let best=task.lines[0];task.lines.forEach(function(L){if(Math.abs(L.haul-haul)<Math.abs(best.haul-haul))best=L;});return best;}
+function euUsed(u,name){const wk=S.weeks[S.currentWeek];let q=0;Object.keys((wk&&wk.utilDays)||{}).forEach(function(dk){const p=dk.split('|');if(p[0]!==u.job||p[1]!==u.ph)return;((wk.utilDays[dk]||{}).tasks||[]).forEach(function(t){if(t.type==='et'&&t.id===name)q+=upNum(t.q);});});return q;}
+function euCost(u){
+  const c=euCache();const st=(c&&c.setup)||{};const rates=Object.assign({},EU_RATES,st.rates||{},((st.jobs||{})[u.job]||{}).rates||{});
+  const wk=S.weeks[S.currentWeek];let cost=0,unknown=0;if(!wk)return {cost:0,unknown:0};
+  (wk.employees||[]).forEach(function(eid){
+    const emp=empById(eid)||{};
+    getJobLines(wk,eid,u.dt).forEach(function(ln){
+      if(String(ln.job||'').trim()!==u.job||String(ln.phase||'').trim()!==u.ph)return;
+      const c2=calcJobHours(ln);const hrs=(c2&&c2.total)||0;if(!(hrs>0))return;let eqH=0;
+      (ln.equipment||[]).forEach(function(x){
+        const hh=parseFloat(x&&x.hours)||0;if(!(hh>0))return;const numb=String((x&&(x.number||x.id||x.equipNum))||'').trim();
+        const reg=(typeof EQ!=='undefined'&&Array.isArray(EQ))?EQ.find(function(e){return String(e.number)===numb;}):null;
+        const cat=euCat(numb,(reg&&reg.description)||(x&&x.description)||'',st);eqH+=hh;
+        if(cat===null)unknown+=hh;else if(cat)cost+=hh*(rates[cat]||0);});
+      cost+=Math.max(0,hrs-eqH)*(rates[euClass(emp.title)]||0);});});
+  return {cost:Math.round(cost),unknown:unknown};
+}
+function euMoney(n){return (n<0?'\u2212':'')+'$'+Math.abs(Math.round(n)).toLocaleString();}
+function euHaul(v){const e=document.getElementById('up-haul');if(e)e.value=v;}
+// Square yard helper for finish grade: length x width in feet, as many areas as needed.
+function euAreaTotal(u){let s=0;(u.areas||[]).forEach(function(a){s+=a.l*a.w/9;});return Math.round(s);}
+function euFormKeep(u){const g=function(id){const e=document.getElementById(id);return e?e.value:'';};u.form={ft:g('up-ft'),haul:g('up-haul'),hr:g('up-hr')};}
+function euArea(){
+  const u=window.__up;if(!u)return;const l=upNum((document.getElementById('up-al')||{}).value),w=upNum((document.getElementById('up-aw')||{}).value);
+  if(!l||!w){const e=document.getElementById('up-err');if(e)e.textContent='Enter both the length and the width in feet.';return;}
+  euFormKeep(u);u.areas=u.areas||[];u.areas.push({l:l,w:w});u.form.ft=String(euAreaTotal(u));upDraw();
+}
+function euAreaDel(i){const u=window.__up;if(!u||!u.areas)return;euFormKeep(u);u.areas.splice(i,1);u.form.ft=u.areas.length?String(euAreaTotal(u)):'';upDraw();}
+// ===== PRODUCTION TAB: one report per kind of work, per job, per day ==========
+// The day's reports are kept in wk.utilDays and copied into the production entries the app has
+// always sent to SharePoint, so the job tracker and the office files need no new plumbing.
+function upDayStats(d){let h=0;((d&&d.tasks)||[]).forEach(function(t){h+=upNum(t.h);});return {n:((d&&d.tasks)||[]).length,h:upR2(h),np:upNum(d&&d.np)};}
+function upLauncher(wk,dt,ro){
+  const PH=[['300','Mass earthwork','ti-bulldozer','Yards moved, by task'],['310','Finish grade','ti-ruler-2','Area finished, by task'],['400','Storm','ti-droplet','Pipe runs and structures'],['500','Sanitary','ti-ripple','Pipe runs, manholes and laterals'],['600','Water main','ti-ruler-measure','Feet of pipe laid']];
+  const tj={};(wk.employees||[]).forEach(function(eid){getJobLines(wk,eid,dt).forEach(function(ln){const j=String(ln.job||'').trim(),p=String(ln.phase||'').trim();if(j&&p)(tj[p]=tj[p]||{})[j]=1;});});
+  const days=wk.utilDays||{};const di=wd(S.currentWeek).indexOf(dt);const safe=function(x){return String(x).replace(/[^A-Za-z0-9-]/g,'');};
+  let h='<div style="font-size:16px;font-weight:700;margin:2px 0 2px">What did the crew do'+(di>=0?' on '+DAYS[di]:'')+'?</div><div style="font-size:13px;color:var(--text2);margin-bottom:12px">'+(ro?'This week has been turned in, so its reports can no longer be changed.':'Tap the kind of work to report it. It saves as you go.')+'</div>';
+  let shown=0;
+  PH.forEach(function(P){
+    const ph=P[0];
+    const keys=Object.keys(days).filter(function(k){const p=k.split('|');const d=days[k]||{};return p[1]===ph&&p[2]===dt&&(((d.tasks||[]).length)||upNum(d.np)>0||String(d.note||'').trim());});
+    const onTs=Object.keys(tj[ph]||{});const done=keys.length>0;
+    if(ro&&!done)return;shown++;
+    const openJob=keys.length===1?keys[0].split('|')[0]:(keys.length?'':(onTs.length===1?onTs[0]:''));
+    let sub=P[3];
+    if(keys.length===1){const st=upDayStats(days[keys[0]]);sub='Job '+wdEsc(keys[0].split('|')[0])+' \u00b7 '+st.n+(st.n===1?' entry':' entries')+' \u00b7 '+st.h+' h'+(st.np?' \u00b7 '+st.np+' h lost':'');}
+    else if(keys.length>1)sub=keys.length+' jobs reported';
+    else if(onTs.length)sub='On the timesheet for job '+wdEsc(onTs.join(', '))+'. Not reported yet.';
+    h+='<button class="btn btn-bl" '+(ro?'disabled ':'')+'style="justify-content:flex-start;gap:14px;min-height:66px;margin-bottom:10px;text-align:left;'+(done?'border-color:#16a34a;':'')+'" onclick="upOpen(\''+dt+'\',\''+ph+'\',\''+safe(openJob)+'\')"><i class="ti '+P[2]+'" style="font-size:24px;color:'+(done?'#16a34a':'var(--accent)')+';flex-shrink:0"></i><span style="flex:1;min-width:0"><strong style="font-size:16px;display:block">'+P[1]+'</strong><span style="font-size:12.5px;color:var(--text2);font-weight:400">'+sub+'</span></span><i class="ti '+(done?'ti-circle-check':'ti-chevron-right')+'" style="color:'+(done?'#16a34a':'var(--text3)')+';font-size:20px;flex-shrink:0"></i></button>';
+    if(keys.length>1&&!ro)keys.forEach(function(k){const j=k.split('|')[0];const st=upDayStats(days[k]);h+='<button class="btn btn-sm" style="margin:-4px 0 10px 38px" onclick="upOpen(\''+dt+'\',\''+ph+'\',\''+safe(j)+'\')">Job '+wdEsc(j)+' \u00b7 '+st.n+(st.n===1?' entry':' entries')+' \u00b7 '+st.h+' h</button>';});
+  });
+  if(ro&&!shown)h+='<div class="nd" style="padding:20px 16px"><i class="ti ti-clipboard"></i>No production was reported for this day.</div>';
+  // reports entered before this form existed stay visible until the week is turned in
+  const legacy=prodEntries(wk).filter(function(e){return e&&e.date===dt&&!e.upKey&&(e.job||e.strId||e.quantity||e.yardsMovedTotal||e.areaFinished||e.productionHours||e.notes);});
+  if(legacy.length){
+    h+='<div style="font-size:13px;font-weight:700;color:var(--text2);margin:16px 0 4px">Entered earlier</div>';
+    legacy.forEach(function(e){const q=e.quantity||e.yardsMovedTotal||e.areaFinished||'';const what=[e.strId||e.bidItem||e.workType||'',q?q+(e.yardsMovedTotal?' CY':(e.areaFinished?' SY':' LF')):'',e.productionHours?e.productionHours+' h':''].filter(Boolean).join(' \u00b7 ');
+      h+='<div style="display:flex;align-items:center;gap:10px;padding:10px 0;border-top:1px solid var(--border)"><div style="flex:1;min-width:0"><div style="font-weight:700;font-size:14.5px">Phase '+wdEsc(e.phase||'')+' \u00b7 job '+wdEsc(e.job||'?')+'</div><div style="font-size:12.5px;color:var(--text2)">'+wdEsc(what||'No details')+'</div></div>'+(ro?'':'<button class="btn btn-sm" onclick="if(confirm(\'Remove this report?\'))removeProdEntry('+e.id+')"><i class="ti ti-trash"></i></button>')+'</div>';});
+  }
+  return h;
+}
+// Copy one day's report into the production entries that are sent to SharePoint.
+function upBridge(u){
+  if(!u||!u.job)return;const wk=S.weeks[S.currentWeek];if(!wk)return;
+  const key=upKey(u),d=upDay(u,false),list=prodEntries(wk),old={};
+  for(let i=list.length-1;i>=0;i--){const e=list[i];if(e&&e.upKey===key){old[e.upRef]=e;list.splice(i,1);}}
+  if(!d)return;
+  const mk=function(ref,fields){const e={id:(old[ref]&&old[ref].id)||(Date.now()+Math.random()),phase:u.ph,date:u.dt,job:u.job,upKey:key,upRef:ref,notes:''};Object.assign(e,fields);list.push(e);};
+  const lats=u.ph==='500'?upScope(u,'lateral'):[];
+  (d.tasks||[]).forEach(function(t,i){
+    if(t.type==='run')mk('t'+i,{strId:t.id,quantity:t.ft,productionHours:t.h,workType:'Pipe run'+(t.fin?' (finished)':'')});
+    else if(t.type==='str')mk('t'+i,{strId:t.id,quantity:'',productionHours:t.h,workType:u.ph==='400'?'Structure set':'Manhole set'});
+    else if(t.type==='lat'){const L=lats.find(function(x){return String(x.id)===String(t.id);})||{};mk('t'+i,{strId:t.id,quantity:L.q>0?L.q:'',productionHours:t.h,workType:'Lateral tied in'});}
+    else if(t.type==='pipe')mk('t'+i,{strId:'',quantity:t.ft,productionHours:t.h,workType:'Pipe laid'});
+    else if(t.type==='et'){const fl={bidItem:t.id+(t.haul?' ('+t.haul+' ft haul)':''),workType:t.id,haulDistance:t.haul||'',productionHours:t.h,bidCostPerYard:t.p,unit:t.u};if(u.ph==='310')fl.areaFinished=t.q;else fl.yardsMovedTotal=t.q;mk('t'+i,fl);}
+  });
+  const np=upNum(d.np),note=String(d.note||'').trim();
+  if(np>0||note)mk('day',{workType:np>0?'Lost time':'Note',quantity:'',productionHours:'',notes:[np>0?('LOST TIME '+np+' h'+(d.why?': '+d.why:'')):'',note].filter(Boolean).join(' | ')});
+}
+function upDraw(){
+  const u=window.__up;if(!u)return;
+  const RS=(u.ph==='300'||u.ph==='310')?['Weather','Wet ground','Equipment down','Waiting on stakes','Fueling or maintenance','Moving or setup','Other']:['Weather','Waiting on material','Unloading materials','Locates or inspection','Equipment down','Dewatering','Bench walls','Collars','Moving or setup','Other'];
+  const inp='width:100%;font-size:17px;padding:12px;border-radius:10px;border:1px solid var(--border);background:var(--bg);color:inherit;box-sizing:border-box';
+  const lbl='font-size:12.5px;color:var(--text2);display:block;margin:12px 0 5px';
+  const earth=(u.ph==='300'||u.ph==='310');const name=({'300':'Mass earthwork','310':'Finish grade','400':'Storm','500':'Sanitary','600':'Water main'})[u.ph]||('Phase '+u.ph);const di=wd(S.currentWeek).indexOf(u.dt);
+  const esc1=function(x){return wdEsc(x);};const q1=function(x){return String(x).replace(/\\/g,'\\\\').replace(/'/g,"\\'");};
+  let title=name+' \u00b7 '+(di>=0?DAYS[di]+' ':'')+fs(u.dt),back='',h='';
+  if(!u.job){
+    const sug=Object.keys(wdMyJobs());
+    h+='<div style="font-size:15px;font-weight:700;margin-bottom:8px">Which job?</div><div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px">'+sug.map(function(j){return '<button class="btn" style="min-height:48px;font-size:16px" onclick="upSetJob(\''+q1(j)+'\')">'+esc1(j)+'</button>';}).join('')+'</div>'+
+       '<div style="display:flex;gap:8px"><input id="up-job" placeholder="Job number" style="'+inp+'"/><button class="btn btn-p" onclick="upSetJob(document.getElementById(\'up-job\').value)">Go</button></div>';
+  }else if(u.view==='day'){
+    const d=upDay(u,false)||{tasks:[],np:'',why:'',note:''};const crew=upCrewHrs(u);u._rate=(earth&&crew>0)?euCost(u).cost/crew:0;
+    if(earth){const tl=euTasks(u);let ch=false;d.tasks.forEach(function(t){if(t.type!=='et')return;const tk=tl.find(function(x){return x.n===t.id;});if(!tk)return;const L=euLine(tk,t.haul||tk.lines[0].haul);const v=upR2(upNum(t.q)*L.p);if(t.p!==L.p||t.val!==v){t.p=L.p;t.lineHaul=L.haul;t.val=v;ch=true;}});if(ch)upSave();}
+    const big=function(v,ic,t,s){return '<button class="btn btn-bl" style="justify-content:flex-start;gap:14px;min-height:64px;margin-bottom:10px;text-align:left" onclick="upGo(\''+v+'\')"><i class="ti '+ic+'" style="font-size:24px;color:var(--accent);flex-shrink:0"></i><span style="flex:1"><strong style="font-size:16px;display:block">'+t+'</strong><span style="font-size:12.5px;color:var(--text2);font-weight:400">'+s+'</span></span><i class="ti ti-plus" style="color:var(--text3)"></i></button>';};
+    title=name+' \u00b7 job '+u.job;
+    h+='<div style="font-size:13px;color:var(--text2);margin-bottom:10px">'+(di>=0?DAYS[di]+' ':'')+fs(u.dt)+' \u00b7 <a href="#" onclick="window.__up.job=\'\';upDraw();return false" style="color:var(--accent)">change job</a></div>';
+    h+='<div style="font-size:15px;font-weight:700;margin-bottom:8px">What did you do today?</div>';
+    if(earth)h+=big('et',u.ph==='300'?'ti-bulldozer':'ti-ruler-2',u.ph==='300'?'Mass earthwork task':'Finish grade task',u.ph==='300'?'Yards moved, by task and haul':'Area finished, by task');
+    else if(u.ph==='600')h+=(upScope(u,'run').length?big('run','ti-line','Pipe run','Feet laid on a run'):'')+big('pipe','ti-ruler-measure','Pipe laid','Feet of water main laid today');
+    else h+=big('run','ti-line','Pipe run','Feet laid on a run')+big('str','ti-circle-dot',u.ph==='400'?'Structure':'Manhole',u.ph==='400'?'A structure you set':'A manhole you set');
+    if(u.ph==='500')h+=big('lat','ti-home','Laterals','Lots you tied in');
+    h+='<div style="font-size:13px;font-weight:700;color:var(--text2);margin:14px 0 4px">Added today</div>';
+    if(!d.tasks.length)h+='<div style="color:var(--text2);font-size:13.5px;padding:6px 0">Nothing yet.</div>';
+    let on=0;
+    d.tasks.forEach(function(t,i){on+=upNum(t.h);
+      const label=t.type==='pipe'?'Water main pipe':t.type==='et'?(t.id+(t.haul?' · '+t.haul+' ft haul':'')):t.type==='run'?'Run '+t.id:(t.type==='str'?(u.ph==='400'?'Structure ':'Manhole ')+upSid(t.id):'Lateral, lot '+t.id);
+      const detail=t.type==='et'?(Number(t.q).toLocaleString()+' '+t.u+' at $'+Number(t.p).toFixed(2)+' = '+euMoney(t.val)+((t.lineHaul&&t.haul!==t.lineHaul)?' (bid cost for a '+t.lineHaul+' ft haul)':'')+(u._rate>0?' · cost '+euMoney(u._rate*upNum(t.h)):'')):(t.type==='run'?((t.fin?'Finished, ':'')+t.ft+' ft'):(t.type==='str'?'Set':(t.type==='pipe'?t.ft+' ft':'Tied in')))+(t.bid>0?' · bid '+t.bid+' h':'');
+      h+='<div style="display:flex;align-items:center;gap:10px;padding:10px 0;border-top:1px solid var(--border)"><div style="flex:1;min-width:0"><div style="font-weight:700;font-size:15px">'+esc1(label)+'</div><div style="font-size:12.5px;color:var(--text2)">'+esc1(detail)+'</div></div><span style="text-align:right;white-space:nowrap"><span style="font-size:15px;font-weight:700;display:block">'+t.h+' h</span>'+upGainBit(t)+'</span><button class="btn btn-sm" onclick="upRemove('+i+')"><i class="ti ti-x"></i></button></div>';});
+    on=Math.round(on*100)/100;const np=upNum(d.np),left=Math.round((crew-on-np)*100)/100,ok=d.tasks.length&&Math.abs(left)<0.01,over=left<-0.01;
+    h+='<div style="margin-top:14px;padding:12px;border-radius:12px;background:'+(ok?'#dcfce7':(over?'#fee2e2':'var(--bg2)'))+';color:'+(ok||over?'#111':'inherit')+'"><div style="display:grid;grid-template-columns:1fr 1fr 1.2fr;gap:10px;align-items:end"><div><div style="font-size:11.5px;opacity:.7">Crew hours</div><div style="font-weight:700;font-size:19px">'+crew+'</div></div><div><div style="font-size:11.5px;opacity:.7">On tasks</div><div style="font-weight:700;font-size:19px">'+on+'</div></div><div><div style="font-size:11.5px;opacity:.7;margin-bottom:3px">Non-production</div><input inputmode="decimal" value="'+esc1(d.np)+'" placeholder="0" style="'+inp+';padding:9px;color:var(--text)" onchange="upNp(this.value)"/></div></div>'+
+       '<div style="font-size:14px;font-weight:700;margin-top:8px;color:'+(ok?'#15803d':(over?'#b91c1c':'inherit'))+'">'+(!crew?'No time on your timesheet yet for '+name.toLowerCase()+' on job '+esc1(u.job)+' this day. Crew hours come from the timesheet.':(ok?'The day adds up.':(over?(-left)+' h more than the crew worked. Check the numbers.':(d.tasks.length?left+' h not accounted for yet.':'Crew hours come from your timesheet.'))))+'</div>'+
+       upGainLine(d)+((left>0.01&&d.tasks.length)?'<button class="btn btn-sm" style="margin-top:8px" onclick="upFill('+left+')">Put the '+left+' h under non-production</button>':'')+'</div>';
+    if(np>0)h+='<div style="font-size:12.5px;color:var(--text2);margin:10px 0 5px">Why was time lost? (tap one)</div><div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">'+RS.map(function(x){return '<button class="btn'+(d.why===x?' btn-p':'')+'" style="min-height:44px;justify-content:center;font-size:13.5px" onclick="upWhy(\''+x+'\')">'+x+'</button>';}).join('')+'</div>';
+    h+='<span style="'+lbl+'">Notes (water, delays, anything the office should know)</span><input style="'+inp+'" value="'+esc1(d.note||'')+'" onchange="upNote(this.value)"/>';
+    h+='<div class="ib" style="margin-top:14px"><i class="ti ti-cloud-upload"></i><span>Saved as you go. It reaches the job tracker within a few minutes when you have signal, and goes to the office with your timesheet.</span></div>';
+  }else if(u.view==='run'){
+    back='day';title='Pick the run';
+    const d=upDay(u,false)||{tasks:[]};const runs=upScope(u,'run').slice().sort(function(a,b){return String(a.id).localeCompare(String(b.id),undefined,{numeric:true});});
+    if(!runs.length)h+='<div class="ib"><i class="ti ti-info-circle"></i><span>No runs are loaded for '+name.toLowerCase()+' on job '+esc1(u.job)+'. If the list is still loading, wait a few seconds and tap Pipe run again.</span></div>';
+    h+='<input id="up-find" placeholder="Type to narrow the list" autocomplete="off" style="'+inp+';margin-bottom:10px" oninput="upFilter(this.value)"/><div id="up-list">';
+    runs.forEach(function(r){
+      if(d.tasks.some(function(t){return t.k==='r:'+r.id;}))return;
+      const done=upUsed(u,'r:'+r.id).ft;const left=r.q>0?Math.max(0,Math.round((r.q-done)*10)/10):0;
+      if(r.q>0&&left<=0)return;
+      h+='<button class="btn btn-bl up-row" data-n="'+esc1(String(r.id).toUpperCase())+'" style="justify-content:flex-start;min-height:54px;margin-bottom:8px;text-align:left" onclick="upPick(\'run\',\''+q1(r.id)+'\')"><span style="flex:1"><strong style="font-size:16px">'+esc1(r.id)+'</strong>'+(r.d?'<span style="display:block;font-size:12px;color:var(--text2);font-weight:400">'+esc1(r.d)+'</span>':'')+'</span>'+(r.q>0?'<span style="font-size:12.5px;color:var(--text2)">'+left+' ft left</span>':'')+'</button>';});
+    h+='</div>';
+  }else if(u.view==='runf'){
+    back='run';title='Run '+u.sel;
+    const r=upScope(u,'run').find(function(x){return x.id===u.sel;})||{q:0};const done=upUsed(u,'r:'+u.sel).ft;const left=r.q>0?Math.max(0,Math.round((r.q-done)*10)/10):0;
+    h+='<span style="'+lbl+'">Feet laid today'+(r.q>0?' ('+left+' ft left of '+r.q+')':'')+'</span><div style="display:grid;grid-template-columns:1fr 1fr;gap:10px"><input id="up-ft" inputmode="decimal" style="'+inp+'"/>'+(r.q>0?'<button class="btn" style="min-height:50px;justify-content:center" onclick="upFin('+left+')"><i class="ti ti-check"></i> Finished it</button>':'<span></span>')+'</div>'+
+       '<span style="'+lbl+'">Production hours on this run</span><input id="up-hr" inputmode="decimal" style="'+inp+'"/>'+
+       '<div id="up-err" style="color:#dc2626;font-size:13.5px;min-height:20px;margin-top:8px"></div><button class="btn btn-p btn-bl" style="min-height:54px;justify-content:center;font-size:16px" onclick="upAdd()">Add to today</button>';
+  }else if(u.view==='str'){
+    back='day';title=u.ph==='400'?'Pick the structure':'Pick the manhole';
+    const d=upDay(u,false)||{tasks:[]};const list=upScope(u,'structure');
+    // the ones at the ends of today's runs come first
+    const flat=function(x){return upSid(x).toUpperCase().replace(/\s+/g,'');};
+    const near={};d.tasks.forEach(function(t){if(t.type==='run')String(t.id).toUpperCase().split('-').forEach(function(p){near[p.replace(/\s+/g,'')]=1;});});
+    const avail=list.filter(function(s){return !upUsed(u,'s:'+s.id).hit;});
+    if(!list.length)h+='<div class="ib"><i class="ti ti-info-circle"></i><span>No structures are loaded for this job yet. If the list is still loading, wait a few seconds and try again.</span></div>';
+    else if(!avail.length)h+='<div class="ib"><i class="ti ti-check"></i><span>Every one on the list has been reported as set.</span></div>';
+    const sorted=avail.slice().sort(function(a,b){return (near[flat(b.id)]?1:0)-(near[flat(a.id)]?1:0)||upSid(a.id).localeCompare(upSid(b.id),undefined,{numeric:true});});
+    h+='<input id="up-find" placeholder="Type to narrow the list" autocomplete="off" style="'+inp+';margin-bottom:10px" oninput="upFilter(this.value)"/><div id="up-list" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(88px,1fr));gap:8px">';
+    sorted.forEach(function(s){const nr=near[flat(s.id)];h+='<button class="btn up-row" data-n="'+esc1(flat(s.id))+'" style="min-height:52px;justify-content:center;font-size:15px;font-weight:700;'+(nr?'border:2px solid var(--accent)':'')+'" onclick="upPick(\'str\',\''+q1(s.id)+'\')">'+esc1(upSid(s.id))+'</button>';});
+    h+='</div>';
+  }else if(u.view==='strf'){
+    back='str';title='Set '+upSid(u.sel);
+    h+='<span style="'+lbl+'">Production hours to set this one</span><input id="up-hr" inputmode="decimal" style="'+inp+'"/><div id="up-err" style="color:#dc2626;font-size:13.5px;min-height:20px;margin-top:8px"></div><button class="btn btn-p btn-bl" style="min-height:54px;justify-content:center;font-size:16px" onclick="upAdd()">Add to today</button>';
+  }else if(u.view==='pipe'){
+    back='day';title='Pipe laid';
+    h+='<span style="'+lbl+'">Feet of water main laid today</span><input id="up-ft" inputmode="decimal" style="'+inp+'"/><span style="'+lbl+'">Production hours on this</span><input id="up-hr" inputmode="decimal" style="'+inp+'"/><div id="up-err" style="color:#dc2626;font-size:13.5px;min-height:20px;margin-top:8px"></div><button class="btn btn-p btn-bl" style="min-height:54px;justify-content:center;font-size:16px" onclick="upAdd()">Add to today</button>';
+  }else if(u.view==='et'){
+    back='day';title='Pick the task';const list=euTasks(u);
+    if(!list.length)h+='<div class="ib"><i class="ti ti-info-circle"></i><span>No bid tasks are loaded for '+name.toLowerCase()+' on job '+esc1(u.job)+'. If the list is still loading, wait a few seconds and try again.</span></div>';
+    h+='<input id="up-find" placeholder="Type to narrow the list" autocomplete="off" style="'+inp+';margin-bottom:10px" oninput="upFilter(this.value)"/><div id="up-list">';
+    list.forEach(function(tk){const left=Math.max(0,Math.round(tk.qty-euUsed(u,tk.n)));const ps=tk.lines.map(function(L){return L.p;});const lo=Math.min.apply(null,ps),hi=Math.max.apply(null,ps);const hauls=tk.lines.filter(function(L){return L.haul>0;}).map(function(L){return L.haul;});
+      h+='<button class="btn btn-bl up-row" data-n="'+esc1(String(tk.n).toUpperCase())+'" style="justify-content:flex-start;min-height:58px;margin-bottom:8px;text-align:left;gap:10px" onclick="upPick(\'et\',\''+q1(tk.n)+'\')"><span style="flex:1;min-width:0"><strong style="font-size:15.5px;display:block">'+esc1(tk.n)+'</strong><span style="font-size:12px;color:var(--text2);font-weight:400">'+(hauls.length?'haul '+hauls.join(', ')+' ft \u00b7 ':'')+left.toLocaleString()+' '+tk.u+' left of '+Math.round(tk.qty).toLocaleString()+'</span></span><span style="font-size:13px;font-weight:700;white-space:nowrap">$'+lo.toFixed(2)+(hi>lo+0.004?' to $'+hi.toFixed(2):'')+'</span></button>';});
+    h+='</div>';
+  }else if(u.view==='etf'){
+    back='et';title=u.sel;const tk=euTasks(u).find(function(x){return x.n===u.sel;})||{u:'CY',lines:[{haul:0,p:0}],qty:0};
+    const hauls=tk.lines.filter(function(L){return L.haul>0;});const left=Math.max(0,Math.round(tk.qty-euUsed(u,tk.n)));const fm=u.form||{};
+    h+='<span style="'+lbl+'">'+(tk.u==='CY'?'Yards moved':'Area finished')+' today, '+tk.u+' ('+left.toLocaleString()+' left)</span><input id="up-ft" inputmode="decimal" style="'+inp+'" value="'+esc1(fm.ft==null?'':fm.ft)+'"/>';
+    if(tk.u==='SY'){const ar=u.areas||[];h+='<div style="border:1px solid var(--border);border-radius:12px;padding:10px 12px;margin-top:10px"><div style="font-size:13.5px;font-weight:700;margin-bottom:2px"><i class="ti ti-calculator"></i> Work out the square yards</div><div style="font-size:12px;color:var(--text2);margin-bottom:8px">Enter the length and width of each area in feet. Add as many areas as you need.</div>'+
+      ar.map(function(a,i){return '<div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-top:1px solid var(--border);font-size:14px"><span style="flex:1">'+a.l+' ft \u00d7 '+a.w+' ft</span><strong>'+Math.round(a.l*a.w/9).toLocaleString()+' SY</strong><button class="btn btn-sm" onclick="euAreaDel('+i+')"><i class="ti ti-x"></i></button></div>';}).join('')+
+      (ar.length>1?'<div style="display:flex;padding:6px 0;border-top:1px solid var(--border);font-size:14px;font-weight:700"><span style="flex:1">Total</span><span>'+euAreaTotal(u).toLocaleString()+' SY</span></div>':'')+
+      '<div style="display:grid;grid-template-columns:1fr 1fr auto;gap:8px;align-items:end;margin-top:8px"><div><span style="font-size:11.5px;color:var(--text2)">Length, ft</span><input id="up-al" inputmode="decimal" style="'+inp+';padding:10px"/></div><div><span style="font-size:11.5px;color:var(--text2)">Width, ft</span><input id="up-aw" inputmode="decimal" style="'+inp+';padding:10px"/></div><button class="btn btn-p" style="min-height:46px" onclick="euArea()"><i class="ti ti-plus"></i> Add</button></div></div>';}
+    if(hauls.length){h+='<span style="'+lbl+'">Haul distance today, ft</span><input id="up-haul" inputmode="numeric" style="'+inp+'" value="'+esc1((fm.haul!=null&&fm.haul!=='')?fm.haul:hauls[0].haul)+'"/><div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:8px">'+hauls.map(function(L){return '<button class="btn btn-sm" onclick="euHaul('+L.haul+')">'+L.haul+' ft \u00b7 $'+L.p.toFixed(2)+'</button>';}).join('')+'</div><div style="font-size:12px;color:var(--text2);margin-top:6px">The yards use the bid cost for the haul closest to the one you enter.</div>';}
+    else h+='<div style="font-size:12px;color:var(--text2);margin-top:6px">Bid cost $'+Number(tk.lines[0].p).toFixed(2)+' per '+tk.u+'.</div>';
+    h+='<span style="'+lbl+'">Production hours on this task</span><input id="up-hr" inputmode="decimal" style="'+inp+'" value="'+esc1(fm.hr==null?'':fm.hr)+'"/><div id="up-err" style="color:#dc2626;font-size:13.5px;min-height:20px;margin-top:8px"></div><button class="btn btn-p btn-bl" style="min-height:54px;justify-content:center;font-size:16px" onclick="upAdd()">Add to today</button>';
+  }else if(u.view==='lat'){
+    back='day';title='Laterals tied in';
+    const lots=upScope(u,'lateral').filter(function(l){return !upUsed(u,'l:'+l.id).hit;}).sort(function(a,b){return String(a.id).localeCompare(String(b.id),undefined,{numeric:true});});
+    if(!lots.length)h+='<div class="ib"><i class="ti ti-info-circle"></i><span>No laterals are left on the list for this job.</span></div>';
+    h+='<div style="font-size:13px;color:var(--text2);margin-bottom:8px">Tap every lot you tied in today</div><input id="up-find" placeholder="Type a lot number to narrow the list" autocomplete="off" inputmode="numeric" style="'+inp+';margin-bottom:10px" oninput="upFilter(this.value)"/><div id="up-list" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(64px,1fr));gap:8px">'+lots.map(function(l){return '<button class="btn up-row'+(u.pick[l.id]?' btn-p':'')+'" data-n="'+esc1(String(l.id).toUpperCase())+'" style="min-height:50px;justify-content:center;font-weight:700" onclick="upLot(\''+q1(l.id)+'\')">'+esc1(l.id)+'</button>';}).join('')+'</div>'+
+       '<span style="'+lbl+'">Production hours on these laterals, all together</span><input id="up-hr" inputmode="decimal" style="'+inp+'"/><div id="up-err" style="color:#dc2626;font-size:13.5px;min-height:20px;margin-top:8px"></div><button class="btn btn-p btn-bl" style="min-height:54px;justify-content:center;font-size:16px" onclick="upAdd()">Add to today</button>';
+  }
+  let el=document.getElementById('up-sheet');if(!el){el=document.createElement('div');el.id='up-sheet';document.body.appendChild(el);}
+  el.innerHTML='<div style="position:fixed;inset:0;background:var(--bg);z-index:150;display:flex;flex-direction:column">'+
+    '<div style="display:flex;align-items:center;gap:8px;padding:calc(10px + env(safe-area-inset-top)) 12px 10px;border-bottom:0.5px solid var(--border)">'+
+      '<button onclick="'+(back?'upGo(\''+back+'\')':'upClose()')+'" style="background:none;border:none;color:inherit;font-size:22px;padding:4px 8px;cursor:pointer"><i class="ti '+(back?'ti-arrow-left':'ti-x')+'"></i></button>'+
+      '<strong style="flex:1;font-size:17px">'+esc1(title)+'</strong>'+(back?'':'<button class="btn btn-p" style="min-height:40px" onclick="upClose()">Done</button>')+'</div>'+
+    '<div style="flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:14px 16px calc(24px + env(safe-area-inset-bottom));max-width:640px;width:100%;margin:0 auto;box-sizing:border-box">'+h+'</div></div>';
+}
+function upFilter(v){const q=String(v||'').toUpperCase().replace(/\s+/g,'');document.querySelectorAll('#up-list .up-row').forEach(function(e){e.style.display=(!q||String(e.dataset.n||'').replace(/\s+/g,'').indexOf(q)>=0)?'':'none';});}
 async function openMarkup(entryId){
   const wk=S.weeks[S.currentWeek];
   const entry=prodEntries(wk).find(function(e){return e.id==entryId;});
@@ -2925,12 +3182,12 @@ async function vhLoadScope(force){
     const colsR=await fetch(`https://graph.microsoft.com/v1.0/sites/${L.siteId}/lists/${L.listId}/columns?$select=name,displayName`,{headers:{Authorization:'Bearer '+tok}});
     const cols=colsR.ok?((await colsR.json()).value||[]):[];
     const col=w=>{const ex=cols.find(c=>c.name.toLowerCase()===w.toLowerCase());const dp=cols.find(c=>(c.displayName||'').toLowerCase()===w.toLowerCase());return (ex||dp||{name:w}).name;};
-    const cJob=col('JobNum'),cPh=col('Phase'),cDe=col('Descr'),cTy=col('ItemType');
+    const cJob=col('JobNum'),cPh=col('Phase'),cDe=col('Descr'),cTy=col('ItemType'),cQty=col('BidQty'),cHrs=col('BidHrs');
     const rows=[];let next=`https://graph.microsoft.com/v1.0/sites/${L.siteId}/lists/${L.listId}/items?$expand=fields&$top=999`,pages=0;
     while(next&&pages<10){
       const r=await fetch(next,{headers:{Authorization:'Bearer '+tok}});if(!r.ok)break;
       const j=await r.json();
-      (j.value||[]).forEach(it=>{const f=it.fields||{};if(f.Title)rows.push({j:String(f[cJob]||'').trim(),p:String(f[cPh]||'').trim(),id:f.Title,d:String(f[cDe]||'').slice(0,40),t:(f[cTy]||'run').toLowerCase()});});
+      (j.value||[]).forEach(it=>{const f=it.fields||{};if(f.Title)rows.push({j:String(f[cJob]||'').trim(),p:String(f[cPh]||'').trim(),id:f.Title,d:String(f[cDe]||'').slice(0,40),t:(f[cTy]||'run').toLowerCase(),q:+f[cQty]||0,bh:+f[cHrs]||0});});
       next=j['@odata.nextLink']||null;pages++;
     }
     if(rows.length){__vhScope={ts:Date.now(),rows};try{localStorage.setItem('vhts_scope',JSON.stringify(__vhScope));}catch(e){}}

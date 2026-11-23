@@ -648,7 +648,7 @@ async function initApp(){
   }catch(e){console.warn(e);}
   initWeeks();updUC();updNav();render();updBadge();
 }
-const VH_BUILD='2026-11-23.36';
+const VH_BUILD='2026-11-23.37';
 console.log('[VH] Timesheets build',VH_BUILD);
 let __vhAuthToastAt=0;
 // interactive=true only from a user-initiated action: saves drafts, then allows the MSAL
@@ -2328,7 +2328,7 @@ function upOpen(dt,ph,job){
 }
 function upClose(){
   const u=window.__up;if(!u)return;const d=upDay(u,false);
-  if(d&&d.tasks.length){let on=0;d.tasks.forEach(function(t){on+=upNum(t.h);});const left=Math.round((upCrewHrs(u)-on-upNum(d.np))*100)/100;
+  if(d&&d.tasks.length){let on=0;d.tasks.forEach(function(t){on+=upNum(t.h);});const crewNow=upCrewHrs(u);const left=crewNow>0?Math.round((crewNow-on-upNum(d.np))*100)/100:0;
     if(Math.abs(left)>0.01&&!confirm('The day does not add up yet ('+(left>0?left+' h not accounted for':(-left)+' h more than the crew worked')+'). Close anyway?'))return;}
   const el=document.getElementById('up-sheet');if(el)el.remove();window.__up=null;render();
 }
@@ -2336,7 +2336,7 @@ function upSave(){try{upBridge(window.__up);}catch(e){console.warn('upBridge',e)
 function upSetJob(j){const u=window.__up;j=String(j||'').trim();if(!j){toast('Enter the job number.','error');return;}u.job=j;upDraw();}
 function upGo(v){const u=window.__up;u.view=v;u.sel=null;u.pick={};upDraw();}
 function upPick(kind,id){const u=window.__up;u.sel=id;u.areas=[];u.form=null;u.view=kind==='run'?'runf':(kind==='et'?'etf':'strf');upDraw();}
-function upLot(id){const u=window.__up;const hv=(document.getElementById('up-hr')||{}).value||'';u.pick[id]=!u.pick[id];upDraw();const e=document.getElementById('up-hr');if(e)e.value=hv;}
+function upLot(id){const u=window.__up;const hv=(document.getElementById('up-hr')||{}).value||'';const fv=(document.getElementById('up-find')||{}).value||'';u.pick[id]=!u.pick[id];upDraw();const e=document.getElementById('up-hr');if(e)e.value=hv;const fe=document.getElementById('up-find');if(fe&&fv){fe.value=fv;upFilter(fv);}}
 function upFin(left){const e=document.getElementById('up-ft');if(e)e.value=left;}
 function upRemove(i){const u=window.__up;const d=upDay(u,false);if(!d)return;d.tasks.splice(i,1);upSave();upDraw();}
 function upNp(v){const u=window.__up;const d=upDay(u,true);d.np=v;if(!upNum(v))d.why='';upSave();upDraw();}
@@ -2554,7 +2554,7 @@ function upDraw(){
       const detail=t.type==='et'?(Number(t.q).toLocaleString()+' '+t.u+' at $'+Number(t.p).toFixed(2)+' = '+euMoney(t.val)+((t.lineHaul&&t.haul!==t.lineHaul)?' (bid cost for a '+t.lineHaul+' ft haul)':'')+(u._rate>0?' · cost '+euMoney(u._rate*upNum(t.h)):'')):(t.type==='run'?((t.fin?'Finished, ':'')+t.ft+' ft'):(t.type==='str'?'Set':(t.type==='pipe'?t.ft+' ft':'Tied in')))+(t.bid>0?' · bid '+t.bid+' h':'');
       h+='<div style="display:flex;align-items:center;gap:10px;padding:10px 0;border-top:1px solid var(--border)"><div style="flex:1;min-width:0"><div style="font-weight:700;font-size:15px">'+esc1(label)+'</div><div style="font-size:12.5px;color:var(--text2)">'+esc1(detail)+'</div></div><span style="text-align:right;white-space:nowrap"><span style="font-size:15px;font-weight:700;display:block">'+t.h+' h</span>'+upGainBit(t)+'</span><button class="btn btn-sm" onclick="upRemove('+i+')"><i class="ti ti-x"></i></button></div>';});
     on=Math.round(on*100)/100;const np=upNum(d.np),left=Math.round((crew-on-np)*100)/100,ok=d.tasks.length&&Math.abs(left)<0.01,over=left<-0.01;
-    h+='<div style="margin-top:14px;padding:12px;border-radius:12px;background:'+(ok?'#dcfce7':(over?'#fee2e2':'var(--bg2)'))+';color:'+(ok||over?'#111':'inherit')+'"><div style="display:grid;grid-template-columns:1fr 1fr 1.2fr;gap:10px;align-items:end"><div><div style="font-size:11.5px;opacity:.7">Crew hours</div><div style="font-weight:700;font-size:19px">'+crew+'</div></div><div><div style="font-size:11.5px;opacity:.7">On tasks</div><div style="font-weight:700;font-size:19px">'+on+'</div></div><div><div style="font-size:11.5px;opacity:.7;margin-bottom:3px">Non-production</div><input inputmode="decimal" value="'+esc1(d.np)+'" placeholder="0" style="'+inp+';padding:9px" onchange="upNp(this.value)"/></div></div>'+
+    h+='<div style="margin-top:14px;padding:12px;border-radius:12px;background:'+(ok?'#dcfce7':(over?'#fee2e2':'var(--bg2)'))+';color:'+(ok||over?'#111':'inherit')+'"><div style="display:grid;grid-template-columns:1fr 1fr 1.2fr;gap:10px;align-items:end"><div><div style="font-size:11.5px;opacity:.7">Crew hours</div><div style="font-weight:700;font-size:19px">'+crew+'</div></div><div><div style="font-size:11.5px;opacity:.7">On tasks</div><div style="font-weight:700;font-size:19px">'+on+'</div></div><div><div style="font-size:11.5px;opacity:.7;margin-bottom:3px">Non-production</div><input inputmode="decimal" value="'+esc1(d.np)+'" placeholder="0" style="'+inp+';padding:9px;color:var(--text)" onchange="upNp(this.value)"/></div></div>'+
        '<div style="font-size:14px;font-weight:700;margin-top:8px;color:'+(ok?'#15803d':(over?'#b91c1c':'inherit'))+'">'+(!crew?'No time on your timesheet yet for '+name.toLowerCase()+' on job '+esc1(u.job)+' this day. Crew hours come from the timesheet.':(ok?'The day adds up.':(over?(-left)+' h more than the crew worked. Check the numbers.':(d.tasks.length?left+' h not accounted for yet.':'Crew hours come from your timesheet.'))))+'</div>'+
        upGainLine(d)+((left>0.01&&d.tasks.length)?'<button class="btn btn-sm" style="margin-top:8px" onclick="upFill('+left+')">Put the '+left+' h under non-production</button>':'')+'</div>';
     if(np>0)h+='<div style="font-size:12.5px;color:var(--text2);margin:10px 0 5px">Why was time lost? (tap one)</div><div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">'+RS.map(function(x){return '<button class="btn'+(d.why===x?' btn-p':'')+'" style="min-height:44px;justify-content:center;font-size:13.5px" onclick="upWhy(\''+x+'\')">'+x+'</button>';}).join('')+'</div>';
@@ -2562,7 +2562,7 @@ function upDraw(){
     h+='<div class="ib" style="margin-top:14px"><i class="ti ti-cloud-upload"></i><span>Saved as you go. It reaches the job tracker within a few minutes when you have signal, and goes to the office with your timesheet.</span></div>';
   }else if(u.view==='run'){
     back='day';title='Pick the run';
-    const d=upDay(u,false)||{tasks:[]};const runs=upScope(u,'run');
+    const d=upDay(u,false)||{tasks:[]};const runs=upScope(u,'run').slice().sort(function(a,b){return String(a.id).localeCompare(String(b.id),undefined,{numeric:true});});
     if(!runs.length)h+='<div class="ib"><i class="ti ti-info-circle"></i><span>No runs are loaded for '+name.toLowerCase()+' on job '+esc1(u.job)+'. If the list is still loading, wait a few seconds and tap Pipe run again.</span></div>';
     h+='<input id="up-find" placeholder="Type to narrow the list" autocomplete="off" style="'+inp+';margin-bottom:10px" oninput="upFilter(this.value)"/><div id="up-list">';
     runs.forEach(function(r){
@@ -2618,7 +2618,7 @@ function upDraw(){
     back='day';title='Laterals tied in';
     const lots=upScope(u,'lateral').filter(function(l){return !upUsed(u,'l:'+l.id).hit;}).sort(function(a,b){return String(a.id).localeCompare(String(b.id),undefined,{numeric:true});});
     if(!lots.length)h+='<div class="ib"><i class="ti ti-info-circle"></i><span>No laterals are left on the list for this job.</span></div>';
-    h+='<div style="font-size:13px;color:var(--text2);margin-bottom:8px">Tap every lot you tied in today</div><div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(64px,1fr));gap:8px">'+lots.map(function(l){return '<button class="btn'+(u.pick[l.id]?' btn-p':'')+'" style="min-height:50px;justify-content:center;font-weight:700" onclick="upLot(\''+q1(l.id)+'\')">'+esc1(l.id)+'</button>';}).join('')+'</div>'+
+    h+='<div style="font-size:13px;color:var(--text2);margin-bottom:8px">Tap every lot you tied in today</div><input id="up-find" placeholder="Type a lot number to narrow the list" autocomplete="off" inputmode="numeric" style="'+inp+';margin-bottom:10px" oninput="upFilter(this.value)"/><div id="up-list" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(64px,1fr));gap:8px">'+lots.map(function(l){return '<button class="btn up-row'+(u.pick[l.id]?' btn-p':'')+'" data-n="'+esc1(String(l.id).toUpperCase())+'" style="min-height:50px;justify-content:center;font-weight:700" onclick="upLot(\''+q1(l.id)+'\')">'+esc1(l.id)+'</button>';}).join('')+'</div>'+
        '<span style="'+lbl+'">Production hours on these laterals, all together</span><input id="up-hr" inputmode="decimal" style="'+inp+'"/><div id="up-err" style="color:#dc2626;font-size:13.5px;min-height:20px;margin-top:8px"></div><button class="btn btn-p btn-bl" style="min-height:54px;justify-content:center;font-size:16px" onclick="upAdd()">Add to today</button>';
   }
   let el=document.getElementById('up-sheet');if(!el){el=document.createElement('div');el.id='up-sheet';document.body.appendChild(el);}
