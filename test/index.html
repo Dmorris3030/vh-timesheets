@@ -648,7 +648,7 @@ async function initApp(){
   }catch(e){console.warn(e);}
   initWeeks();updUC();updNav();render();updBadge();
 }
-const VH_BUILD='2026-11-23.35-test';
+const VH_BUILD='2026-11-23.36';
 console.log('[VH] Timesheets build',VH_BUILD);
 let __vhAuthToastAt=0;
 // interactive=true only from a user-initiated action: saves drafts, then allows the MSAL
@@ -1117,13 +1117,6 @@ function prodEntries(wk){
     Object.values(old).forEach(function(p){if(p&&p.job)wk.production.entries.push(Object.assign({id:Date.now()+Math.random(),phase:p.phase||'400'},p));});
   }
   return wk.production.entries;
-}
-
-function addProdEntry(phase,dt){
-  const wk=S.weeks[S.currentWeek];
-  const entries=prodEntries(wk);
-  entries.push({id:Date.now()+Math.random(),phase:phase,date:dt,job:'',notes:''});
-  rEntry();
 }
 
 function removeProdEntry(id){
@@ -1704,30 +1697,8 @@ function getJobSuggestions(wk,dt){
   return Array.from(jobs);
 }
 
-function buildProdField(f,entry,ro){
-  const val=(entry[f.id]||'').toString().replace(/"/g,'&quot;');
-  const id=entry.id;
-  let s='<div>';
-  s+='<span class="fl" style="font-size:10px;margin-bottom:4px;display:block">'+f.label+'</span>';
-  if(f.type==='weather'){
-    s+='<select class="di" style="font-size:14px;padding:8px 10px" '+(ro?'disabled':'')+' data-id="'+id+'" data-f="'+f.id+'" onchange="setProdField(+this.dataset.id,this.dataset.f,this.value)">';
-    s+='<option value="">Select...</option>';
-    WEATHER_OPTIONS.forEach(function(w){s+='<option value="'+w+'" '+(entry[f.id]===w?'selected':'')+'>'+w+'</option>';});
-    s+='</select>';
-  }else if(f.id==='strId'){
-    // Native datalist is unusable on phones (keyboard dismisses, 300 options unscrollable) —
-    // readonly field opens a full-screen searchable picker instead.
-    s+='<input type="text" class="di" readonly value="'+val+'" '+(ro?'disabled':'')+' placeholder="Tap to pick run / lot" style="font-size:15px;padding:8px 10px;cursor:pointer" data-id="'+id+'" data-f="strId" onclick="if(!this.disabled)vhStrPick(this)"/>';
-  }else{
-    s+='<input type="'+(f.type==='text'?'text':'number')+'" class="di" '+(f.type!=='text'?'inputmode="decimal"':'')+' value="'+val+'" '+(ro?'disabled':'')+' placeholder="'+f.label+'" style="font-size:15px;padding:8px 10px" data-id="'+id+'" data-f="'+f.id+'" oninput="setProdField(+this.dataset.id,this.dataset.f,this.value)"/>';
-  }
-  s+='</div>';
-  return s;
-}
-
 function buildProductionView(wk,dates,ro){
   const adDay=adys['_prod_day']||0;
-  const adPhase=adys['_prod_phase']||0;
   let s='';
 
   // Day tabs
@@ -1746,65 +1717,11 @@ function buildProductionView(wk,dates,ro){
   const dt=dates[adDay];
   const suggestions=getJobSuggestions(wk,dt);
   // Material tickets bar (independent of timesheet status: a delivery can be logged any time)
-  s+='<div style="display:flex;align-items:center;gap:10px;background:var(--bg2);border-radius:var(--r3);padding:10px 12px;margin-bottom:14px"><i class="ti ti-receipt" style="font-size:22px;color:var(--accent);flex-shrink:0"></i><div style="flex:1;min-width:0" onclick="tkFlush(true)"><strong style="font-size:14px">Material tickets</strong><br><span id="tk-pend" style="font-size:12px;color:var(--text2)">Stone and pipe deliveries</span></div><button class="btn btn-p btn-sm" style="flex-shrink:0;min-height:40px" data-dt="'+dt+'" data-ph="'+PROD_PHASES[adPhase]+'" data-job="'+String(suggestions[0]||'').replace(/"/g,'&quot;')+'" onclick="tkOpen(this.dataset.dt,this.dataset.ph,this.dataset.job)"><i class="ti ti-camera"></i> Add ticket</button><button class="btn btn-sm" style="flex-shrink:0;min-height:40px" data-dt="'+dt+'" data-ph="'+PROD_PHASES[adPhase]+'" data-job="'+String(suggestions[0]||'').replace(/"/g,'&quot;')+'" onclick="tkbOpen(this.dataset.dt,this.dataset.ph,this.dataset.job)"><i class="ti ti-stack-2"></i> Stack</button></div>';
-  if(vhIsTest()&&/^(300|310|400|500)$/.test(PROD_PHASES[adPhase]))s+='<button class="btn btn-p btn-bl" style="min-height:58px;justify-content:center;font-size:16px;margin:0 0 14px" onclick="upOpen(\''+dt+'\',\''+PROD_PHASES[adPhase]+'\',\''+String(suggestions[0]||'').replace(/[^A-Za-z0-9-]/g,'')+'\')"><i class="ti ti-clipboard-check"></i> Report today\'s work (new form)</button>';
+  s+='<div style="display:flex;align-items:center;gap:10px;background:var(--bg2);border-radius:var(--r3);padding:10px 12px;margin-bottom:14px"><i class="ti ti-receipt" style="font-size:22px;color:var(--accent);flex-shrink:0"></i><div style="flex:1;min-width:0" onclick="tkFlush(true)"><strong style="font-size:14px">Material tickets</strong><br><span id="tk-pend" style="font-size:12px;color:var(--text2)">Stone and pipe deliveries</span></div><button class="btn btn-p btn-sm" style="flex-shrink:0;min-height:40px" data-dt="'+dt+'" data-ph="" data-job="'+String(suggestions[0]||'').replace(/"/g,'&quot;')+'" onclick="tkOpen(this.dataset.dt,this.dataset.ph,this.dataset.job)"><i class="ti ti-camera"></i> Add ticket</button><button class="btn btn-sm" style="flex-shrink:0;min-height:40px" data-dt="'+dt+'" data-ph="" data-job="'+String(suggestions[0]||'').replace(/"/g,'&quot;')+'" onclick="tkbOpen(this.dataset.dt,this.dataset.ph,this.dataset.job)"><i class="ti ti-stack-2"></i> Stack</button></div>';
   setTimeout(tkRefreshCount,0);
 
-  // Phase tabs
-  s+='<div style="display:flex;gap:4px;margin-bottom:14px;overflow-x:auto;scrollbar-width:none;-webkit-overflow-scrolling:touch;padding-bottom:2px">';
-  PROD_PHASES.forEach(function(ph,pi){
-    const label=(S.phaseLabels&&S.phaseLabels[ph])||PHASE_TEMPLATES[ph].label;
-    const active=pi===adPhase;
-    const count=prodEntries(wk).filter(function(e){return e.date===dt&&e.phase===ph;}).length;
-    s+='<button data-pi="'+pi+'" onclick="adys[\'_prod_phase\']=+this.dataset.pi;rEntry()" style="flex-shrink:0;padding:6px 10px;border-radius:16px;border:0.5px solid '+(active?'var(--accent)':'var(--border)')+';background:'+(active?'var(--accent)':'var(--bg2)')+';color:'+(active?'#fff':'var(--text2)')+';font-size:11px;font-weight:600;cursor:pointer;white-space:nowrap">';
-    const shortLabel={'300':'Earthwork','310':'Fine Grade','400':'Storm','500':'Sanitary','600':'Watermain'};
-    s+=ph+' '+( shortLabel[ph]||label)+(count>0?' ('+count+')':'')+' </button>';
-  });
-  s+='</div>';
-
-  const phase=PROD_PHASES[adPhase];
-  const template=PHASE_TEMPLATES[phase];
-  const phaseEntries=prodEntries(wk).filter(function(e){return e.date===dt&&e.phase===phase;});
-
-  if(!phaseEntries.length){
-    s+='<div class="nd" style="padding:24px 16px"><i class="ti ti-clipboard"></i>No '+template.label+' reports for this day.<br>';
-    if(!ro)s+='<button class="btn btn-p" style="margin-top:10px" data-ph="'+phase+'" data-dt="'+dt+'" onclick="addProdEntry(this.dataset.ph,this.dataset.dt)"><i class="ti ti-plus"></i> Add report</button>';
-    s+='</div>';
-  } else {
-    phaseEntries.forEach(function(entry){
-      s+='<div class="card" style="position:relative">';
-      // Remove button
-      if(!ro)s+='<button onclick="removeProdEntry('+entry.id+')" style="position:absolute;top:10px;right:10px;background:none;border:none;color:var(--text3);font-size:18px;cursor:pointer;padding:4px">✕</button>';
-      // Job # with suggestions
-      s+='<div style="margin-bottom:10px"><span class="fl" style="font-size:10px;margin-bottom:4px;display:block">Job #</span>';
-      s+='<input type="text" class="di" list="job-suggestions-'+entry.id+'" value="'+(entry.job||'')+'" '+(ro?'disabled':'')+' placeholder="Job number" style="font-size:16px;font-weight:600;padding:10px 12px" data-id="'+entry.id+'" data-f="job" oninput="setProdField(+this.dataset.id,this.dataset.f,this.value)"/>';
-      if(suggestions.length){
-        s+='<datalist id="job-suggestions-'+entry.id+'">';
-        suggestions.forEach(function(j){s+='<option value="'+j+'">'+j+'</option>';});
-        s+='</datalist>';
-      }
-      s+='</div>';
-      // Phase fields grid
-      s+='<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px">';
-      (template.fields||[]).forEach(function(f){
-        const span=f.span===2?'grid-column:span 2':'';
-        s+='<div style="'+span+'">'+buildProdField(f,entry,ro)+'</div>';
-      });
-      s+='</div>';
-      // Notes
-      s+='<div><span class="fl" style="font-size:10px;margin-bottom:4px;display:block">Notes</span>';
-      s+='<textarea class="di" '+(ro?'disabled':'')+' placeholder="Field conditions, issues..." style="height:60px;resize:none;font-size:14px" data-id="'+entry.id+'" data-f="notes" oninput="setProdField(+this.dataset.id,this.dataset.f,this.value)">'+(entry.notes||'')+'</textarea></div>';
-      if(!ro)s+='<button class="btn btn-bl" style="margin-top:10px;width:100%;justify-content:center" data-eid="'+entry.id+'" onclick="openMarkup(+this.dataset.eid)"><i class="ti ti-highlight"></i> Mark up plan</button>';
-      s+='</div>';
-    });
-    if(!ro){
-    s+='<button class="btn btn-bl" data-ph="'+phase+'" data-dt="'+dt+'" onclick="addProdEntry(this.dataset.ph,this.dataset.dt)" style="margin-bottom:8px"><i class="ti ti-plus"></i> Add another '+template.label+' report</button>';
-    }
-  }
-
-  if(!ro){
-    s+='<div class="acts"><button class="btn btn-bl" onclick="saveDraft()"><i class="ti ti-device-floppy"></i> Save production</button></div>';
-  }
+  // One button per kind of work. Each opens that day's report.
+  s+=upLauncher(wk,dt,ro);
   return s;
 }
 
@@ -2402,6 +2319,7 @@ function upScope(u,type){const c=vhScopeCache();return ((c&&c.rows)||[]).filter(
 function upUsed(u,k){const wk=S.weeks[S.currentWeek];let ft=0,hit=false;Object.keys((wk&&wk.utilDays)||{}).forEach(function(dk){const p=dk.split('|');if(p[0]!==u.job||p[1]!==u.ph)return;((wk.utilDays[dk]||{}).tasks||[]).forEach(function(t){if(t.k===k){hit=true;ft+=upNum(t.ft);}});});return {hit:hit,ft:ft};}
 function upOpen(dt,ph,job){
   const wk=S.weeks[S.currentWeek];if(!wk){toast('Open your timesheet for the week first.','error');return;}
+  if(wk.status!=='draft'&&wk.status!=='returned'){toast('This week has been turned in, so its reports can no longer be changed.','error');return;}
   window.__up={dt:dt,ph:ph,job:String(job||'').trim(),view:'day',sel:null,pick:{}};
   const c=vhScopeCache();if(!c||!c.rows||!c.rows.length||c.rows[0].bh===undefined)vhLoadScope(true).then(function(){if(window.__up)upDraw();});
   upLoadStructs().then(function(){if(window.__up)upDraw();});
@@ -2414,7 +2332,7 @@ function upClose(){
     if(Math.abs(left)>0.01&&!confirm('The day does not add up yet ('+(left>0?left+' h not accounted for':(-left)+' h more than the crew worked')+'). Close anyway?'))return;}
   const el=document.getElementById('up-sheet');if(el)el.remove();window.__up=null;render();
 }
-function upSave(){saveDraftSilent();}
+function upSave(){try{upBridge(window.__up);}catch(e){console.warn('upBridge',e);}saveDraftSilent();}
 function upSetJob(j){const u=window.__up;j=String(j||'').trim();if(!j){toast('Enter the job number.','error');return;}u.job=j;upDraw();}
 function upGo(v){const u=window.__up;u.view=v;u.sel=null;u.pick={};upDraw();}
 function upPick(kind,id){const u=window.__up;u.sel=id;u.areas=[];u.form=null;u.view=kind==='run'?'runf':(kind==='et'?'etf':'strf');upDraw();}
@@ -2435,6 +2353,11 @@ function upAdd(){
     if(r.q>0&&ft>left+0.5){err('Only '+left+' ft are left on this run.');return;}
     if(!hr){err('Enter the production hours.');return;}
     d.tasks.push({k:'r:'+r.id,type:'run',id:r.id,ft:ft,h:hr,fin:r.q>0&&ft>=left-0.5,bid:(r.q>0&&r.bh>0)?upR2(r.bh*Math.min(ft,r.q)/r.q):0});
+  }else if(u.view==='pipe'){
+    const ft=upNum((document.getElementById('up-ft')||{}).value);
+    if(!ft){err('Enter the feet.');return;}
+    if(!hr){err('Enter the production hours.');return;}
+    d.tasks.push({k:'p:'+Date.now(),type:'pipe',id:'Water main',ft:ft,h:hr});
   }else if(u.view==='etf'){
     const tk=euTasks(u).find(function(x){return x.n===u.sel;});if(!tk){err('That task is no longer on the list.');return;}
     const q=upNum((document.getElementById('up-ft')||{}).value);const hv=document.getElementById('up-haul');const haul=hv?upNum(hv.value):0;
@@ -2549,12 +2472,63 @@ function euArea(){
   euFormKeep(u);u.areas=u.areas||[];u.areas.push({l:l,w:w});u.form.ft=String(euAreaTotal(u));upDraw();
 }
 function euAreaDel(i){const u=window.__up;if(!u||!u.areas)return;euFormKeep(u);u.areas.splice(i,1);u.form.ft=u.areas.length?String(euAreaTotal(u)):'';upDraw();}
+// ===== PRODUCTION TAB: one report per kind of work, per job, per day ==========
+// The day's reports are kept in wk.utilDays and copied into the production entries the app has
+// always sent to SharePoint, so the job tracker and the office files need no new plumbing.
+function upDayStats(d){let h=0;((d&&d.tasks)||[]).forEach(function(t){h+=upNum(t.h);});return {n:((d&&d.tasks)||[]).length,h:upR2(h),np:upNum(d&&d.np)};}
+function upLauncher(wk,dt,ro){
+  const PH=[['300','Mass earthwork','ti-bulldozer','Yards moved, by task'],['310','Finish grade','ti-ruler-2','Area finished, by task'],['400','Storm','ti-droplet','Pipe runs and structures'],['500','Sanitary','ti-ripple','Pipe runs, manholes and laterals'],['600','Water main','ti-ruler-measure','Feet of pipe laid']];
+  const tj={};(wk.employees||[]).forEach(function(eid){getJobLines(wk,eid,dt).forEach(function(ln){const j=String(ln.job||'').trim(),p=String(ln.phase||'').trim();if(j&&p)(tj[p]=tj[p]||{})[j]=1;});});
+  const days=wk.utilDays||{};const di=wd(S.currentWeek).indexOf(dt);const safe=function(x){return String(x).replace(/[^A-Za-z0-9-]/g,'');};
+  let h='<div style="font-size:16px;font-weight:700;margin:2px 0 2px">What did the crew do'+(di>=0?' on '+DAYS[di]:'')+'?</div><div style="font-size:13px;color:var(--text2);margin-bottom:12px">'+(ro?'This week has been turned in, so its reports can no longer be changed.':'Tap the kind of work to report it. It saves as you go.')+'</div>';
+  let shown=0;
+  PH.forEach(function(P){
+    const ph=P[0];
+    const keys=Object.keys(days).filter(function(k){const p=k.split('|');const d=days[k]||{};return p[1]===ph&&p[2]===dt&&(((d.tasks||[]).length)||upNum(d.np)>0||String(d.note||'').trim());});
+    const onTs=Object.keys(tj[ph]||{});const done=keys.length>0;
+    if(ro&&!done)return;shown++;
+    const openJob=keys.length===1?keys[0].split('|')[0]:(keys.length?'':(onTs.length===1?onTs[0]:''));
+    let sub=P[3];
+    if(keys.length===1){const st=upDayStats(days[keys[0]]);sub='Job '+wdEsc(keys[0].split('|')[0])+' \u00b7 '+st.n+(st.n===1?' entry':' entries')+' \u00b7 '+st.h+' h'+(st.np?' \u00b7 '+st.np+' h lost':'');}
+    else if(keys.length>1)sub=keys.length+' jobs reported';
+    else if(onTs.length)sub='On the timesheet for job '+wdEsc(onTs.join(', '))+'. Not reported yet.';
+    h+='<button class="btn btn-bl" '+(ro?'disabled ':'')+'style="justify-content:flex-start;gap:14px;min-height:66px;margin-bottom:10px;text-align:left;'+(done?'border-color:#16a34a;':'')+'" onclick="upOpen(\''+dt+'\',\''+ph+'\',\''+safe(openJob)+'\')"><i class="ti '+P[2]+'" style="font-size:24px;color:'+(done?'#16a34a':'var(--accent)')+';flex-shrink:0"></i><span style="flex:1;min-width:0"><strong style="font-size:16px;display:block">'+P[1]+'</strong><span style="font-size:12.5px;color:var(--text2);font-weight:400">'+sub+'</span></span><i class="ti '+(done?'ti-circle-check':'ti-chevron-right')+'" style="color:'+(done?'#16a34a':'var(--text3)')+';font-size:20px;flex-shrink:0"></i></button>';
+    if(keys.length>1&&!ro)keys.forEach(function(k){const j=k.split('|')[0];const st=upDayStats(days[k]);h+='<button class="btn btn-sm" style="margin:-4px 0 10px 38px" onclick="upOpen(\''+dt+'\',\''+ph+'\',\''+safe(j)+'\')">Job '+wdEsc(j)+' \u00b7 '+st.n+(st.n===1?' entry':' entries')+' \u00b7 '+st.h+' h</button>';});
+  });
+  if(ro&&!shown)h+='<div class="nd" style="padding:20px 16px"><i class="ti ti-clipboard"></i>No production was reported for this day.</div>';
+  // reports entered before this form existed stay visible until the week is turned in
+  const legacy=prodEntries(wk).filter(function(e){return e&&e.date===dt&&!e.upKey&&(e.job||e.strId||e.quantity||e.yardsMovedTotal||e.areaFinished||e.productionHours||e.notes);});
+  if(legacy.length){
+    h+='<div style="font-size:13px;font-weight:700;color:var(--text2);margin:16px 0 4px">Entered earlier</div>';
+    legacy.forEach(function(e){const q=e.quantity||e.yardsMovedTotal||e.areaFinished||'';const what=[e.strId||e.bidItem||e.workType||'',q?q+(e.yardsMovedTotal?' CY':(e.areaFinished?' SY':' LF')):'',e.productionHours?e.productionHours+' h':''].filter(Boolean).join(' \u00b7 ');
+      h+='<div style="display:flex;align-items:center;gap:10px;padding:10px 0;border-top:1px solid var(--border)"><div style="flex:1;min-width:0"><div style="font-weight:700;font-size:14.5px">Phase '+wdEsc(e.phase||'')+' \u00b7 job '+wdEsc(e.job||'?')+'</div><div style="font-size:12.5px;color:var(--text2)">'+wdEsc(what||'No details')+'</div></div>'+(ro?'':'<button class="btn btn-sm" onclick="if(confirm(\'Remove this report?\'))removeProdEntry('+e.id+')"><i class="ti ti-trash"></i></button>')+'</div>';});
+  }
+  return h;
+}
+// Copy one day's report into the production entries that are sent to SharePoint.
+function upBridge(u){
+  if(!u||!u.job)return;const wk=S.weeks[S.currentWeek];if(!wk)return;
+  const key=upKey(u),d=upDay(u,false),list=prodEntries(wk),old={};
+  for(let i=list.length-1;i>=0;i--){const e=list[i];if(e&&e.upKey===key){old[e.upRef]=e;list.splice(i,1);}}
+  if(!d)return;
+  const mk=function(ref,fields){const e={id:(old[ref]&&old[ref].id)||(Date.now()+Math.random()),phase:u.ph,date:u.dt,job:u.job,upKey:key,upRef:ref,notes:''};Object.assign(e,fields);list.push(e);};
+  const lats=u.ph==='500'?upScope(u,'lateral'):[];
+  (d.tasks||[]).forEach(function(t,i){
+    if(t.type==='run')mk('t'+i,{strId:t.id,quantity:t.ft,productionHours:t.h,workType:'Pipe run'+(t.fin?' (finished)':'')});
+    else if(t.type==='str')mk('t'+i,{strId:t.id,quantity:'',productionHours:t.h,workType:u.ph==='400'?'Structure set':'Manhole set'});
+    else if(t.type==='lat'){const L=lats.find(function(x){return String(x.id)===String(t.id);})||{};mk('t'+i,{strId:t.id,quantity:L.q>0?L.q:'',productionHours:t.h,workType:'Lateral tied in'});}
+    else if(t.type==='pipe')mk('t'+i,{strId:'',quantity:t.ft,productionHours:t.h,workType:'Pipe laid'});
+    else if(t.type==='et'){const fl={bidItem:t.id+(t.haul?' ('+t.haul+' ft haul)':''),workType:t.id,haulDistance:t.haul||'',productionHours:t.h,bidCostPerYard:t.p,unit:t.u};if(u.ph==='310')fl.areaFinished=t.q;else fl.yardsMovedTotal=t.q;mk('t'+i,fl);}
+  });
+  const np=upNum(d.np),note=String(d.note||'').trim();
+  if(np>0||note)mk('day',{workType:np>0?'Lost time':'Note',quantity:'',productionHours:'',notes:[np>0?('LOST TIME '+np+' h'+(d.why?': '+d.why:'')):'',note].filter(Boolean).join(' | ')});
+}
 function upDraw(){
   const u=window.__up;if(!u)return;
   const RS=(u.ph==='300'||u.ph==='310')?['Weather','Wet ground','Equipment down','Waiting on stakes','Fueling or maintenance','Moving or setup','Other']:['Weather','Waiting on material','Unloading materials','Locates or inspection','Equipment down','Dewatering','Bench walls','Collars','Moving or setup','Other'];
   const inp='width:100%;font-size:17px;padding:12px;border-radius:10px;border:1px solid var(--border);background:var(--bg);color:inherit;box-sizing:border-box';
   const lbl='font-size:12.5px;color:var(--text2);display:block;margin:12px 0 5px';
-  const earth=(u.ph==='300'||u.ph==='310');const name=({'300':'Mass earthwork','310':'Finish grade','400':'Storm','500':'Sanitary'})[u.ph]||('Phase '+u.ph);const di=wd(S.currentWeek).indexOf(u.dt);
+  const earth=(u.ph==='300'||u.ph==='310');const name=({'300':'Mass earthwork','310':'Finish grade','400':'Storm','500':'Sanitary','600':'Water main'})[u.ph]||('Phase '+u.ph);const di=wd(S.currentWeek).indexOf(u.dt);
   const esc1=function(x){return wdEsc(x);};const q1=function(x){return String(x).replace(/\\/g,'\\\\').replace(/'/g,"\\'");};
   let title=name+' \u00b7 '+(di>=0?DAYS[di]+' ':'')+fs(u.dt),back='',h='';
   if(!u.job){
@@ -2569,14 +2543,15 @@ function upDraw(){
     h+='<div style="font-size:13px;color:var(--text2);margin-bottom:10px">'+(di>=0?DAYS[di]+' ':'')+fs(u.dt)+' \u00b7 <a href="#" onclick="window.__up.job=\'\';upDraw();return false" style="color:var(--accent)">change job</a></div>';
     h+='<div style="font-size:15px;font-weight:700;margin-bottom:8px">What did you do today?</div>';
     if(earth)h+=big('et',u.ph==='300'?'ti-bulldozer':'ti-ruler-2',u.ph==='300'?'Mass earthwork task':'Finish grade task',u.ph==='300'?'Yards moved, by task and haul':'Area finished, by task');
+    else if(u.ph==='600')h+=(upScope(u,'run').length?big('run','ti-line','Pipe run','Feet laid on a run'):'')+big('pipe','ti-ruler-measure','Pipe laid','Feet of water main laid today');
     else h+=big('run','ti-line','Pipe run','Feet laid on a run')+big('str','ti-circle-dot',u.ph==='400'?'Structure':'Manhole',u.ph==='400'?'A structure you set':'A manhole you set');
     if(u.ph==='500')h+=big('lat','ti-home','Laterals','Lots you tied in');
     h+='<div style="font-size:13px;font-weight:700;color:var(--text2);margin:14px 0 4px">Added today</div>';
     if(!d.tasks.length)h+='<div style="color:var(--text2);font-size:13.5px;padding:6px 0">Nothing yet.</div>';
     let on=0;
     d.tasks.forEach(function(t,i){on+=upNum(t.h);
-      const label=t.type==='et'?(t.id+(t.haul?' · '+t.haul+' ft haul':'')):t.type==='run'?'Run '+t.id:(t.type==='str'?(u.ph==='400'?'Structure ':'Manhole ')+upSid(t.id):'Lateral, lot '+t.id);
-      const detail=t.type==='et'?(Number(t.q).toLocaleString()+' '+t.u+' at $'+Number(t.p).toFixed(2)+' = '+euMoney(t.val)+((t.lineHaul&&t.haul!==t.lineHaul)?' (bid cost for a '+t.lineHaul+' ft haul)':'')+(u._rate>0?' · cost '+euMoney(u._rate*upNum(t.h)):'')):(t.type==='run'?((t.fin?'Finished, ':'')+t.ft+' ft'):(t.type==='str'?'Set':'Tied in'))+(t.bid>0?' · bid '+t.bid+' h':'');
+      const label=t.type==='pipe'?'Water main pipe':t.type==='et'?(t.id+(t.haul?' · '+t.haul+' ft haul':'')):t.type==='run'?'Run '+t.id:(t.type==='str'?(u.ph==='400'?'Structure ':'Manhole ')+upSid(t.id):'Lateral, lot '+t.id);
+      const detail=t.type==='et'?(Number(t.q).toLocaleString()+' '+t.u+' at $'+Number(t.p).toFixed(2)+' = '+euMoney(t.val)+((t.lineHaul&&t.haul!==t.lineHaul)?' (bid cost for a '+t.lineHaul+' ft haul)':'')+(u._rate>0?' · cost '+euMoney(u._rate*upNum(t.h)):'')):(t.type==='run'?((t.fin?'Finished, ':'')+t.ft+' ft'):(t.type==='str'?'Set':(t.type==='pipe'?t.ft+' ft':'Tied in')))+(t.bid>0?' · bid '+t.bid+' h':'');
       h+='<div style="display:flex;align-items:center;gap:10px;padding:10px 0;border-top:1px solid var(--border)"><div style="flex:1;min-width:0"><div style="font-weight:700;font-size:15px">'+esc1(label)+'</div><div style="font-size:12.5px;color:var(--text2)">'+esc1(detail)+'</div></div><span style="text-align:right;white-space:nowrap"><span style="font-size:15px;font-weight:700;display:block">'+t.h+' h</span>'+upGainBit(t)+'</span><button class="btn btn-sm" onclick="upRemove('+i+')"><i class="ti ti-x"></i></button></div>';});
     on=Math.round(on*100)/100;const np=upNum(d.np),left=Math.round((crew-on-np)*100)/100,ok=d.tasks.length&&Math.abs(left)<0.01,over=left<-0.01;
     h+='<div style="margin-top:14px;padding:12px;border-radius:12px;background:'+(ok?'#dcfce7':(over?'#fee2e2':'var(--bg2)'))+';color:'+(ok||over?'#111':'inherit')+'"><div style="display:grid;grid-template-columns:1fr 1fr 1.2fr;gap:10px;align-items:end"><div><div style="font-size:11.5px;opacity:.7">Crew hours</div><div style="font-weight:700;font-size:19px">'+crew+'</div></div><div><div style="font-size:11.5px;opacity:.7">On tasks</div><div style="font-weight:700;font-size:19px">'+on+'</div></div><div><div style="font-size:11.5px;opacity:.7;margin-bottom:3px">Non-production</div><input inputmode="decimal" value="'+esc1(d.np)+'" placeholder="0" style="'+inp+';padding:9px" onchange="upNp(this.value)"/></div></div>'+
@@ -2584,7 +2559,7 @@ function upDraw(){
        upGainLine(d)+((left>0.01&&d.tasks.length)?'<button class="btn btn-sm" style="margin-top:8px" onclick="upFill('+left+')">Put the '+left+' h under non-production</button>':'')+'</div>';
     if(np>0)h+='<div style="font-size:12.5px;color:var(--text2);margin:10px 0 5px">Why was time lost? (tap one)</div><div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">'+RS.map(function(x){return '<button class="btn'+(d.why===x?' btn-p':'')+'" style="min-height:44px;justify-content:center;font-size:13.5px" onclick="upWhy(\''+x+'\')">'+x+'</button>';}).join('')+'</div>';
     h+='<span style="'+lbl+'">Notes (water, delays, anything the office should know)</span><input style="'+inp+'" value="'+esc1(d.note||'')+'" onchange="upNote(this.value)"/>';
-    h+='<div class="ib" style="margin-top:14px"><i class="ti ti-flask"></i><span>Test form. What you enter here is saved on this device only and is not sent to the tracker yet.</span></div>';
+    h+='<div class="ib" style="margin-top:14px"><i class="ti ti-cloud-upload"></i><span>Saved as you go. It reaches the job tracker within a few minutes when you have signal, and goes to the office with your timesheet.</span></div>';
   }else if(u.view==='run'){
     back='day';title='Pick the run';
     const d=upDay(u,false)||{tasks:[]};const runs=upScope(u,'run');
@@ -2618,6 +2593,9 @@ function upDraw(){
   }else if(u.view==='strf'){
     back='str';title='Set '+upSid(u.sel);
     h+='<span style="'+lbl+'">Production hours to set this one</span><input id="up-hr" inputmode="decimal" style="'+inp+'"/><div id="up-err" style="color:#dc2626;font-size:13.5px;min-height:20px;margin-top:8px"></div><button class="btn btn-p btn-bl" style="min-height:54px;justify-content:center;font-size:16px" onclick="upAdd()">Add to today</button>';
+  }else if(u.view==='pipe'){
+    back='day';title='Pipe laid';
+    h+='<span style="'+lbl+'">Feet of water main laid today</span><input id="up-ft" inputmode="decimal" style="'+inp+'"/><span style="'+lbl+'">Production hours on this</span><input id="up-hr" inputmode="decimal" style="'+inp+'"/><div id="up-err" style="color:#dc2626;font-size:13.5px;min-height:20px;margin-top:8px"></div><button class="btn btn-p btn-bl" style="min-height:54px;justify-content:center;font-size:16px" onclick="upAdd()">Add to today</button>';
   }else if(u.view==='et'){
     back='day';title='Pick the task';const list=euTasks(u);
     if(!list.length)h+='<div class="ib"><i class="ti ti-info-circle"></i><span>No bid tasks are loaded for '+name.toLowerCase()+' on job '+esc1(u.job)+'. If the list is still loading, wait a few seconds and try again.</span></div>';
