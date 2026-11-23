@@ -503,8 +503,8 @@ function vhTripsHtml(wk){
   const tr=wk.trips.slice().sort(function(a,b){return String(a.date).localeCompare(String(b.date))||((+a.begin||0)-(+b.begin||0));});
   let hh=0,mm=0;const c='padding:5px 6px;border-top:0.5px solid var(--border)';
   let h='<div style="font-size:11px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.4px;margin:12px 0 4px">Trip log</div><div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12.5px"><tr style="text-align:left;color:var(--text3);font-size:11px"><th style="padding:5px 6px">Date</th><th style="padding:5px 6px">Truck</th><th style="padding:5px 6px">From</th><th style="padding:5px 6px">To</th><th style="padding:5px 6px;text-align:right">Miles</th><th style="padding:5px 6px;text-align:right">Hours</th><th style="padding:5px 6px">Hauled</th></tr>';
-  tr.forEach(function(x){const mi=Math.max(0,(+x.end||0)-(+x.begin||0));hh+=(+x.hours||0);mm+=mi;
-    h+='<tr><td style="'+c+'">'+fs(x.date)+'</td><td style="'+c+'">'+wdEsc(x.truck)+'</td><td style="'+c+'">'+wdEsc(x.from)+'</td><td style="'+c+'">'+wdEsc(x.to)+'</td><td style="'+c+';text-align:right">'+(Math.round(mi*10)/10)+'</td><td style="'+c+';text-align:right">'+(+x.hours||0)+'</td><td style="'+c+'">'+(TL_SHORT[(x.svc||0)-1]||'')+(x.manual?' <span style="color:var(--text3)">(entered by hand)</span>':'')+'</td></tr>';});
+  tr.forEach(function(x){const mi=tlMiles(x);hh+=(+x.hours||0);mm+=mi;
+    h+='<tr><td style="'+c+'">'+fs(x.date)+'</td><td style="'+c+'">'+wdEsc(x.truck)+'</td><td style="'+c+'">'+wdEsc(x.from)+'</td><td style="'+c+'">'+wdEsc(x.to)+'</td><td style="'+c+';text-align:right">'+(Math.round(mi*10)/10)+'</td><td style="'+c+';text-align:right">'+(+x.hours||0)+'</td><td style="'+c+'">'+(TL_SHORT[(x.svc||0)-1]||'')+' <span style="color:var(--text3)">('+wdEsc(tlHow(x).toLowerCase())+')</span>'+'</td></tr>';});
   return h+'<tr><td colspan="4" style="'+c+';text-align:right;font-weight:700">Total</td><td style="'+c+';text-align:right;font-weight:700">'+(Math.round(mm*10)/10)+'</td><td style="'+c+';text-align:right;font-weight:700">'+(Math.round(hh*100)/100)+'</td><td style="'+c+'"></td></tr></table></div>';
 }
 // ---- Server backup of time that has not been submitted yet. One small file per person in the
@@ -648,7 +648,7 @@ async function initApp(){
   }catch(e){console.warn(e);}
   initWeeks();updUC();updNav();render();updBadge();
 }
-const VH_BUILD='2026-11-20.26';
+const VH_BUILD='2026-11-23.27';
 console.log('[VH] Timesheets build',VH_BUILD);
 let __vhAuthToastAt=0;
 // interactive=true only from a user-initiated action: saves drafts, then allows the MSAL
@@ -2170,10 +2170,45 @@ function tlOpen(){
 }
 function tlClose(){const el=document.getElementById('tl-sheet');if(el)el.remove();window.__tl=null;}
 function tlTruck(v){const m=tlMem();m.truck=String(v||'').trim();tlMemSave(m);}
+// ---- Miles (build .27). Start/Arrived trips: road distance between the two ends, worked out
+//      by a routing service. Trips added by hand: beginning and ending odometer, subtracted.
+function tlMiles(x){const m=+x.miles;if(isFinite(m)&&m>0)return m;const d=(+x.end||0)-(+x.begin||0);return d>0?Math.round(d*10)/10:0;}
+function tlHow(x){if(x.manual&&+x.end>0)return 'Odometer '+x.begin+' to '+x.end;if(x.milesSrc==='road')return 'By road';if(x.milesSrc==='estimate')return 'Rough estimate';return 'Entered by hand';}
+// A point for one end of a trip: the device's own fix when it is good, else the saved place.
+function tlPt(job,pos){
+  if(pos&&pos.acc<=1500)return {lat:pos.lat,lng:pos.lng};
+  const mem=tlMem();if(mem.home&&mem.home.code===job&&typeof mem.home.lat==='number')return {lat:mem.home.lat,lng:mem.home.lng};
+  const l=(tlLocCache().loc||{})[job];return (l&&typeof l.lat==='number')?{lat:l.lat,lng:l.lng}:null;
+}
+// Driving distance. Points are rounded to about a city block before they leave the device.
+async function tlRoute(a,b){
+  const r3=function(n){return Math.round(n*1000)/1000;};
+  try{
+    const ctl=new AbortController();const tm=setTimeout(function(){ctl.abort();},9000);
+    const r=await fetch('https://router.project-osrm.org/route/v1/driving/'+r3(a.lng)+','+r3(a.lat)+';'+r3(b.lng)+','+r3(b.lat)+'?overview=false',{signal:ctl.signal});
+    clearTimeout(tm);
+    if(r.ok){const j=await r.json();const m=j&&j.routes&&j.routes[0]&&j.routes[0].distance;if(j&&j.code==='Ok'&&m>0)return {miles:Math.max(0.1,Math.round(m/1609.344*10)/10),src:'road'};}
+  }catch(e){}
+  return {miles:Math.max(0.1,Math.round(tlDist(a.lat,a.lng,b.lat,b.lng)/1609.344*1.25*10)/10),src:'estimate'};
+}
+async function tlCalc(){
+  const t=window.__tl;if(!t||!t.f||t.f.manual||t.f.milesTouched)return;const f=t.f;
+  if(!f.from||!f.to)return;
+  const a=f.fromPt||tlPt(f.from),b=f.toPt||tlPt(f.to);
+  if(!a||!b){f.milesNote='The app has no saved location for one end of this trip, so it cannot work out the miles. Enter them.';tlRead();tlDraw();return;}
+  f.milesNote='Working out the road miles\u2026';tlRead();tlDraw();
+  const res=await tlRoute(a,b);
+  if(!window.__tl||window.__tl.f!==f||f.milesTouched)return;
+  tlRead();f.miles=res.miles;f.milesSrc=res.src;
+  f.milesNote=res.src==='road'?'Worked out by road from where the trip started to where it ended. Change it if you went a longer way.':'Rough estimate only: the mapping service did not answer. Check it against what you drove.';
+  tlDraw();
+}
 function tlRead(){
   const t=window.__tl;if(!t||!t.f)return;const g=function(id){const e=document.getElementById(id);return e?e.value:null;};
-  const d=g('tl-date');if(d!=null)t.f.date=d;const b=g('tl-begin');if(b!=null)t.f.begin=b;const e=g('tl-end');if(e!=null)t.f.end=e;const h=g('tl-hrs');if(h!=null)t.f.hours=h;
+  const d=g('tl-date');if(d!=null)t.f.date=d;const b=g('tl-begin');if(b!=null)t.f.begin=b;const e=g('tl-end');if(e!=null)t.f.end=e;
+  const m=g('tl-miles');if(m!=null)t.f.miles=m;const h=g('tl-hrs');if(h!=null)t.f.hours=h;
 }
+function tlOdo(){const el=document.getElementById('tl-odo');if(!el)return;const b=tlNum((document.getElementById('tl-begin')||{}).value),e=tlNum((document.getElementById('tl-end')||{}).value);el.textContent=(e>b)?('= '+(Math.round((e-b)*10)/10)+' miles'):'';}
 function tlFormHtml(f,inp,lbl){
   const days=wd(S.currentWeek);const pk='min-height:48px;justify-content:flex-start;text-align:left;font-size:15px';
   let h='<div style="border:1.5px solid var(--border);border-radius:14px;padding:12px;margin-bottom:12px">';
@@ -2182,9 +2217,16 @@ function tlFormHtml(f,inp,lbl){
   h+='<span style="'+lbl+'">Date</span><select id="tl-date" style="'+inp+'">'+days.map(function(d,i){return '<option value="'+d+'"'+(d===f.date?' selected':'')+'>'+DAYS[i]+' '+fs(d)+'</option>';}).join('')+'</select>';
   h+='<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px"><div><span style="'+lbl+'">From</span><button class="btn btn-bl" style="'+pk+'" onclick="tlPickJob(\'from\')">'+(f.from?wdEsc(tlLabel(f.from)):'Pick')+'</button></div>'+
      '<div><span style="'+lbl+'">To</span><button class="btn btn-bl" style="'+pk+'" onclick="tlPickJob(\'to\')">'+(f.to?wdEsc(tlLabel(f.to)):'Pick')+'</button></div></div>';
-  h+='<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px"><div><span style="'+lbl+'">Beginning miles</span><input id="tl-begin" inputmode="decimal" style="'+inp+'" value="'+wdEsc(f.begin)+'"/></div>'+
-     '<div><span style="'+lbl+'">Ending miles</span><input id="tl-end" inputmode="decimal" style="'+inp+'" value="'+wdEsc(f.end)+'"/></div>'+
-     '<div><span style="'+lbl+'">Hours</span><input id="tl-hrs" inputmode="decimal" style="'+inp+'" value="'+wdEsc(f.hours)+'"/></div></div>';
+  if(f.manual){
+    h+='<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px"><div><span style="'+lbl+'">Beginning odometer</span><input id="tl-begin" inputmode="decimal" style="'+inp+'" value="'+wdEsc(f.begin)+'" oninput="tlOdo()"/></div>'+
+       '<div><span style="'+lbl+'">Ending odometer</span><input id="tl-end" inputmode="decimal" style="'+inp+'" value="'+wdEsc(f.end)+'" oninput="tlOdo()"/></div>'+
+       '<div><span style="'+lbl+'">Hours</span><input id="tl-hrs" inputmode="decimal" style="'+inp+'" value="'+wdEsc(f.hours)+'"/></div></div>'+
+       '<div id="tl-odo" style="font-size:13.5px;font-weight:700;margin-top:6px;min-height:18px">'+((tlNum(f.end)>tlNum(f.begin))?('= '+(Math.round((tlNum(f.end)-tlNum(f.begin))*10)/10)+' miles'):'')+'</div>';
+  }else{
+    h+='<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px"><div><span style="'+lbl+'">Miles</span><input id="tl-miles" inputmode="decimal" style="'+inp+'" value="'+wdEsc(f.miles)+'" oninput="window.__tl.f.milesTouched=true"/></div>'+
+       '<div><span style="'+lbl+'">Hours</span><input id="tl-hrs" inputmode="decimal" style="'+inp+'" value="'+wdEsc(f.hours)+'"/></div></div>'+
+       (f.milesNote?'<div style="font-size:12.5px;color:var(--text2);margin-top:6px">'+wdEsc(f.milesNote)+'</div>':'');
+  }
   h+='<span style="'+lbl+'">What you hauled</span><div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">'+TL_SHORT.map(function(s,i){return '<button class="btn'+(f.svc===i+1?' btn-p':'')+'" style="min-height:46px;justify-content:center;font-size:14px" onclick="tlSvc('+(i+1)+')">'+s+'</button>';}).join('')+'</div>';
   h+='<div id="tl-err" style="color:#dc2626;font-size:13.5px;min-height:20px;margin-top:8px"></div>';
   h+='<div style="display:flex;gap:8px"><button class="btn btn-p" style="flex:1;min-height:52px;justify-content:center;font-size:16px" onclick="tlSave()"><i class="ti ti-check"></i> Save trip</button>'+(f.id?'<button class="btn" style="color:#dc2626" onclick="tlDelete()"><i class="ti ti-trash"></i></button>':'')+'<button class="btn" onclick="tlCancel()">Cancel</button></div></div>';
@@ -2195,9 +2237,9 @@ function tlDraw(){
   const inp='width:100%;font-size:17px;padding:12px;border-radius:10px;border:1px solid var(--border);background:var(--bg);color:inherit;box-sizing:border-box';
   const lbl='font-size:12px;font-weight:600;color:var(--text2);display:block;margin:10px 0 5px';
   const big='width:100%;min-height:58px;font-size:17px;justify-content:center';
-  const trips=tlSorted();let th=0,tm=0;trips.forEach(function(x){th+=(+x.hours||0);if(+x.end>+x.begin)tm+=(+x.end)-(+x.begin);});
+  const trips=tlSorted();let th=0,tm=0;trips.forEach(function(x){th+=(+x.hours||0);tm+=tlMiles(x);});
   let h='<div style="display:grid;grid-template-columns:1fr 1.4fr;gap:10px;margin-bottom:14px"><div><span style="'+lbl+';margin-top:0">Truck #</span><input id="tl-truck" style="'+inp+'" value="'+wdEsc(mem.truck||'')+'" onchange="tlTruck(this.value)"/></div>'+
-    '<div style="background:var(--bg2);border-radius:12px;padding:10px 12px"><div style="font-size:12px;color:var(--text2)">This week</div><div style="font-size:18px;font-weight:700">'+(Math.round(th*100)/100)+' h \u00b7 '+Math.round(tm)+' mi</div></div></div>';
+    '<div style="background:var(--bg2);border-radius:12px;padding:10px 12px"><div style="font-size:12px;color:var(--text2)">This week</div><div style="font-size:18px;font-weight:700">'+(Math.round(th*100)/100)+' h \u00b7 '+(Math.round(tm*10)/10)+' mi</div></div></div>';
   if(!can){h+='<div class="ib"><i class="ti ti-lock"></i><span>This week has been turned in, so its trip log can no longer be changed.</span></div>';}
   else if(t.stage==='form'&&t.f){h+=tlFormHtml(t.f,inp,lbl);}
   else if(mem.open){
@@ -2208,16 +2250,16 @@ function tlDraw(){
       '<button class="btn btn-p" style="'+big+'" onclick="tlArrive()"><i class="ti ti-flag"></i> Arrived</button>'+
       '<div style="display:flex;gap:8px;margin-top:8px"><button class="btn btn-sm" onclick="tlPickJob(\'openfrom\')">Change where it started</button><button class="btn btn-sm" style="color:#dc2626;margin-left:auto" onclick="tlDiscardOpen()">Discard trip</button></div></div>';
   }else{
-    h+='<button class="btn btn-p" style="'+big+'" onclick="tlStart()"><i class="ti ti-player-play"></i> Start trip</button><div style="font-size:12.5px;color:var(--text2);margin:6px 0 10px">Tap when you pull out. The app reads where you are and fills in the job.</div>'+
-       '<button class="btn btn-bl" style="min-height:48px;justify-content:center" onclick="tlManual()"><i class="ti ti-plus"></i> Add a trip by hand</button>';
+    h+='<button class="btn btn-p" style="'+big+'" onclick="tlStart()"><i class="ti ti-player-play"></i> Start trip</button><div style="font-size:12.5px;color:var(--text2);margin:6px 0 10px">Tap when you pull out, and Arrived when you get there. The app works out the road miles.</div>'+
+       '<button class="btn btn-bl" style="min-height:48px;justify-content:center" onclick="tlManual()"><i class="ti ti-plus"></i> Add a trip by hand (odometer)</button>';
   }
   h+='<div style="font-size:13px;font-weight:700;color:var(--text2);margin:18px 0 4px">Trips this week</div>';
   if(!trips.length)h+='<div style="color:var(--text2);font-size:13.5px;padding:10px 0">No trips yet.</div>';
   const days=wd(S.currentWeek);
   trips.slice().reverse().forEach(function(x){
-    const mi=(+x.end>+x.begin)?Math.round(((+x.end)-(+x.begin))*10)/10:0;const di=days.indexOf(x.date);
-    h+='<div '+(can?'onclick="tlEdit(\''+x.id+'\')" ':'')+'style="padding:10px 0;border-top:1px solid var(--border);'+(can?'cursor:pointer':'')+'"><div style="display:flex;gap:8px;font-size:15px"><span style="flex:1;font-weight:700">'+wdEsc(x.from)+' <i class="ti ti-arrow-right" style="font-size:14px"></i> '+wdEsc(x.to)+'</span><span>'+(+x.hours||0)+' h</span></div>'+
-       '<div style="font-size:12.5px;color:var(--text2)">'+(di>=0?DAYS[di]+' ':'')+fs(x.date)+' \u00b7 '+mi+' mi \u00b7 '+(TL_SHORT[(x.svc||0)-1]||'')+(x.truck?' \u00b7 truck '+wdEsc(x.truck):'')+'</div></div>';
+    const mi=tlMiles(x);const di=days.indexOf(x.date);
+    h+='<div '+(can?'onclick="tlEdit(\''+x.id+'\')" ':'')+'style="padding:10px 0;border-top:1px solid var(--border);'+(can?'cursor:pointer':'')+'"><div style="display:flex;gap:8px;font-size:15px"><span style="flex:1;font-weight:700">'+wdEsc(x.from)+' <i class="ti ti-arrow-right" style="font-size:14px"></i> '+wdEsc(x.to)+'</span><span>'+mi+' mi</span></div>'+
+       '<div style="font-size:12.5px;color:var(--text2)">'+(di>=0?DAYS[di]+' ':'')+fs(x.date)+' \u00b7 '+(+x.hours||0)+' h \u00b7 '+(TL_SHORT[(x.svc||0)-1]||'')+' \u00b7 '+wdEsc(tlHow(x).toLowerCase())+(x.truck?' \u00b7 truck '+wdEsc(x.truck):'')+'</div></div>';
   });
   h+='<div style="font-size:12.5px;color:var(--text2);margin-top:16px">Your trip log is turned in with your timesheet when you submit the week.</div>';
   tlPanel(h);
@@ -2228,7 +2270,7 @@ async function tlStart(){
   toast('Finding where you are\u2026','');
   const pos=await tlGps();if(!window.__tl)return;
   const near=tlNear(pos);
-  const begin=function(job,hint){const m=tlMem();m.open={from:job,startedAt:new Date().toISOString(),hint:hint||''};tlMemSave(m);tlDraw();};
+  const begin=function(job,hint){const m=tlMem();m.open={from:job,startedAt:new Date().toISOString(),hint:hint||'',pt:tlPt(job,pos)};tlMemSave(m);tlDraw();};
   if(near.length===1){begin(near[0].job,'found by your location');toast('Trip started from '+near[0].label+'.','success');return;}
   tlPickJob('start',near,pos,function(job){begin(job,'');});
 }
@@ -2240,33 +2282,47 @@ async function tlArrive(){
   const st=new Date(mem.open.startedAt);const hrs=Math.max(0.25,Math.round(((Date.now()-st.getTime())/3600000)*4)/4);
   const iso=new Date(st.getTime()-st.getTimezoneOffset()*60000).toISOString().slice(0,10);
   const days=wd(S.currentWeek);
-  const f={date:days.indexOf(iso)>=0?iso:days[days.length-1],from:mem.open.from,to:'',begin:tlLastEnd()||'',end:'',hours:hrs>16?'':hrs,svc:0,manual:false,fromOpen:true,hint:''};
-  const go=function(){t.stage='form';t.f=f;tlDraw();};
+  const f={date:days.indexOf(iso)>=0?iso:days[days.length-1],from:mem.open.from,to:'',miles:'',milesSrc:'',milesNote:'',milesTouched:false,hours:hrs>16?'':hrs,svc:0,manual:false,fromOpen:true,hint:'',
+    fromPt:mem.open.pt||null,toPt:(pos&&pos.acc<=1500)?{lat:pos.lat,lng:pos.lng}:null};
+  const go=function(){t.stage='form';t.f=f;tlDraw();tlCalc();};
   if(near.length===1){f.to=near[0].job;f.hint='Arrived at '+near[0].label+', found by your location';go();return;}
   tlPickJob('arrive',near,pos,function(job){f.to=job;go();});
 }
-function tlManual(){const t=window.__tl;const days=wd(S.currentWeek);const td=wdToday();t.stage='form';t.f={date:days.indexOf(td)>=0?td:days[days.length-1],from:'',to:'',begin:tlLastEnd()||'',end:'',hours:'',svc:0,manual:true};tlDraw();}
-function tlEdit(id){const t=window.__tl;const x=tlTrips().find(function(y){return y.id===id;});if(!t||!x||!tlEditable())return;t.stage='form';t.f={id:x.id,date:x.date,from:x.from,to:x.to,begin:x.begin,end:x.end,hours:x.hours,svc:x.svc,manual:true};tlDraw();}
+function tlLastOdo(){let m=+tlMem().lastEnd||0;tlTrips().forEach(function(x){if(+x.end>m)m=+x.end;});return m;}
+function tlManual(){const t=window.__tl;const days=wd(S.currentWeek);const td=wdToday();t.stage='form';t.f={date:days.indexOf(td)>=0?td:days[days.length-1],from:'',to:'',begin:tlLastOdo()||'',end:'',hours:'',svc:0,manual:true};tlDraw();}
+function tlEdit(id){
+  const t=window.__tl;const x=tlTrips().find(function(y){return y.id===id;});if(!t||!x||!tlEditable())return;t.stage='form';
+  if(x.manual&&+x.end>0)t.f={id:x.id,date:x.date,from:x.from,to:x.to,begin:x.begin,end:x.end,hours:x.hours,svc:x.svc,manual:true};
+  else t.f={id:x.id,date:x.date,from:x.from,to:x.to,miles:tlMiles(x)||'',milesSrc:x.milesSrc||'typed',milesTouched:true,milesNote:'',hours:x.hours,svc:x.svc,manual:false,wasManual:!!x.manual};
+  tlDraw();
+}
 function tlSvc(n){tlRead();window.__tl.f.svc=n;tlDraw();}
 function tlCancel(){const t=window.__tl;t.stage='idle';t.f=null;tlDraw();}
 function tlDiscardOpen(){if(!confirm('Discard this unfinished trip?'))return;const m=tlMem();delete m.open;tlMemSave(m);tlDraw();}
 function tlDelete(){const t=window.__tl;if(!t.f||!t.f.id||!confirm('Delete this trip?'))return;const wk=tlWk();wk.trips=tlTrips().filter(function(x){return x.id!==t.f.id;});saveDraftSilent();t.stage='idle';t.f=null;tlDraw();}
 function tlSave(){
   tlRead();const t=window.__tl,f=t.f;const err=function(m){const e=document.getElementById('tl-err');if(e)e.textContent=m;};
-  const b=tlNum(f.begin),e=tlNum(f.end),h=tlNum(f.hours);
+  const h=tlNum(f.hours);let miles=0,src='typed',b=null,e=null;
   if(!f.from||!f.to){err('Pick where the trip started and where it ended.');return;}
-  if(!(b>=0)){err('Enter the beginning miles.');return;}
-  if(!(e>b)){err('Ending miles must be more than the beginning miles.');return;}
+  if(f.manual){
+    b=tlNum(f.begin);e=tlNum(f.end);
+    if(!(b>=0)){err('Enter the beginning odometer reading.');return;}
+    if(!(e>b)){err('The ending odometer must be more than the beginning.');return;}
+    miles=Math.round((e-b)*10)/10;src='odometer';
+  }else{
+    miles=tlNum(f.miles);if(!(miles>0)){err('Enter the miles.');return;}
+    miles=Math.round(miles*10)/10;src=f.milesTouched?'typed':(f.milesSrc||'typed');
+  }
   if(!(h>0)){err('Enter the hours.');return;}
   if(!f.svc){err('Pick what you hauled.');return;}
-  if(e-b>600&&!confirm('That is '+Math.round(e-b)+' miles for one trip. Is that right?'))return;
+  if(miles>600&&!confirm('That is '+Math.round(miles)+' miles for one trip. Is that right?'))return;
   const mem=tlMem();
-  const rec={id:f.id||wdId(),date:f.date,truck:String(mem.truck||''),from:f.from,to:f.to,begin:b,end:e,hours:h,svc:f.svc,manual:!!f.manual,at:new Date().toISOString()};
+  const rec={id:f.id||wdId(),date:f.date,truck:String(mem.truck||''),from:f.from,to:f.to,miles:miles,milesSrc:src,hours:h,svc:f.svc,manual:!!(f.manual||f.wasManual),at:new Date().toISOString()};
+  if(f.manual){rec.begin=b;rec.end=e;mem.lastEnd=Math.max(+mem.lastEnd||0,e);}
   const wk=tlWk();const list=tlTrips().filter(function(x){return x.id!==rec.id;});list.push(rec);wk.trips=list;
   if(f.fromOpen)delete mem.open;
-  mem.lastEnd=Math.max(+mem.lastEnd||0,e);
   mem.recent=[f.to,f.from].concat(mem.recent||[]).filter(function(x,i,a){return x&&a.indexOf(x)===i&&!(mem.home&&mem.home.code===x);}).slice(0,8);
-  tlMemSave(mem);saveDraftSilent();t.stage='idle';t.f=null;tlDraw();toast('Trip saved.','success');
+  tlMemSave(mem);saveDraftSilent();t.stage='idle';t.f=null;tlDraw();toast('Trip saved: '+miles+' miles.','success');
 }
 // Pick a job by hand: nearby jobs first, then a box to type any number (T&M), Home, then the list.
 function tlPickJob(mode,near,pos,cb){
@@ -2299,8 +2355,8 @@ function tlPicked(job){
       tlSaveLoc(job,p.pos.lat,p.pos.lng).then(function(ok){toast(ok?('Location saved for '+job+'.'):'Could not save the location. Try again with signal.',ok?'success':'error');});}
   }
   if(p.cb){p.cb(job);return;}
-  if(p.mode==='openfrom'){const m=tlMem();if(m.open){m.open.from=job;m.open.hint='';tlMemSave(m);}tlDraw();return;}
-  if(t.f){if(p.mode==='from')t.f.from=job;else t.f.to=job;}
+  if(p.mode==='openfrom'){const m=tlMem();if(m.open){m.open.from=job;m.open.hint='';m.open.pt=tlPt(job);tlMemSave(m);}tlDraw();return;}
+  if(t.f){if(p.mode==='from'){t.f.from=job;t.f.fromPt=null;}else{t.f.to=job;t.f.toPt=null;}if(!t.f.manual)t.f.milesTouched=false;tlDraw();tlCalc();return;}
   tlDraw();
 }
 async function tlSetHome(){
@@ -3850,14 +3906,14 @@ async function tsfBuild(X,wk,iso,who,statusLine){
   // ---- the driver trip log, laid out like the paper form
   if(Array.isArray(wk.trips)&&wk.trips.length){
     const wt=wb.addWorksheet('Trip Log',{views:[{showGridLines:false}],pageSetup:{orientation:'landscape',fitToPage:true,fitToWidth:1,fitToHeight:0}});
-    [13,12,14,14,14,14,9,40].forEach(function(w,i){wt.getColumn(i+1).width=w;});
+    [13,13,16,16,10,9,40,30].forEach(function(w,i){wt.getColumn(i+1).width=w;});
     banner(wt,8,'Driver trip log \u00b7 '+who+' \u00b7 week ending '+fs(dates[dates.length-1])+'/'+String(iso).slice(0,4));
-    head(wt,4,['Date','Truck Number','Beginning Miles','Ending Miles','Job # From','Job # To','Hours','Transportation Services Provided']);
+    head(wt,4,['Date','Truck Number','Job # From','Job # To','Miles','Hours','Transportation Services Provided','How Miles Were Figured']);
     const tr=wk.trips.slice().sort(function(a,b){return String(a.date).localeCompare(String(b.date))||((+a.begin||0)-(+b.begin||0));});
     let hh=0,mm=0;
-    tr.forEach(function(x,i){hh+=(+x.hours||0);mm+=Math.max(0,(+x.end||0)-(+x.begin||0));
-      body(wt,5+i,[x.date,String(x.truck||''),+x.begin,+x.end,String(x.from||''),String(x.to||''),+x.hours,(x.svc?x.svc+'. '+(TL_SVC[x.svc-1]||''):'')],{band:i%2===1});});
-    body(wt,5+tr.length,['Total','','','','','',hh,(Math.round(mm*10)/10)+' miles driven'],{bold:true,top:true});
+    tr.forEach(function(x,i){const mi=tlMiles(x);hh+=(+x.hours||0);mm+=mi;
+      body(wt,5+i,[x.date,String(x.truck||''),String(x.from||''),String(x.to||''),mi,+x.hours,(x.svc?x.svc+'. '+(TL_SVC[x.svc-1]||''):''),tlHow(x)],{band:i%2===1});});
+    body(wt,5+tr.length,['Total','','','',Math.round(mm*10)/10,hh,'',''],{bold:true,top:true});
   }
   wb.eachSheet(function(w){w.eachRow(function(row){row.eachCell(function(c){c.font=Object.assign({name:'Calibri'},c.font||{});});});});
   return wb;
