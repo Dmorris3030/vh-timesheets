@@ -648,7 +648,7 @@ async function initApp(){
   }catch(e){console.warn(e);}
   initWeeks();updUC();updNav();render();updBadge();
 }
-const VH_BUILD='2026-11-23.29-test';
+const VH_BUILD='2026-11-23.30-test';
 console.log('[VH] Timesheets build',VH_BUILD);
 let __vhAuthToastAt=0;
 // interactive=true only from a user-initiated action: saves drafts, then allows the MSAL
@@ -2447,7 +2447,7 @@ function upAdd(){
 }
 function upDraw(){
   const u=window.__up;if(!u)return;
-  const RS=['Weather','Waiting on material','Unloading materials','Locates or inspection','Equipment down','Rock','Dewatering','Bench walls','Collars','Moving or setup','Other'];
+  const RS=['Weather','Waiting on material','Unloading materials','Locates or inspection','Equipment down','Dewatering','Bench walls','Collars','Moving or setup','Other'];
   const inp='width:100%;font-size:17px;padding:12px;border-radius:10px;border:1px solid var(--border);background:var(--bg);color:inherit;box-sizing:border-box';
   const lbl='font-size:12.5px;color:var(--text2);display:block;margin:12px 0 5px';
   const name=u.ph==='400'?'Storm':'Sanitary';const di=wd(S.currentWeek).indexOf(u.dt);
@@ -2477,7 +2477,7 @@ function upDraw(){
        '<div style="font-size:14px;font-weight:700;margin-top:8px;color:'+(ok?'#15803d':(over?'#b91c1c':'inherit'))+'">'+(!crew?'No time on your timesheet yet for '+name.toLowerCase()+' on job '+esc1(u.job)+' this day. Crew hours come from the timesheet.':(ok?'The day adds up.':(over?(-left)+' h more than the crew worked. Check the numbers.':(d.tasks.length?left+' h not accounted for yet.':'Crew hours come from your timesheet.'))))+'</div>'+
        ((left>0.01&&d.tasks.length)?'<button class="btn btn-sm" style="margin-top:8px" onclick="upFill('+left+')">Put the '+left+' h under non-production</button>':'')+'</div>';
     if(np>0)h+='<div style="font-size:12.5px;color:var(--text2);margin:10px 0 5px">Why was time lost? (tap one)</div><div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">'+RS.map(function(x){return '<button class="btn'+(d.why===x?' btn-p':'')+'" style="min-height:44px;justify-content:center;font-size:13.5px" onclick="upWhy(\''+x+'\')">'+x+'</button>';}).join('')+'</div>';
-    h+='<span style="'+lbl+'">Notes (rock, water, delays)</span><input style="'+inp+'" value="'+esc1(d.note||'')+'" onchange="upNote(this.value)"/>';
+    h+='<span style="'+lbl+'">Notes (water, delays, anything the office should know)</span><input style="'+inp+'" value="'+esc1(d.note||'')+'" onchange="upNote(this.value)"/>';
     h+='<div class="ib" style="margin-top:14px"><i class="ti ti-flask"></i><span>Test form. What you enter here is saved on this device only and is not sent to the tracker yet.</span></div>';
   }else if(u.view==='run'){
     back='day';title='Pick the run';
