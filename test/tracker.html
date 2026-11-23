@@ -139,7 +139,7 @@ const FALLBACK_ADMINS=['dmorris@valentiheld.com','abewley@valentiheld.com','jroe
 const SCOPE_LIST_NAME='JobScope';
 const STATUS_LIST_NAME='TrackerStatus';
 const PHASE_LABELS={'300':'Earth — Mass','310':'Earth — Finish','400':'Storm','450':'Storm — Other','500':'Sanitary','600':'Water'};
-const VH_TRK_BUILD='2026-11-20.30';
+const VH_TRK_BUILD='2026-11-23.31';
 const VH_BG=/[?&]autosave=1/.test(location.search); // loaded hidden by the time app, only to refresh the Excel trackers
 console.log('[VH] Job Trackers build',VH_TRK_BUILD);
 
@@ -1261,7 +1261,7 @@ function pkParseEarth(wb){
   const rs=sheet(/rate\s*sheet/i);
   if(rs){const rates={};const norm=x=>String(x||'').toUpperCase().replace(/\s+/g,' ').trim();
     const all=EW_MACH.concat(EW_LAB);
-    rs.forEach(r=>{if(!r)return;const n=norm(r[0]),v=pkNum(r[1]);if(!n||!(v>0))return;const hit=all.find(c=>norm(c)===n);if(hit)rates[hit]=Math.round(v*100)/100;});
+    rs.forEach(r=>{if(!r)return;let n=norm(r[0]);const v=pkNum(r[1]);if(!n||!(v>0))return;if(/^(TRACTOR\s*(&|AND|-|\/)\s*PAN|P\s*PAN|PULL\s*PAN)S?$/.test(n))n='TRACTOR AND PAN';const hit=all.find(c=>norm(c)===n);if(hit)rates[hit]=Math.round(v*100)/100;});
     if(Object.keys(rates).length)out.rates=rates;}
   return out;
 }
@@ -1321,7 +1321,7 @@ async function pkWrite(tok,j,parsed){
   // earthwork setup: fill it in from the packet only if nobody has set this job up by hand
   try{
     const e=parsed.earth||{};
-    if(e.bidCY||e.bidSY){
+    if(e.bidCY||e.bidSY||e.rates){
       const H={Authorization:'Bearer '+tok};let etag=null,cur={rates:{},eqMap:{},jobs:{}};
       const mr=await fetch(ewUrl(),{headers:H});
       if(mr.status!==404&&mr.ok){etag=(await mr.json()).eTag;const cr=await fetch(ewUrl()+':/content',{headers:H});if(cr.ok){const d=await cr.json();if(d&&typeof d==='object')cur=Object.assign(cur,d);}}
@@ -1419,21 +1419,49 @@ function pkAttn(){if(!S.pk)return;S.pk.attention=(S.pk.jobs||[]).filter(function
 async function pkCheckLoad(tok){
   try{const r=await fetch(pkUrl(PK_CHECK)+':/content',{headers:{Authorization:'Bearer '+tok}});if(r.ok){const d=await r.json();if(d&&d.jobs)S.pkCheck=d;}}catch(e){}
 }
+// Keep each job's rates in step with its own packet. Runs with the weekly bid pack check.
+//  - a job loaded from its packet: its rates follow the packet
+//  - a job set up by hand: only rates that are missing are filled in, nothing typed is changed
+//  - a job with no earthwork setup yet: gets one, so it stops using another job's rates
+async function ewRatesApply(tok,up){
+  const jobs=Object.keys(up);if(!jobs.length)return 0;
+  for(let a=0;a<3;a++){
+    const H={Authorization:'Bearer '+tok};let etag=null,cur={rates:{},eqMap:{},jobs:{}};
+    const mr=await fetch(ewUrl(),{headers:H});
+    if(mr.status!==404&&mr.ok){etag=(await mr.json()).eTag;const cr=await fetch(ewUrl()+':/content',{headers:H});if(cr.ok){const d=await cr.json();if(d&&typeof d==='object')cur=Object.assign(cur,d);}}
+    cur.jobs=cur.jobs||{};let n=0;
+    jobs.forEach(function(job){
+      const e=up[job].e,pr=e.rates||{};const c=cur.jobs[job];
+      if(!c){cur.jobs[job]={name:up[job].name,bidCY:e.bidCY||0,bidCost:e.bidCost||0,bidSY:e.bidSY||0,bidCostFG:e.bidCostFG||0,rates:Object.assign({},pr),fromPacket:true};n++;return;}
+      c.rates=c.rates||{};
+      Object.keys(pr).forEach(function(k){if(c.fromPacket?(c.rates[k]!==pr[k]):(c.rates[k]==null)){c.rates[k]=pr[k];n++;}});
+    });
+    if(!n)return 0;
+    const PH={Authorization:'Bearer '+tok,'Content-Type':'application/json'};if(etag)PH['If-Match']=etag;
+    const p2=await fetch(ewUrl()+':/content',{method:'PUT',headers:PH,body:JSON.stringify(cur)});
+    if(p2.status===412)continue;
+    if(p2.ok){if(S.earth)S.earth.setup=cur;return n;}
+    return 0;
+  }
+  return 0;
+}
 async function pkVerify(manual){
   if(!auth.isAdmin||S.pkChecking||!S.pk||!S.pk.jobs)return;
   S.pkChecking=true;if(manual)toast('Checking every field packet against the tracker. This takes a minute.');
   try{
     const tok=await getToken(manual);if(!tok)return;
-    const out={at:new Date().toISOString(),by:(auth.user&&auth.user.name)||'',jobs:{}};
+    const out={at:new Date().toISOString(),by:(auth.user&&auth.user.name)||'',jobs:{}};const rateUp={};
     for(const j of S.pk.jobs){
       if(!j.file)continue;
       try{
         const parsed=await pkLoadPacket(tok,j);
+        if(parsed.earth&&parsed.earth.rates)rateUp[j.job]={name:j.name,e:parsed.earth};
         if(!parsed.rows.length){out.jobs[j.job]={name:j.name,file:j.file.name,err:'No takeoff rows the tracker can read'};continue;}
         const groups=pkCompare(j.job,parsed);
         out.jobs[j.job]={name:j.name,file:j.file.name,modified:j.file.modified,groups:groups,diff:groups.reduce(function(a,x){return a+x.diff;},0)};
       }catch(e){out.jobs[j.job]={name:j.name,file:j.file.name,err:e.message};}
     }
+    try{out.ratesUpdated=await ewRatesApply(tok,rateUp);}catch(e){console.warn('rates refresh',e);}
     await fetch(pkUrl(PK_CHECK)+':/content',{method:'PUT',headers:{Authorization:'Bearer '+tok,'Content-Type':'application/json'},body:JSON.stringify(out)});
     S.pkCheck=out;pkAttn();
     if(manual)toast('Bid pack check finished: '+pkCheckBad()+' job(s) with differences');
