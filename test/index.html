@@ -648,7 +648,7 @@ async function initApp(){
   }catch(e){console.warn(e);}
   initWeeks();updUC();updNav();render();updBadge();
 }
-const VH_BUILD='2026-11-23.37';
+const VH_BUILD='2026-11-24.38';
 console.log('[VH] Timesheets build',VH_BUILD);
 let __vhAuthToastAt=0;
 // interactive=true only from a user-initiated action: saves drafts, then allows the MSAL
@@ -1203,7 +1203,7 @@ function tkOpen(dt,ph,job){
        '<input type="file" accept="image/*" capture="environment" style="display:none" onchange="tkPhoto(this)"/>'+
        '<div id="tk-prev"><i class="ti ti-camera" style="font-size:34px;color:var(--accent)"></i><div style="font-size:15px;font-weight:600;margin-top:6px">Take photo of the ticket</div><div style="font-size:12.5px;color:var(--text2)">Fill the frame and keep it flat so the numbers are readable</div></div></label>'+
      '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">'+
-       '<div><span style="'+lbl+'">Job #</span><input id="tk-job" inputmode="text" style="'+inp+'" value="'+String(job||mem.lastJob||'').replace(/"/g,'&quot;')+'" oninput="tkSupFill()"/></div>'+
+       '<div><span style="'+lbl+'">Job #</span><input id="tk-job" inputmode="text" style="'+inp+'" value="'+String(job||mem.lastJob||'').replace(/"/g,'&quot;')+'"/></div>'+
        '<div><span style="'+lbl+'">Phase</span><select id="tk-phase" style="'+inp+'">'+phs.map(function(p){return '<option value="'+p+'"'+(p===ph?' selected':'')+'>'+(p||'--')+'</option>';}).join('')+'</select></div>'+
        '<div><span style="'+lbl+'">Date</span><input id="tk-date" type="date" style="'+inp+'" value="'+iso+'"/></div></div>'+
      '<span style="'+lbl+'">Type</span><div id="tk-kinds" style="display:flex;gap:8px"></div>'+
@@ -1213,17 +1213,10 @@ function tkOpen(dt,ph,job){
      '<div style="display:grid;grid-template-columns:2fr 1fr;gap:10px">'+
        '<div><span style="'+lbl+'">Quantity</span><input id="tk-qty" type="text" inputmode="decimal" placeholder="e.g. 22.45" style="'+inp+'"/></div>'+
        '<div><span style="'+lbl+'">Unit</span><select id="tk-unit" style="'+inp+'"></select></div></div>'+
-     '<span style="'+lbl+'">Supplier</span><input id="tk-sup" autocomplete="off" style="'+inp+'" oninput="tkSupFill()"/>'+
-     '<div id="tk-chips" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px"></div>'+
-     '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">'+
-       '<div><span style="'+lbl+'">Ticket #</span><input id="tk-tno" autocomplete="off" autocapitalize="characters" style="'+inp+'"/></div>'+
-       '<div><span style="'+lbl+'">PO #</span><input id="tk-po" autocomplete="off" autocapitalize="characters" style="'+inp+'"/></div></div>'+
      '<span style="'+lbl+'">Notes (optional)</span><input id="tk-notes" style="'+inp+'" placeholder="Short load, rejected, where it was placed..."/>'+
    '</div></div>';
   document.body.appendChild(el);
   tkKind('Stone');
-  const chips=document.getElementById('tk-chips');
-  (mem.sup||[]).slice(0,6).forEach(function(sn){const b=document.createElement('button');b.className='btn btn-sm';b.textContent=sn;b.onclick=function(){document.getElementById('tk-sup').value=sn;tkSupFill();};chips.appendChild(b);});
 }
 function tkKind(k){
   window.__tk.kind=k;
@@ -1232,12 +1225,6 @@ function tkKind(k){
   document.getElementById('tk-mat').innerHTML=TK_MATS[k].map(function(m){return '<option>'+m+'</option>';}).join('');
   document.getElementById('tk-unit').innerHTML=TK_UNITS[k].map(function(u){return '<option>'+u+'</option>';}).join('');
   document.getElementById('tk-size').disabled=(k==='Stone');
-}
-// Remembered PO for this job + supplier, so it is typed once per job
-function tkSupFill(){
-  const mem=tkMem();const job=document.getElementById('tk-job').value.trim();const sup=document.getElementById('tk-sup').value.trim().toUpperCase();
-  const po=(mem.po||{})[job+'|'+sup];const f=document.getElementById('tk-po');
-  if(po&&!f.value)f.value=po;
 }
 function tkPhoto(inp){
   const f=inp.files&&inp.files[0];if(!f)return;
@@ -1259,34 +1246,29 @@ async function tkSave(){
   if(!st.img)miss.push('photo');
   if(!v('tk-job'))miss.push('job #');
   if(!(qty>0))miss.push('quantity');
-  if(!v('tk-sup'))miss.push('supplier');
-  if(!v('tk-tno'))miss.push('ticket #');
-  if(!v('tk-po'))miss.push('PO #');
   if(miss.length){toast('Still needed: '+miss.join(', ')+'.','error');return;}
   const meta={date:v('tk-date'),job:v('tk-job'),phase:v('tk-phase'),kind:st.kind,material:v('tk-mat'),size:st.kind==='Stone'?'':v('tk-size'),
-    qty:qty,unit:v('tk-unit'),supplier:v('tk-sup'),ticket:v('tk-tno'),po:v('tk-po'),notes:v('tk-notes'),
+    qty:qty,unit:v('tk-unit'),notes:v('tk-notes'),
     by:(auth.user&&auth.user.name)||'',byEmail:(auth.user&&auth.user.email)||'',at:new Date().toISOString()};
   const id=Date.now()+'-'+Math.random().toString(36).slice(2,8);
   document.getElementById('tk-save').disabled=true;
   try{await tkPut({id:id,meta:meta,img:st.img});}
   catch(e){document.getElementById('tk-save').disabled=false;toast('Could not save on this device: '+(e&&e.message||e),'error');return;}
-  const mem=tkMem();mem.lastJob=meta.job;
-  mem.sup=[meta.supplier].concat((mem.sup||[]).filter(function(x){return x.toUpperCase()!==meta.supplier.toUpperCase();})).slice(0,12);
-  mem.po=mem.po||{};mem.po[meta.job+'|'+meta.supplier.toUpperCase()]=meta.po;tkMemSave(mem);
+  const mem=tkMem();mem.lastJob=meta.job;tkMemSave(mem);
   tkClose();
   toast(navigator.onLine?'Ticket saved. Sending...':'Ticket saved on this iPad. It will send when you have signal.','success');
   tkRefreshCount();tkFlush(false);
 }
 // --- send ---
 // ===== TICKETS: A STACK AT ONCE (build .22) ===================================
-// For 30 tickets off one job: enter what is the same on all of them once (job, supplier, PO,
-// material), then add photos and type only the ticket number and quantity for each.
+// For 30 tickets off one job: enter what is the same on all of them once (job and
+// material), then add photos and type only the quantity for each.
 // Every photo is kept on the device as an unfinished stack the moment it is added, so closing
 // the app half way through loses nothing.
 function tkChoose(iso){
   showM('<div class="mh"></div><h2>Material tickets</h2><p>Photos upload straight to the job\'s Tickets folder.</p>'+
     '<button class="btn btn-p btn-bl" style="justify-content:flex-start;gap:14px;min-height:64px;margin-bottom:10px;text-align:left" onclick="closeM();tkOpen(\''+iso+'\',\'\',\'\')"><i class="ti ti-camera" style="font-size:24px"></i><span><strong style="font-size:16px;display:block">One ticket</strong><span style="font-size:12.5px;font-weight:400;opacity:.85">Take the photo and fill it in</span></span></button>'+
-    '<button class="btn btn-bl" style="justify-content:flex-start;gap:14px;min-height:64px;margin-bottom:10px;text-align:left" onclick="closeM();tkbOpen(\''+iso+'\',\'\',\'\')"><i class="ti ti-stack-2" style="font-size:24px"></i><span><strong style="font-size:16px;display:block">A stack of tickets</strong><span style="font-size:12.5px;color:var(--text2);font-weight:400">Same job, supplier and PO. Only the ticket number and quantity change.</span></span></button>'+
+    '<button class="btn btn-bl" style="justify-content:flex-start;gap:14px;min-height:64px;margin-bottom:10px;text-align:left" onclick="closeM();tkbOpen(\''+iso+'\',\'\',\'\')"><i class="ti ti-stack-2" style="font-size:24px"></i><span><strong style="font-size:16px;display:block">A stack of tickets</strong><span style="font-size:12.5px;color:var(--text2);font-weight:400">Same job and material. Only the quantity changes.</span></span></button>'+
     '<div class="mf"><button class="btn btn-bl" onclick="closeM()">Cancel</button></div>','tkch');
 }
 async function tkbOpen(dt,ph,job){
@@ -1309,7 +1291,7 @@ async function tkbOpen(dt,ph,job){
    '<div style="flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:6px 16px 20px;max-width:640px;width:100%;margin:0 auto;box-sizing:border-box">'+
      '<div style="font-size:14px;font-weight:700;margin-top:14px">Same on every ticket</div>'+
      '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">'+
-       '<div><span style="'+lbl+'">Job #</span><input id="tk-job" style="'+inp+'" value="'+q(job||mem.lastJob)+'" oninput="tkSupFill()"/></div>'+
+       '<div><span style="'+lbl+'">Job #</span><input id="tk-job" style="'+inp+'" value="'+q(job||mem.lastJob)+'"/></div>'+
        '<div><span style="'+lbl+'">Phase</span><select id="tk-phase" style="'+inp+'">'+phs.map(function(p){return '<option value="'+p+'"'+(p===ph?' selected':'')+'>'+(p||'--')+'</option>';}).join('')+'</select></div>'+
        '<div><span style="'+lbl+'">Date</span><input id="tk-date" type="date" style="'+inp+'" value="'+iso+'"/></div></div>'+
      '<span style="'+lbl+'">Type</span><div id="tk-kinds" style="display:flex;gap:8px"></div>'+
@@ -1317,10 +1299,6 @@ async function tkbOpen(dt,ph,job){
        '<div><span style="'+lbl+'">Material</span><select id="tk-mat" style="'+inp+'"></select></div>'+
        '<div><span style="'+lbl+'">Size (pipe)</span><input id="tk-size" style="'+inp+'"/></div>'+
        '<div><span style="'+lbl+'">Unit</span><select id="tk-unit" style="'+inp+'"></select></div></div>'+
-     '<div style="display:grid;grid-template-columns:2fr 1fr;gap:10px">'+
-       '<div><span style="'+lbl+'">Supplier</span><input id="tk-sup" autocomplete="off" style="'+inp+'" oninput="tkSupFill()"/></div>'+
-       '<div><span style="'+lbl+'">PO #</span><input id="tk-po" autocomplete="off" autocapitalize="characters" style="'+inp+'"/></div></div>'+
-     '<div id="tk-chips" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px"></div>'+
      '<div style="display:flex;align-items:baseline;gap:10px;margin-top:20px"><span style="font-size:14px;font-weight:700">Tickets</span><span id="tkb-count" style="font-size:12.5px;color:var(--text2)"></span></div>'+
      '<div id="tkb-list"></div>'+
      '<div id="tkb-discard" style="text-align:center;margin-top:14px"></div>'+
@@ -1331,8 +1309,6 @@ async function tkbOpen(dt,ph,job){
    '</div></div>';
   document.body.appendChild(el);
   tkKind('Stone');
-  const chips=document.getElementById('tk-chips');
-  (mem.sup||[]).slice(0,6).forEach(function(sn){const b=document.createElement('button');b.className='btn btn-sm';b.textContent=sn;b.onclick=function(){document.getElementById('tk-sup').value=sn;tkSupFill();};chips.appendChild(b);});
   tkbRender(false);
   if(rows.length)toast('Picked up your unfinished stack: '+rows.length+' photo'+(rows.length>1?'s':'')+'.','success');
 }
@@ -1361,8 +1337,7 @@ function tkbRender(toEnd){
       '<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px"><strong style="font-size:14px;flex:1">Ticket '+(i+1)+'</strong><button class="btn btn-sm" title="Remove" onclick="tkbRemove(\''+r.id+'\')"><i class="ti ti-trash"></i></button></div>'+
       '<img src="'+r.img+'" onclick="this.style.maxHeight=(this.style.maxHeight===\'none\')?\'210px\':\'none\'" style="display:block;width:100%;max-height:210px;object-fit:contain;background:#111;border-radius:10px;cursor:zoom-in"/>'+
       '<div style="font-size:11.5px;color:var(--text2);margin:4px 0 6px">Tap the photo to enlarge it</div>'+
-      '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">'+
-        '<input placeholder="Ticket #" autocomplete="off" autocapitalize="characters" value="'+wdEsc(r.meta.ticket)+'" style="'+inp+'" oninput="tkbSet(\''+r.id+'\',\'ticket\',this.value)" onchange="tkbKeep(\''+r.id+'\')"/>'+
+      '<div>'+
         '<input placeholder="Quantity" inputmode="decimal" value="'+wdEsc(r.meta.qty)+'" style="'+inp+'" oninput="tkbSet(\''+r.id+'\',\'qty\',this.value)" onchange="tkbKeep(\''+r.id+'\')"/>'+
       '</div></div>';}).join('');
   const dz=document.getElementById('tkb-discard');
@@ -1375,7 +1350,7 @@ function tkbSet(id,f,v){const r=tkbRow(id);if(!r)return;r.meta[f]=v;tkbCount();}
 function tkbKeep(id){const r=tkbRow(id);if(r&&r.draft)tkPut(r).catch(function(){});}
 function tkbCount(){
   const t=window.__tk,el=document.getElementById('tkb-count');if(!t||!el)return;
-  const ready=t.rows.filter(function(r){return String(r.meta.ticket||'').trim()&&parseFloat(String(r.meta.qty).replace(/,/g,''))>0;}).length;
+  const ready=t.rows.filter(function(r){return parseFloat(String(r.meta.qty).replace(/,/g,''))>0;}).length;
   el.textContent=t.rows.length?(t.rows.length+' photo'+(t.rows.length>1?'s':'')+' \u00b7 '+ready+' filled in'):'';
 }
 async function tkbRemove(id){
@@ -1393,32 +1368,29 @@ async function tkbSave(){
   const t=window.__tk;if(!t||!t.batch)return;
   const v=function(id){return document.getElementById(id).value.trim();};
   const miss=[];
-  if(!v('tk-job'))miss.push('job #');if(!v('tk-sup'))miss.push('supplier');if(!v('tk-po'))miss.push('PO #');
+  if(!v('tk-job'))miss.push('job #');
   if(!t.rows.length)miss.push('at least one photo');
   if(miss.length){toast('Still needed: '+miss.join(', ')+'.','error');return;}
-  let first=null,nBad=0;const seen={};
+  let first=null,nBad=0;
   t.rows.forEach(function(r){
-    const qty=parseFloat(String(r.meta.qty).replace(/,/g,''));const tn=String(r.meta.ticket||'').trim().toUpperCase();
-    const dup=tn&&seen[tn];if(tn)seen[tn]=1;
-    const ok=tn&&qty>0&&!dup;const box=document.getElementById('tkb-'+r.id);
+    const qty=parseFloat(String(r.meta.qty).replace(/,/g,''));
+    const ok=qty>0;const box=document.getElementById('tkb-'+r.id);
     if(box)box.style.borderColor=ok?'var(--border)':'#dc2626';
     if(!ok){nBad++;if(!first)first=box;}
   });
-  if(nBad){toast(nBad+' ticket'+(nBad>1?'s are':' is')+' missing a number or quantity, or repeats a ticket number. Outlined in red.','error');if(first)first.scrollIntoView({block:'center'});return;}
+  if(nBad){toast(nBad+' ticket'+(nBad>1?'s are':' is')+' missing a quantity. Outlined in red.','error');if(first)first.scrollIntoView({block:'center'});return;}
   const btn=document.getElementById('tkb-save');btn.disabled=true;
   const kind=t.kind;
-  const shared={date:v('tk-date'),job:v('tk-job'),phase:v('tk-phase'),kind:kind,material:v('tk-mat'),size:kind==='Stone'?'':v('tk-size'),unit:v('tk-unit'),supplier:v('tk-sup'),po:v('tk-po'),notes:'',
+  const shared={date:v('tk-date'),job:v('tk-job'),phase:v('tk-phase'),kind:kind,material:v('tk-mat'),size:kind==='Stone'?'':v('tk-size'),unit:v('tk-unit'),notes:'',
     by:(auth.user&&auth.user.name)||'',byEmail:(auth.user&&auth.user.email)||''};
   const n=t.rows.length;
   try{
     for(const r of t.rows){
-      r.meta=Object.assign({},shared,{qty:parseFloat(String(r.meta.qty).replace(/,/g,'')),ticket:String(r.meta.ticket).trim(),at:new Date().toISOString()});
+      r.meta=Object.assign({},shared,{qty:parseFloat(String(r.meta.qty).replace(/,/g,'')),at:new Date().toISOString()});
       delete r.draft;await tkPut(r);
     }
   }catch(e){btn.disabled=false;toast('Could not save on this device: '+((e&&e.message)||e),'error');return;}
-  const mem=tkMem();mem.lastJob=shared.job;
-  mem.sup=[shared.supplier].concat((mem.sup||[]).filter(function(x){return x.toUpperCase()!==shared.supplier.toUpperCase();})).slice(0,12);
-  mem.po=mem.po||{};mem.po[shared.job+'|'+shared.supplier.toUpperCase()]=shared.po;tkMemSave(mem);
+  const mem=tkMem();mem.lastJob=shared.job;tkMemSave(mem);
   tkClose();
   toast(n+' ticket'+(n>1?'s':'')+' saved. '+(navigator.onLine?'Uploading now\u2026':'They will upload when you have signal.'),'success');
   tkRefreshCount();tkFlush(false);
@@ -1447,7 +1419,7 @@ async function tkSend(tok,rec){
   // 1. photo (skipped on retry if it already went up)
   if(!m.url){
     const blob=await (await fetch(rec.img)).blob();
-    const fname=[m.date,tkClean(m.material+(m.size?' '+m.size:'')),tkClean(m.supplier),'T'+tkClean(m.ticket),'PO'+tkClean(m.po)].join('_')+'.jpg';
+    const fname=[m.date,tkClean(m.material+(m.size?' '+m.size:'')),tkClean(String(m.qty==null?'':m.qty)+' '+(m.unit||'')),(m.supplier||m.ticket)?tkClean((m.supplier||'')+' T'+(m.ticket||'')):String(rec.id).replace(/[^A-Za-z0-9]/g,'').slice(-6)].filter(Boolean).join('_')+'.jpg';
     const up=function(){return fetch(tkUrl(dir+'/'+fname)+':/content?@microsoft.graph.conflictBehavior=rename',{method:'PUT',headers:{Authorization:'Bearer '+tok,'Content-Type':'image/jpeg'},body:blob});};
     let r=await up();
     if(r.status===404||r.status===409){await tkEnsureFolder(tok,jobDir,'Tickets');r=await up();}
@@ -1469,7 +1441,7 @@ async function tkSend(tok,rec){
     }
     if(!rows.some(function(x){return x.id===rec.id;})){
       const row=Object.assign({id:rec.id},m);
-      if(rows.some(function(x){return String(x.supplier).toUpperCase()===String(m.supplier).toUpperCase()&&String(x.ticket).toUpperCase()===String(m.ticket).toUpperCase();}))row.dup=true;
+      if(m.ticket&&rows.some(function(x){return String(x.supplier).toUpperCase()===String(m.supplier).toUpperCase()&&String(x.ticket).toUpperCase()===String(m.ticket).toUpperCase();}))row.dup=true;
       rows.push(row);
     }
     const H={Authorization:'Bearer '+tok,'Content-Type':'application/json'};if(etag)H['If-Match']=etag;
@@ -1483,9 +1455,10 @@ async function tkSend(tok,rec){
   //    it is rebuilt from the JSON on the next ticket.
   try{
     const q=function(x){let s=String(x==null?'':x);if(/^[=+\-@]/.test(s))s="'"+s;return '"'+s.replace(/"/g,'""')+'"';};
-    const head=['Date','Job','Phase','Type','Material','Size','Qty','Unit','Supplier','Ticket #','PO #','Entered by','Notes','Photo'];
+    const old3=rows.some(function(x){return x.supplier||x.ticket||x.po;});
+    const head=['Date','Job','Phase','Type','Material','Size','Qty','Unit'].concat(old3?['Supplier','Ticket #','PO #']:[],['Entered by','Notes','Photo']);
     const lines=[head.join(',')].concat(rows.slice().sort(function(a,b){return String(a.date).localeCompare(String(b.date));}).map(function(x){
-      return [q(x.date),q(x.job),q(x.phase),q(x.kind),q(x.material),q(x.size),x.qty,q(x.unit),q(x.supplier),q(x.ticket),q(x.po),q(x.by),q((x.dup?'POSSIBLE DUPLICATE TICKET. ':'')+(x.notes||'')),x.url?'"=HYPERLINK(""'+String(x.url).replace(/"/g,'')+'"",""Open photo"")"':'""'].join(',');
+      return [q(x.date),q(x.job),q(x.phase),q(x.kind),q(x.material),q(x.size),x.qty,q(x.unit)].concat(old3?[q(x.supplier),q(x.ticket),q(x.po)]:[],[q(x.by),q((x.dup?'POSSIBLE DUPLICATE TICKET. ':'')+(x.notes||'')),x.url?'"=HYPERLINK(""'+String(x.url).replace(/"/g,'')+'"",""Open photo"")"':'""']).join(',');
     }));
     await fetch(tkUrl(dir+'/Ticket Log '+job+'.csv')+':/content',{method:'PUT',headers:{Authorization:'Bearer '+tok,'Content-Type':'text/csv'},body:'\ufeff'+lines.join('\r\n')});
   }catch(e){console.warn('ticket csv',e);}
