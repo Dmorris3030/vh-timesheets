@@ -139,7 +139,7 @@ const FALLBACK_ADMINS=['dmorris@valentiheld.com','abewley@valentiheld.com','jroe
 const SCOPE_LIST_NAME='JobScope';
 const STATUS_LIST_NAME='TrackerStatus';
 const PHASE_LABELS={'300':'Earth — Mass','310':'Earth — Finish','400':'Storm','450':'Subsurface drain','500':'Sanitary','600':'Water'};
-const VH_TRK_BUILD='2026-11-25.39';
+const VH_TRK_BUILD='2026-11-25.40';
 const VH_BG=/[?&]autosave=1/.test(location.search); // loaded hidden by the time app, only to refresh the Excel trackers
 console.log('[VH] Job Trackers build',VH_TRK_BUILD);
 
@@ -401,16 +401,16 @@ function effPct(job,r){
 //   by footage : all feet reported for the utility, as a share of its bid feet
 // Taking the higher one (not the sum) means work is never counted twice.
 function phEarn(job,ph,rows){
-  let bid=0,bidP=0,erP=0,erS=0,bidLF=0;const ids={};
+  let bid=0,bidP=0,erP=0,erS=0,bidLF=0;const ids={},np={};
   rows.forEach(function(r){const p=effPct(job,r);bid+=r.BidHrs;
-    if(r.ItemType==='structure'||r.ItemType==='biditem'){erS+=r.BidHrs*p/100;}
+    if(r.ItemType==='structure'||r.ItemType==='biditem'){erS+=r.BidHrs*p/100;np[nid(r.ItemID)]=1;}
     else{bidP+=r.BidHrs;erP+=r.BidHrs*p/100;if(r.BidQty>0)bidLF+=r.BidQty;}
     ids[nid(r.ItemID)]=1;});
   let repF=0,un=0;
   S.prod.forEach(function(l){
     if(String(l.Jobnumber||'').trim()!==job||String(l.Phase||'').trim()!==ph)return;
     const q=parseFloat(String(l['Yardage_x002f_production']||'').replace(/,/g,''));if(!(q>0))return;
-    repF+=q;const id=nid(l['STR_x0020_ID']);if(!id||!ids[id])un+=q;});
+    const id=nid(l['STR_x0020_ID']);if(id&&np[id])return;repF+=q;if(!id||!ids[id])un+=q;});
   // Footage only speaks for pipe. Structures count when they are marked or reported set.
   // Only estimate from footage when some of it has no run; if every foot is on a run, the runs are exact.
   const ef=(un>0.5&&bidLF>0)?bidP*Math.min(1,repF/bidLF):0;
@@ -1448,7 +1448,9 @@ function pkParseBid(wb,job){
     }else{
       let nm='BID '+sec+' '+label.toUpperCase()+((det&&/^(valves?|str)$/i.test(label))?' '+det.toUpperCase():'');
       ids[nm]=(ids[nm]||0)+1;if(ids[nm]>1)nm+=' ('+ids[nm]+')';
-      out.push({Title:nm,JobNum:job,Phase:sec,ItemType:'biditem',Descr:(qty>0?(qty+' in the bid'+(per>0?', '+per+' h each':'')):'bid '+H+' h')+((det&&!/^(valves?|str)$/i.test(label))?' \u00b7 '+det:''),BidHrs:H,BidQty:0,Unit:'EA',Area:''});
+      const each=qty>0&&per>0&&Math.abs(qty*per-hrs)<=0.02*Math.max(1,hrs);
+      const rate=qty>0&&per>0&&!each&&Math.abs(qty/per-hrs)<=0.02*Math.max(1,hrs);
+      out.push({Title:nm,JobNum:job,Phase:sec,ItemType:'biditem',Descr:(each?(qty+' in the bid, '+per+' h each'):(rate?(qty+' ft in the bid, '+per+' ft per hour'):(qty>0?qty+' in the bid':'bid '+H+' h')))+((det&&!/^(valves?|str)$/i.test(label))?' \u00b7 '+det:''),BidHrs:H,BidQty:((each||rate)&&qty>1)?Math.round(qty*10)/10:0,Unit:rate?'LF':'EA',Area:''});
     }
   }
   return {rows:out,crew:crew};
@@ -1512,7 +1514,7 @@ async function pkAddStructs(manual,dry){
         const add=[],upd=[];
         parsed.rows.forEach(function(r){
           const ex=have[r.Phase+'|'+r.ItemType+'|'+nid(r.Title)];
-          if(r.ItemType==='structure'||r.ItemType==='biditem'){if(!ex)add.push(r);}
+          if(r.ItemType==='structure'||r.ItemType==='biditem'){if(!ex)add.push(r);else if(r.ItemType==='biditem'&&(String(ex.Descr||'')!==r.Descr||(+ex.BidQty||0)!==r.BidQty))upd.push({spId:ex.spId,Descr:r.Descr,BidQty:r.BidQty,Unit:r.Unit});}
           else if(r.ItemType==='run'){
             if(ex){if(r.Descr&&String(ex.Descr||'')!==r.Descr)upd.push({spId:ex.spId,Descr:r.Descr});}
             else if(r.Phase!=='400'&&r.Phase!=='500'&&!runPh[r.Phase])add.push(r); // water and drain lines, only where the job has none yet
@@ -1532,7 +1534,7 @@ async function pkAddStructs(manual,dry){
           const resp=await gBatch(tok,b.map(function(row,i){return {id:String(i+1),method:'POST',url:'/sites/'+FD_SITE+'/lists/'+S.lists.scope+'/items',headers:{'Content-Type':'application/json'},body:{fields:packFields('scope',row)}};}));
           const bad=resp.filter(function(r){return r.status>=400;});if(bad.length)throw new Error(bad.length+' rows failed (HTTP '+bad[0].status+')');
         }
-        for(const b of chunk(upd,20))await gBatch(tok,b.map(function(v,i){return {id:String(i+1),method:'PATCH',url:'/sites/'+FD_SITE+'/lists/'+S.lists.scope+'/items/'+v.spId+'/fields',headers:{'Content-Type':'application/json'},body:packFields('scope',{Descr:v.Descr})};}));
+        for(const b of chunk(upd,20))await gBatch(tok,b.map(function(v,i){return {id:String(i+1),method:'PATCH',url:'/sites/'+FD_SITE+'/lists/'+S.lists.scope+'/items/'+v.spId+'/fields',headers:{'Content-Type':'application/json'},body:packFields('scope',(function(){const o={Descr:v.Descr};if(v.BidQty!==undefined){o.BidQty=v.BidQty;o.Unit=v.Unit;}return o;})())};}));
         if(add.length||upd.length){added+=add.length;updated+=upd.length;jobs++;}
       }catch(e){errs.push(j.job+': '+((e&&e.message)||e));}
     }
@@ -1641,6 +1643,11 @@ async function pkAuto(force){
       else if(rec.modified!==j.file.modified)j.status='changed'; // packet edited since the last sync
       else j.status='synced';
     }
+    try{const cu={},ru={};
+      for(const j of jobs){if(j.status!=='changed'||!j.file)continue;const key='vhtrk_pkc_'+j.job;if(sessionStorage.getItem(key)===String(j.file.modified))continue;
+        const p=await pkLoadPacket(tok,j);if(p.costs)cu[j.job]=Object.assign({name:j.name},p.costs);if(p.earth&&(p.earth.rates||p.earth.bidCost))ru[j.job]={name:j.name,e:p.earth};sessionStorage.setItem(key,String(j.file.modified));}
+      if(Object.keys(cu).length)await pkSaveCosts(tok,cu);if(Object.keys(ru).length)await ewRatesApply(tok,ru);
+    }catch(e){console.warn('changed packet refresh',e);}
     S.pk={jobs,at:Date.now(),attention:0};
     await pkCheckLoad(tok);pkAttn();
     // weekly bid pack check: runs by itself when the last one is more than 7 days old
