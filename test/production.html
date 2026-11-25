@@ -139,7 +139,7 @@ const FALLBACK_ADMINS=['dmorris@valentiheld.com','abewley@valentiheld.com','jroe
 const SCOPE_LIST_NAME='JobScope';
 const STATUS_LIST_NAME='TrackerStatus';
 const PHASE_LABELS={'300':'Earth — Mass','310':'Earth — Finish','400':'Storm','450':'Subsurface drain','500':'Sanitary','600':'Water'};
-const VH_TRK_BUILD='2026-11-25.43';
+const VH_TRK_BUILD='2026-11-25.44';
 const OFFICE=/production\.html/i.test(location.pathname);
 const VH_BG=/[?&]autosave=1/.test(location.search); // loaded hidden by the time app, only to refresh the Excel trackers
 console.log('[VH] Job Trackers build',VH_TRK_BUILD);
@@ -675,6 +675,7 @@ function ofHrs(v){return '<b style="color:'+gainCol(v)+'">'+(v>=0?'\u25B2 +':'\u
 function ofBar(p){return '<div style="display:flex;align-items:center;gap:6px;justify-content:flex-end"><div style="width:60px;height:8px;background:var(--bg2);border-radius:4px;overflow:hidden"><div style="width:'+Math.max(0,Math.min(100,p))+'%;height:100%;background:var(--green)"></div></div><span style="min-width:34px;text-align:right">'+fmt0(p)+'%</span></div>';}
 function officeHome(){
   if(!S.costs){ofLoad();return '<div class="sec"><div class="empty">Loading bid costs\u2026</div></div>';}
+  if(!S.earth){if(!S.earthLoading)loadEarth();return '<div class="sec"><div class="empty">Loading timesheet hours\u2026</div></div>';}
   const F=S.of||(S.of={mode:'all',date:new Date().toISOString().slice(0,10),job:'',phase:''});
   const rg=ofRange(F),a=rg[0],b=rg[1],inP=!!a;
   const allJobs=[...new Set(S.scope.map(function(r){return r.JobNum;}))].sort();const jobs=allJobs.filter(function(j){return !F.job||j===F.job;});
@@ -719,6 +720,7 @@ function officeHome(){
 }
 function officeJobHtml(job){
   if(!S.costs){ofLoad();return '';}
+  if(!S.earth){if(!S.earthLoading)loadEarth();return '<div class="sec"><p class="note">Loading timesheet hours\u2026</p></div>';}
   const phs=[...new Set(S.scope.filter(function(r){return r.JobNum===job;}).map(function(r){return r.Phase;}))].sort();if(!phs.length)return '';
   const th=function(x,l){return '<th style="'+(l?'text-align:left;':'')+'padding:7px 8px;font-weight:600;white-space:nowrap">'+x+'</th>';};const td='padding:8px;border-top:1px solid var(--border);white-space:nowrap';
   const P=phs.map(function(p){return ofPhase(job,p,null,null);});const B={e:0,l:0,f:0,b:0},A={e:0,l:0,f:0,b:0};let any=false,un=0;
