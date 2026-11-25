@@ -139,7 +139,7 @@ const FALLBACK_ADMINS=['dmorris@valentiheld.com','abewley@valentiheld.com','jroe
 const SCOPE_LIST_NAME='JobScope';
 const STATUS_LIST_NAME='TrackerStatus';
 const PHASE_LABELS={'300':'Earth — Mass','310':'Earth — Finish','400':'Storm','450':'Subsurface drain','500':'Sanitary','600':'Water'};
-const VH_TRK_BUILD='2026-11-25.38';
+const VH_TRK_BUILD='2026-11-25.39';
 const VH_BG=/[?&]autosave=1/.test(location.search); // loaded hidden by the time app, only to refresh the Excel trackers
 console.log('[VH] Job Trackers build',VH_TRK_BUILD);
 
@@ -1459,13 +1459,14 @@ function pkParseBid(wb,job){
 function pkParseCosts(wb){
   const sh=function(re){const n=wb.SheetNames.find(function(x){return re.test(x.trim());});return n?XLSX.utils.sheet_to_json(wb.Sheets[n],{header:1,raw:true,defval:null}):null;};
   const bp=sh(/^bidpack$/i);if(!bp)return null;
-  const G={};(sh(/^gross profit$/i)||[]).forEach(function(r){const m=/^\s*(\d{3,4})\s*-/.exec(String((r||[])[1]||''));if(m)G[+m[1]]=pkNum(r[3]);});
+  const nz=function(v){const n=pkNum(v);return isFinite(n)?n:0;};
+  const G={};(sh(/^gross profit$/i)||[]).forEach(function(r){r=r||[];for(let c=0;c<2;c++){const m=/^\s*(\d{3,4})\s*-/.exec(String(r[c]==null?'':r[c]));if(m){const v=nz(r[c+2]);if(v>0&&!G[+m[1]])G[+m[1]]=v;break;}}});
   let hdr=-1;for(let i=0;i<25;i++){if(String(((bp[i]||[])[0])||'').trim().toUpperCase().indexOf('PHASE')===0){hdr=i;break;}}
   if(hdr<0)return null;
   const ph={};
   for(let i=hdr+1;i<Math.min(bp.length,hdr+90);i++){
-    const r=bp[i]||[];const code=parseInt(r[0],10);if(isNaN(code)||r[1]==null)continue;
-    const e=pkNum(r[3]),l=pkNum(r[4]),mat=pkNum(r[5]),fr=pkNum(r[6]),sub=pkNum(r[8]),oth=pkNum(r[9]);let b=pkNum(r[7]),src='bidpack';
+    const r=bp[i]||[];const code=parseInt(r[0],10);if(isNaN(code)||code<=0||r[1]==null)continue;
+    const e=nz(r[3]),l=nz(r[4]),mat=nz(r[5]),fr=nz(r[6]),sub=nz(r[8]),oth=nz(r[9]);let b=nz(r[7]),src='bidpack';
     if(!(e+l>0))continue;
     if(!(b>0)&&G[code]>0){const rest=e+l+mat+fr+sub+oth;if(G[code]-rest>1){b=G[code]-rest;src='gross profit';}}
     ph[String(code)]={e:Math.round(e),l:Math.round(l),f:Math.round(fr),b:Math.round(b),bsrc:b>0?src:'none'};
