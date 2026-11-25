@@ -138,8 +138,8 @@ const FD_LIST='0e317e27-adb1-4bef-b57a-cb0524e60981'; // Field Data production l
 const FALLBACK_ADMINS=['dmorris@valentiheld.com','abewley@valentiheld.com','jroe@valentiheld.com','jtrenkamp@valentiheld.com','cbroeker@valentiheld.com','eroe@valentiheld.com','cwaters@valentiheld.com','mzielinski@valentiheld.com','mjanson@valentiheld.com','kpero@valentiheld.com','jschuetz@valentiheld.com'];
 const SCOPE_LIST_NAME='JobScope';
 const STATUS_LIST_NAME='TrackerStatus';
-const PHASE_LABELS={'300':'Earth — Mass','310':'Earth — Finish','400':'Storm','450':'Storm — Other','500':'Sanitary','600':'Water'};
-const VH_TRK_BUILD='2026-11-24.37';
+const PHASE_LABELS={'300':'Earth — Mass','310':'Earth — Finish','400':'Storm','450':'Subsurface drain','500':'Sanitary','600':'Water'};
+const VH_TRK_BUILD='2026-11-25.38';
 const VH_BG=/[?&]autosave=1/.test(location.search); // loaded hidden by the time app, only to refresh the Excel trackers
 console.log('[VH] Job Trackers build',VH_TRK_BUILD);
 
@@ -391,7 +391,7 @@ function effPct(job,r){
     const q=autoQtyByItem(job)[nid(r.ItemID)]||0;
     if(q>0)auto=Math.min(100,q/r.BidQty*100);
   }
-  else if(r.ItemType==='structure'&&autoQtyByItem(job)['\u00a7'+nid(r.ItemID)])auto=100; // a production report names this structure
+  else if((r.ItemType==='structure'||r.ItemType==='biditem')&&autoQtyByItem(job)['\u00a7'+nid(r.ItemID)])auto=100; // a production report names this structure
   return Math.max(man,Math.round(auto*10)/10);
 }
 // ===== FOOTAGE THAT IS NOT TIED TO A RUN ======================================
@@ -403,7 +403,7 @@ function effPct(job,r){
 function phEarn(job,ph,rows){
   let bid=0,bidP=0,erP=0,erS=0,bidLF=0;const ids={};
   rows.forEach(function(r){const p=effPct(job,r);bid+=r.BidHrs;
-    if(r.ItemType==='structure'){erS+=r.BidHrs*p/100;}
+    if(r.ItemType==='structure'||r.ItemType==='biditem'){erS+=r.BidHrs*p/100;}
     else{bidP+=r.BidHrs;erP+=r.BidHrs*p/100;if(r.BidQty>0)bidLF+=r.BidQty;}
     ids[nid(r.ItemID)]=1;});
   let repF=0,un=0;
@@ -621,7 +621,8 @@ function renderPhase(job,rows,phase,actual,actItem){
   const lots=rows.filter(r=>r.ItemType==='lot'||r.ItemType==='lateral')
     .sort((a,b)=>String(a.ItemID).localeCompare(String(b.ItemID),undefined,{numeric:true})); // lot 2 before lot 10
   const structs=rows.filter(r=>r.ItemType==='structure').sort((a,b)=>String(a.ItemID).localeCompare(String(b.ItemID),undefined,{numeric:true}));
-  const runs=rows.filter(r=>!(r.ItemType==='lot'||r.ItemType==='lateral'||r.ItemType==='structure'));
+  const bids=rows.filter(r=>r.ItemType==='biditem');
+  const runs=rows.filter(r=>!(r.ItemType==='lot'||r.ItemType==='lateral'||r.ItemType==='structure'||r.ItemType==='biditem'));
   // group runs by Area
   const areas={};runs.forEach(r=>{(areas[r.Area||'']=areas[r.Area||'']||[]).push(r);});
   const areaKeys=Object.keys(areas).sort();
@@ -639,7 +640,7 @@ function renderPhase(job,rows,phase,actual,actItem){
     }).join('')}</div>`:'';
   const strHtml=structs.length?`<div class="area-h"><span>${phase==='400'?'Structures':'Manholes'} — tap when set</span><span class="ah-num">${structs.filter(r=>effPct(job,r)>=100).length} / ${structs.length} set</span></div><div class="lots">${structs.map(r=>{const done=effPct(job,r)>=100;return `<button class="lot${done?' done':''}" onclick="setPct('${esc(job)}','${esc(r.ItemID)}',${done?0:100})" title="${esc(r.Descr)} · bid ${fmt(r.BidHrs)} h">${esc(String(r.ItemID).replace(/^STR /,''))}</button>`;}).join('')}</div>`:'';
   return `<div class="sec"><h2>${esc(PHASE_LABELS[phase]||('Phase '+phase))} <span class="h2-sub">phase ${esc(phase)} · ${rows.length} items</span></h2>
-    ${verdictHtml(bid,earned,actual)}${phFootNote(pe)}${runHtml}${strHtml}${lotHtml}</div>`;
+    ${verdictHtml(bid,earned,actual)}${phFootNote(pe)}${runHtml}${strHtml}${bids.length?`<div class="area-h"><span>Bid items — tap when done</span><span class="ah-num">${bids.filter(r=>effPct(job,r)>=100).length} / ${bids.length} done</span></div><div class="lots">${bids.map(r=>{const done=effPct(job,r)>=100;return `<button class="lot${done?' done':''}" style="min-width:0;padding:8px 10px;text-align:left;font-weight:600" onclick="setPct('${esc(job)}','${esc(r.ItemID)}',${done?0:100})" title="${esc(r.Descr)}">${esc(pkBidName(r.ItemID))} <span style="font-weight:400;opacity:.75">${fmt(r.BidHrs)} h</span></button>`;}).join('')}</div>`:''}${lotHtml}</div>`;
 }
 // ===== TESTING STATUS ==========================================================
 // Test results come from each job's Testing/tests.json (written by the time app's Testing form).
@@ -659,7 +660,7 @@ async function loadTests(){
   finally{S.testsLoading=false;}
 }
 function tsRun(job,r){
-  const req=TS_REQ[r.Phase];if(!req||r.ItemType==='lateral'||r.ItemType==='lot'||r.ItemType==='structure')return null;
+  const req=TS_REQ[r.Phase];if(!req||r.ItemType==='lateral'||r.ItemType==='lot'||r.ItemType==='structure'||r.ItemType==='biditem')return null;
   const rows=((S.tests||{})[String(job).toUpperCase()]||[]).filter(function(x){return nid(x.run)===nid(r.ItemID);});
   const last={};
   rows.forEach(function(x){const key=String(x.date||'')+String(x.at||'');if(!last[x.test]||key>last[x.test].k)last[x.test]={k:key,result:x.result};});
@@ -1329,7 +1330,7 @@ function pkParseRuns(rows,job,phase){
     seen[id]=(seen[id]||0)+1;if(seen[id]>1)id+=' ('+seen[id]+')'; // twin runs keep their own row
     const size=pkNum(r[lc+1]),depth=pkNum(r[lc+2]);
     const h=hc!=null?pkNum(r[+hc]):NaN;
-    out.push({Title:id,JobNum:job,Phase:phase,ItemType:'run',Descr:(size>0?size+'" pipe':'')+(depth>0?(size>0?', ':'')+depth+' ft deep':''),
+    out.push({Title:id,JobNum:job,Phase:phase,ItemType:'run',Descr:(size>0?size+'" pipe':'')+(depth>0?(size>0?', ':'')+depth+' ft deep':'')+((typeof r[lc+4]==='string'&&/^\d+\s*-\s*\d+$/.test(r[lc+4].trim()))?', '+r[lc+4].trim().replace(/\s+/g,'')+' ft range':''),
       BidHrs:h>0?Math.round(h*100)/100:0,BidQty:Math.round(L*10)/10,Unit:'LF',Area:area});});
   return out;
 }
@@ -1408,36 +1409,136 @@ function pkParseStructs(rows,job,phase,titleRe){
   }
   return out;
 }
-// Add any structures the tracker is missing, for every job. Never touches runs or laterals.
-async function pkAddStructs(manual){
+// ===== MORE FROM THE BID PACK =====================================================
+// UTILITY BID tab: each phase has a LABOR table (label, depth or detail, qty, units per hour,
+// hours) that ends at PRIMARY CREW. Pipe, structures and laterals on storm and sanitary are
+// already tracked run by run, so only the other lines are loaded there: move in and out, taps,
+// connections, crossings, core drills. Water and subsurface drain have no run list, so their
+// pipe lines are loaded as runs and their fittings as bid items.
+function pkBidName(id){return String(id==null?'':id).replace(/^BID \d{3} /,'');}
+function pkParseBid(wb,job){
+  const n=wb.SheetNames.find(function(x){return /^utility\s*bid$/i.test(x.trim());});if(!n)return {rows:[],crew:{}};
+  const rows=XLSX.utils.sheet_to_json(wb.Sheets[n],{header:1,raw:true,defval:null});
+  const str=function(v){return v==null?'':String(v).trim();};
+  const out=[],crew={},seenSec={},ids={};let sec='',lab=false,last='';
+  for(let i=0;i<rows.length;i++){
+    const r=rows[i]||[];const b=str(r[1]);
+    const m=b.match(/^#\s*(\d{3})\s*-/);
+    if(m){sec=seenSec[m[1]]?'':m[1];seenSec[m[1]]=1;lab=false;last='';continue;} // each phase appears twice; the first block is the labor one
+    if(!sec)continue;
+    if(/^labor$/i.test(b)){lab=true;continue;}
+    if(!lab)continue;
+    if(/^primary crew/i.test(b)){crew[sec]=Math.round(pkNum(r[5])*100)/100;lab=false;sec='';continue;}
+    if(b)last=b;const label=b||last;const hrs=pkNum(r[5]);
+    if(!label||/^total pipe/i.test(label)||/^other$/i.test(label)||!(hrs>0))continue;
+    const det=str(r[2]),qty=pkNum(r[3]),per=pkNum(r[4]);
+    let kind='item';
+    if(/^laterals?$/i.test(label))kind='lat';
+    else if(/^(str|inlets?|standard manholes|large manholes|drop str|large str|end sections.*|rip rap)$/i.test(label))kind='struct';
+    else if(/pipe|^over\s*\d|ssd|^\d+(\.\d+)?"?$|directional bore/i.test(label))kind='pipe';
+    const tracked=(sec==='400'||sec==='500');
+    if(tracked&&kind!=='item')continue;
+    if(kind==='lat'||kind==='struct')continue;
+    const H=Math.round(hrs*100)/100;
+    if(kind==='pipe'){
+      let nm=/^\d+(\.\d+)?"?$/.test(label)?(label.replace(/"$/,'')+' IN '+(sec==='600'?'WATER MAIN':'PIPE')):label.toUpperCase();
+      if(det&&det!=='.'&&det!=='-'&&!/^fabric$/i.test(det))nm+=' '+det.toUpperCase();
+      ids[sec+nm]=(ids[sec+nm]||0)+1;if(ids[sec+nm]>1)nm+=' ('+ids[sec+nm]+')';
+      out.push({Title:nm,JobNum:job,Phase:sec,ItemType:'run',Descr:(per>0?'bid '+per+' ft per hour':''),BidHrs:H,BidQty:Math.round(qty*10)/10,Unit:'LF',Area:''});
+    }else{
+      let nm='BID '+sec+' '+label.toUpperCase()+((det&&/^(valves?|str)$/i.test(label))?' '+det.toUpperCase():'');
+      ids[nm]=(ids[nm]||0)+1;if(ids[nm]>1)nm+=' ('+ids[nm]+')';
+      out.push({Title:nm,JobNum:job,Phase:sec,ItemType:'biditem',Descr:(qty>0?(qty+' in the bid'+(per>0?', '+per+' h each':'')):'bid '+H+' h')+((det&&!/^(valves?|str)$/i.test(label))?' \u00b7 '+det:''),BidHrs:H,BidQty:0,Unit:'EA',Area:''});
+    }
+  }
+  return {rows:out,crew:crew};
+}
+// BIDPACK tab: equipment, labor, fringe and burden for each phase. Where burden is blank it is
+// backed out of the GROSS PROFIT cost for that phase (cost less everything else), the way the
+// estimate carries it. Profit is never read.
+function pkParseCosts(wb){
+  const sh=function(re){const n=wb.SheetNames.find(function(x){return re.test(x.trim());});return n?XLSX.utils.sheet_to_json(wb.Sheets[n],{header:1,raw:true,defval:null}):null;};
+  const bp=sh(/^bidpack$/i);if(!bp)return null;
+  const G={};(sh(/^gross profit$/i)||[]).forEach(function(r){const m=/^\s*(\d{3,4})\s*-/.exec(String((r||[])[1]||''));if(m)G[+m[1]]=pkNum(r[3]);});
+  let hdr=-1;for(let i=0;i<25;i++){if(String(((bp[i]||[])[0])||'').trim().toUpperCase().indexOf('PHASE')===0){hdr=i;break;}}
+  if(hdr<0)return null;
+  const ph={};
+  for(let i=hdr+1;i<Math.min(bp.length,hdr+90);i++){
+    const r=bp[i]||[];const code=parseInt(r[0],10);if(isNaN(code)||r[1]==null)continue;
+    const e=pkNum(r[3]),l=pkNum(r[4]),mat=pkNum(r[5]),fr=pkNum(r[6]),sub=pkNum(r[8]),oth=pkNum(r[9]);let b=pkNum(r[7]),src='bidpack';
+    if(!(e+l>0))continue;
+    if(!(b>0)&&G[code]>0){const rest=e+l+mat+fr+sub+oth;if(G[code]-rest>1){b=G[code]-rest;src='gross profit';}}
+    ph[String(code)]={e:Math.round(e),l:Math.round(l),f:Math.round(fr),b:Math.round(b),bsrc:b>0?src:'none'};
+  }
+  let fp=0.12,bpct=0.28;
+  (sh(/^rates/i)||[]).forEach(function(r){const a=String(((r||[])[0])||'').trim();const v=(r||[]).find(function(x){return typeof x==='number'&&x>0&&x<1;});if(v){if(/^labor benefits/i.test(a))fp=v;else if(/^burden$/i.test(a))bpct=v;}});
+  return Object.keys(ph).length?{phases:ph,fringePct:fp,burdenPct:bpct}:null;
+}
+const COST_FILE=PK_ROOT+'/bid-costs.json';
+async function pkSaveCosts(tok,map){
+  const jobs=Object.keys(map);if(!jobs.length)return 0;
+  for(let a=0;a<3;a++){
+    const H={Authorization:'Bearer '+tok};let etag=null,cur={jobs:{}};
+    const mr=await fetch(pkUrl(COST_FILE),{headers:H});
+    if(mr.ok){etag=(await mr.json()).eTag;const cr=await fetch(pkUrl(COST_FILE)+':/content',{headers:H});if(cr.ok){const d=await cr.json();if(d&&d.jobs)cur=d;}}
+    else if(mr.status!==404)return 0;
+    let n=0;jobs.forEach(function(j){const s=JSON.stringify(map[j]);if(JSON.stringify(cur.jobs[j])!==s){cur.jobs[j]=map[j];n++;}});
+    if(!n)return 0;
+    cur.at=new Date().toISOString();cur.by=(auth.user&&auth.user.name)||'';cur.basis='Bid equipment, labor, fringe and burden by phase. No material, subs or profit.';
+    const PH={Authorization:'Bearer '+tok,'Content-Type':'application/json'};if(etag)PH['If-Match']=etag;
+    const pr=await fetch(pkUrl(COST_FILE)+':/content',{method:'PUT',headers:PH,body:JSON.stringify(cur)});
+    if(pr.status===412)continue;return pr.ok?n:0;
+  }
+  return 0;
+}
+// Bring every job up to what its packet holds: structures, bid items, water and drain pipe lines,
+// run details and phase costs. Adds and updates only; never removes a run or a lateral.
+// dry=true reports what would change and writes nothing.
+async function pkAddStructs(manual,dry){
   if(!auth.isAdmin||S.pkStructBusy||!S.pk||!S.pk.jobs)return null;
-  S.pkStructBusy=true;if(manual)toast('Loading structures from the field packets. This takes a minute.');
-  let added=0,jobs=0;const errs=[],per=[];
+  S.pkStructBusy=true;if(manual&&!dry)toast('Loading bid data from the field packets. This takes a minute.');
+  let added=0,updated=0,jobs=0;const errs=[],per=[],costs={},check=[];
   try{
     const tok=await getToken(manual);if(!tok)return null;
     for(const j of S.pk.jobs){
       if(!j.file)continue;
       try{
         const parsed=await pkLoadPacket(tok,j);
-        const st=parsed.rows.filter(function(r){return r.ItemType==='structure';});if(!st.length){per.push(j.job+': none in packet');continue;}
+        if(parsed.costs)costs[j.job]=Object.assign({name:j.name},parsed.costs);
         const mine=S.scope.filter(function(r){return r.JobNum===j.job;});
-        const have={};mine.forEach(function(r){if(r.ItemType==='structure')have[r.Phase+'|'+nid(r.ItemID)]=1;});
-        const add=st.filter(function(r){return !have[r.Phase+'|'+nid(r.Title)];});
+        const have={};mine.forEach(function(r){have[r.Phase+'|'+r.ItemType+'|'+nid(r.ItemID)]=r;});
+        const runPh={};mine.forEach(function(r){if(r.ItemType==='run')runPh[r.Phase]=1;});
+        const add=[],upd=[];
+        parsed.rows.forEach(function(r){
+          const ex=have[r.Phase+'|'+r.ItemType+'|'+nid(r.Title)];
+          if(r.ItemType==='structure'||r.ItemType==='biditem'){if(!ex)add.push(r);}
+          else if(r.ItemType==='run'){
+            if(ex){if(r.Descr&&String(ex.Descr||'')!==r.Descr)upd.push({spId:ex.spId,Descr:r.Descr});}
+            else if(r.Phase!=='400'&&r.Phase!=='500'&&!runPh[r.Phase])add.push(r); // water and drain lines, only where the job has none yet
+          }
+        });
         // a structure an older import loaded as a zero-length "run" is replaced by the real one
-        const raw={};st.forEach(function(r){raw[r.Phase+'|'+nid(r.Title.replace(/^STR /,''))]=1;});
-        const dupe=mine.filter(function(r){return r.ItemType!=='structure'&&!(r.BidQty>0)&&raw[r.Phase+'|'+nid(r.ItemID)];});
+        const raw={};parsed.rows.forEach(function(r){if(r.ItemType==='structure')raw[r.Phase+'|'+nid(r.Title.replace(/^STR /,''))]=1;});
+        const dupe=mine.filter(function(r){return r.ItemType==='run'&&!(r.BidQty>0)&&raw[r.Phase+'|'+nid(r.ItemID)];});
+        // check: hours the tracker will hold for each phase against the bid's primary crew hours
+        const tot={};mine.forEach(function(r){if(dupe.indexOf(r)<0)tot[r.Phase]=(tot[r.Phase]||0)+r.BidHrs;});add.forEach(function(r){tot[r.Phase]=(tot[r.Phase]||0)+r.BidHrs;});
+        Object.keys(parsed.crew||{}).forEach(function(p){if(parsed.crew[p]>0||tot[p]>0)check.push({job:j.job,phase:p,tracker:Math.round((tot[p]||0)*10)/10,bid:parsed.crew[p]});});
+        const cnt=function(a,ty){return a.filter(function(r){return r.ItemType===ty;}).length;};
+        per.push(j.job+': '+cnt(add,'structure')+' structures, '+cnt(add,'biditem')+' bid items, '+cnt(add,'run')+' water or drain lines to add; '+upd.length+' run descriptions to update'+(dupe.length?'; '+dupe.length+' mis-loaded row to replace':''));
+        if(dry){added+=add.length;updated+=upd.length;continue;}
         for(const b of chunk(dupe,20))await gBatch(tok,b.map(function(v,i){return {id:String(i+1),method:'DELETE',url:'/sites/'+FD_SITE+'/lists/'+S.lists.scope+'/items/'+v.spId,headers:{'If-Match':'*'}};}));
         for(const b of chunk(add,20)){
           const resp=await gBatch(tok,b.map(function(row,i){return {id:String(i+1),method:'POST',url:'/sites/'+FD_SITE+'/lists/'+S.lists.scope+'/items',headers:{'Content-Type':'application/json'},body:{fields:packFields('scope',row)}};}));
           const bad=resp.filter(function(r){return r.status>=400;});if(bad.length)throw new Error(bad.length+' rows failed (HTTP '+bad[0].status+')');
         }
-        per.push(j.job+': added '+add.length+' of '+st.length+(dupe.length?' (replaced '+dupe.length+' mis-loaded row)':''));
-        if(add.length){added+=add.length;jobs++;}
+        for(const b of chunk(upd,20))await gBatch(tok,b.map(function(v,i){return {id:String(i+1),method:'PATCH',url:'/sites/'+FD_SITE+'/lists/'+S.lists.scope+'/items/'+v.spId+'/fields',headers:{'Content-Type':'application/json'},body:packFields('scope',{Descr:v.Descr})};}));
+        if(add.length||upd.length){added+=add.length;updated+=upd.length;jobs++;}
       }catch(e){errs.push(j.job+': '+((e&&e.message)||e));}
     }
-    if(added)await loadAll();
-    if(manual||added)toast(added?('Loaded '+added+' structures on '+jobs+' job'+(jobs===1?'':'s')+(errs.length?'. '+errs.length+' job(s) had errors':'')):('No structures were missing'+(errs.length?' ('+errs.length+' job(s) had errors)':'')),errs.length?'err':'');
-    return {added:added,jobs:jobs,per:per,errs:errs};
+    let nc=0;if(!dry){try{nc=await pkSaveCosts(tok,costs);}catch(e){errs.push('costs: '+((e&&e.message)||e));}}
+    if(!dry&&(added||updated))await loadAll();
+    if(!dry&&(manual||added))toast((added||updated)?('Loaded '+added+' new items and updated '+updated+' on '+jobs+' job'+(jobs===1?'':'s')+(errs.length?'. '+errs.length+' job(s) had errors':'')):('Nothing was missing'+(errs.length?' ('+errs.length+' job(s) had errors)':'')),errs.length?'err':'');
+    return {dry:!!dry,added:added,updated:updated,jobs:jobs,per:per,errs:errs,costs:costs,costJobsSaved:nc,check:check};
   }finally{S.pkStructBusy=false;}
 }
 function pkParse(wb,job){
@@ -1449,7 +1550,8 @@ function pkParse(wb,job){
   if(sl)rows=rows.concat(pkParseLats(sl,job));
   if(st)rows=rows.concat(pkParseStructs(st,job,'400',/storm\s*manholes/i));
   if(sa)rows=rows.concat(pkParseStructs(sa,job,'500',/sanitary\s*manholes/i));
-  return {rows,earth:pkParseEarth(wb)};
+  const bid=pkParseBid(wb,job);rows=rows.concat(bid.rows);
+  return {rows,earth:pkParseEarth(wb),costs:pkParseCosts(wb),crew:bid.crew};
 }
 function pkTotals(rows){const o={};rows.forEach(r=>{const k=r.Phase+'|'+r.ItemType;const x=o[k]=o[k]||{phase:r.Phase,type:r.ItemType,n:0,lf:0,hrs:0};x.n++;x.lf+=r.BidQty;x.hrs+=r.BidHrs;});return Object.values(o);}
 async function pkScan(tok){
@@ -1634,11 +1736,12 @@ async function pkVerify(manual){
   S.pkChecking=true;if(manual)toast('Checking every field packet against the tracker. This takes a minute.');
   try{
     const tok=await getToken(manual);if(!tok)return;
-    const out={at:new Date().toISOString(),by:(auth.user&&auth.user.name)||'',jobs:{}};const rateUp={};
+    const out={at:new Date().toISOString(),by:(auth.user&&auth.user.name)||'',jobs:{}};const rateUp={},costUp={};
     for(const j of S.pk.jobs){
       if(!j.file)continue;
       try{
         const parsed=await pkLoadPacket(tok,j);
+        if(parsed.costs)costUp[j.job]=Object.assign({name:j.name},parsed.costs);
         if(parsed.earth&&(parsed.earth.rates||parsed.earth.bidCost))rateUp[j.job]={name:j.name,e:parsed.earth};
         if(!parsed.rows.length){out.jobs[j.job]={name:j.name,file:j.file.name,err:'No takeoff rows the tracker can read'};continue;}
         const groups=pkCompare(j.job,parsed);
@@ -1646,6 +1749,7 @@ async function pkVerify(manual){
       }catch(e){out.jobs[j.job]={name:j.name,file:j.file.name,err:e.message};}
     }
     try{out.ratesUpdated=await ewRatesApply(tok,rateUp);}catch(e){console.warn('rates refresh',e);}
+    try{await pkSaveCosts(tok,costUp);}catch(e){console.warn('costs refresh',e);}
     await fetch(pkUrl(PK_CHECK)+':/content',{method:'PUT',headers:{Authorization:'Bearer '+tok,'Content-Type':'application/json'},body:JSON.stringify(out)});
     S.pkCheck=out;pkAttn();
     if(manual)toast('Bid pack check finished: '+pkCheckBad()+' job(s) with differences');
@@ -1725,7 +1829,7 @@ function renderPackets(){
     nopacket:['No field packet in the folder','#d97706'],empty:['Packet has no takeoff rows the tracker can read','var(--red)'],error:['Import failed','var(--red)']};
   let h=`<div class="sec"><h2>Field packets <span class="h2-sub">Field / Jobs</span></h2>
     <p class="note">Every job folder under Field\\Jobs\\{year} is checked for a field packet. A job with no scope yet is imported automatically. A job that already has scope is only replaced when you press Re-sync.</p>
-    <button class="btn btn-sm" onclick="S.pk=null;sessionStorage.removeItem('vhtrk_pk_scan');render()"><i class="ti ti-refresh"></i> Scan again</button> <button class="btn btn-sm" onclick="pkVerify(true)"><i class="ti ti-checks"></i> Check packets against tracker now</button> <button class="btn btn-sm" onclick="pkAddStructs(true)"><i class="ti ti-circle-dot"></i> Load structures</button>
+    <button class="btn btn-sm" onclick="S.pk=null;sessionStorage.removeItem('vhtrk_pk_scan');render()"><i class="ti ti-refresh"></i> Scan again</button> <button class="btn btn-sm" onclick="pkVerify(true)"><i class="ti ti-checks"></i> Check packets against tracker now</button> <button class="btn btn-sm" onclick="pkAddStructs(true)"><i class="ti ti-circle-dot"></i> Load new bid data</button>
     <p class="note" style="margin-top:8px">${S.pkCheck?'Last full bid pack check: '+esc(String(S.pkCheck.at).slice(0,10))+(S.pkCheck.by?' by '+esc(S.pkCheck.by):'')+'.':'No bid pack check has run yet.'} It runs by itself once a week when an admin opens the tracker.${S.pkChecking?' <b>Checking now…</b>':''}</p></div>`;
   if(S.pk.err)h+=`<div class="sec" style="border-color:var(--red)">Scan failed: ${esc(S.pk.err)}</div>`;
   (S.pk.jobs||[]).forEach(j=>{const L=lab[j.status]||[j.status,'inherit'];
