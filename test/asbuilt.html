@@ -1,0 +1,1117 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#185FA5">
+<title>VH As-Built Plans</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Inter:wght@400;500;600;700;800&display=swap">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@2.47.0/tabler-icons.min.css">
+<script src="https://cdn.jsdelivr.net/npm/@azure/msal-browser@2.38.3/lib/msal-browser.min.js"></script>
+<style>
+  :root{
+    --bg:#fafafa; --bg2:#f0f0f0; --border:#e5e5e5;
+    --text:#111; --text2:#555; --text3:#888;
+    --red:#c8102e; --red-d:#a30d24;
+    --green:#16a34a; --amber:#d97706;
+    --shadow:0 1px 2px rgba(0,0,0,.04);
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{font-family:'Inter',-apple-system,BlinkMacSystemFont,sans-serif;color:var(--text);background:var(--bg);-webkit-font-smoothing:antialiased}
+  body{min-height:100vh;padding-bottom:env(safe-area-inset-bottom)}
+  /* Header */
+  .hdr{background:#fff;border-bottom:1px solid var(--border);padding:12px 16px;position:sticky;top:0;z-index:10}
+  .hdr-in{max-width:1000px;margin:0 auto;display:flex;align-items:center;justify-content:space-between;gap:10px}
+  .brand{display:flex;align-items:center;gap:10px;font-weight:700;font-size:16px;letter-spacing:-.3px}
+  .logo{width:30px;height:30px;background:var(--red);color:#fff;border-radius:6px;display:grid;place-items:center;font-size:13px;font-weight:800;flex-shrink:0}
+  .uline{font-size:13px;color:var(--text2);display:flex;align-items:center;gap:8px;min-width:0}
+  .uline .nm{font-weight:600;color:var(--text);max-width:130px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .rb{font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;background:var(--bg2);color:var(--text2);padding:3px 6px;border-radius:4px;flex-shrink:0}
+  .rb.admin{background:#fee;color:var(--red)}
+  .rb.manager{background:#fef3c7;color:var(--amber)}
+  .container{max-width:1000px;margin:0 auto;padding:14px 16px 32px}
+  /* Controls */
+  .ctrl{display:flex;flex-wrap:wrap;gap:10px;margin-bottom:14px;align-items:flex-end}
+  .cg{display:flex;flex-direction:column;gap:4px}
+  .cg label{font-size:10px;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:.4px}
+  .cg select,.cg input{font:inherit;font-size:14px;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:#fff;color:var(--text);min-width:0}
+  .cg select{min-width:150px;max-width:200px}
+  .cg.grow{flex:1}
+  /* Buttons */
+  .btn{font:inherit;font-size:13px;padding:8px 12px;border-radius:6px;border:1px solid var(--border);background:#fff;cursor:pointer;color:var(--text);display:inline-flex;align-items:center;gap:6px;white-space:nowrap}
+  .btn:hover{background:var(--bg2)}
+  .btn-p{background:var(--red);color:#fff;border-color:var(--red)}
+  .btn-p:hover{background:var(--red-d)}
+  .btn-sm{font-size:12px;padding:5px 10px}
+  /* KPI grid */
+  .kg{display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin-bottom:14px}
+  @media(min-width:520px){.kg{grid-template-columns:repeat(3,1fr)}}
+  @media(min-width:780px){.kg{grid-template-columns:repeat(6,1fr)}}
+  .k{background:#fff;border:1px solid var(--border);border-radius:8px;padding:12px;box-shadow:var(--shadow);min-width:0}
+  .k .lbl{font-size:10px;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:.4px;margin-bottom:6px}
+  .k .val{font-size:20px;font-weight:700;letter-spacing:-.5px;line-height:1.1}
+  .k .sub{font-size:10px;color:var(--text3);margin-top:3px}
+  .k.feat .val{font-size:24px}
+  .val.good{color:var(--green)}
+  .val.bad{color:var(--red)}
+  .val .arr{font-size:14px;margin-right:2px;vertical-align:2px}
+  .pbar{height:3px;background:var(--bg2);border-radius:2px;margin-top:6px;overflow:hidden}
+  .pbarfill{height:100%;background:var(--red);transition:width .3s}
+  .hdr{position:sticky;top:0;z-index:20;background:#fff}
+  .dpre{display:flex;flex-wrap:wrap;gap:6px;margin:6px 0 14px}
+  .dpre button{font:inherit;font-size:11px;padding:5px 10px;border-radius:14px;border:1px solid var(--border);background:#fff;color:var(--text2);cursor:pointer}
+  .dpre button.on{background:var(--red);color:#fff;border-color:var(--red)}
+  .dpre button:hover:not(.on){background:var(--bg2)}
+  .dq{font-size:11px;color:var(--text3);margin:-8px 0 10px;padding:6px 10px;background:var(--bg2);border-radius:4px}
+  /* Sections */
+  .sec{background:#fff;border:1px solid var(--border);border-radius:8px;padding:14px;margin-bottom:14px;box-shadow:var(--shadow)}
+  .sec h2{font-size:14px;font-weight:700;margin-bottom:10px;letter-spacing:-.3px;color:var(--text)}
+  .sec .h2-sub{font-size:11px;color:var(--text3);font-weight:500;margin-left:6px}
+  /* Table */
+  .tbl{width:100%;font-size:13px;border-collapse:collapse}
+  .tbl thead th{font-size:10px;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:.4px;padding:8px 6px;text-align:left;border-bottom:1px solid var(--border)}
+  .tbl tbody td{padding:9px 6px;border-bottom:1px solid var(--bg2);font-variant-numeric:tabular-nums}
+  .tbl tbody tr:last-child td{border-bottom:none}
+  .tbl .num{text-align:right}
+  .tbl .vp{color:var(--red);font-weight:600}
+  .tbl .vn{color:var(--green);font-weight:600}
+  @media(max-width:600px){
+    .tbl thead{display:none}
+    .tbl,.tbl tbody,.tbl tr{display:block}
+    .tbl tbody tr{padding:10px 0;border-bottom:1px solid var(--border)}
+    .tbl tbody tr:last-child{border-bottom:none}
+    .tbl tbody td{display:flex;justify-content:space-between;padding:4px 0;border:none;font-size:13px}
+    .tbl tbody td::before{content:attr(data-label);font-size:11px;color:var(--text2);font-weight:600;text-transform:uppercase;letter-spacing:.3px}
+    .tbl tbody td.num{text-align:right}
+  }
+  /* Recent entries */
+  .e{padding:11px 0;border-bottom:1px solid var(--bg2);display:flex;justify-content:space-between;align-items:center;gap:10px;cursor:pointer;transition:background .12s}
+  .e:hover{background:#fafafa}
+  .e:last-child{border-bottom:none}
+  .e-main{flex:1;min-width:0}
+  .e-title{font-weight:600;font-size:14px;margin-bottom:2px;color:var(--text)}
+  .e-sub{font-size:11px;color:var(--text2)}
+  .e-yard{font-weight:700;font-size:14px;font-variant-numeric:tabular-nums;text-align:right;white-space:nowrap}
+  .e-yard .u{font-size:10px;color:var(--text3);font-weight:500;text-transform:uppercase}
+  /* Empty/loading */
+  .empty,.loading{padding:32px 16px;text-align:center;color:var(--text2);font-size:14px}
+  .spinner{display:inline-block;width:28px;height:28px;border:3px solid var(--bg2);border-top-color:var(--red);border-radius:50%;animation:spin .8s linear infinite;margin-bottom:10px}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  /* Modal */
+  .mo{position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:flex-end;justify-content:center;z-index:100;padding:0;animation:fadeIn .15s}
+  @media(min-width:600px){.mo{align-items:center;padding:20px}}
+  .md{background:#fff;width:100%;max-width:480px;border-radius:14px 14px 0 0;padding:20px;max-height:88vh;overflow-y:auto;animation:slideUp .2s}
+  @media(min-width:600px){.md{border-radius:12px;animation:none}}
+  @keyframes fadeIn{from{opacity:0}}
+  @keyframes slideUp{from{transform:translateY(20px)}}
+  .md h3{font-size:17px;font-weight:700;margin-bottom:4px;letter-spacing:-.3px}
+  .md .meta{font-size:12px;color:var(--text2);margin-bottom:14px}
+  .dr{display:flex;justify-content:space-between;align-items:flex-start;padding:8px 0;border-bottom:1px solid var(--bg2);font-size:13px;gap:12px}
+  .dr:last-of-type{border-bottom:none}
+  .dr .lk{color:var(--text2);flex-shrink:0}
+  .dr .vk{font-weight:600;text-align:right;font-variant-numeric:tabular-nums}
+  .mf{display:flex;justify-content:flex-end;gap:8px;margin-top:14px;padding-top:12px;border-top:1px solid var(--border)}
+  /* Toast */
+  .toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:#111;color:#fff;padding:10px 16px;border-radius:6px;font-size:13px;z-index:200;box-shadow:0 4px 20px rgba(0,0,0,.15);animation:fadeIn .15s}
+  .toast.err{background:var(--red)}
+  /* Auth screen */
+  .auth{display:grid;place-items:center;min-height:80vh;padding:20px}
+  .auth-c{background:#fff;border:1px solid var(--border);border-radius:12px;padding:32px 24px;max-width:380px;width:100%;text-align:center;box-shadow:var(--shadow)}
+  .auth-c .brand{justify-content:center;margin-bottom:18px}
+  .auth-c h1{font-size:22px;font-weight:700;margin-bottom:8px;letter-spacing:-.5px}
+  .auth-c p{color:var(--text2);font-size:14px;margin-bottom:22px;line-height:1.4}
+.vt{display:inline-flex;background:#f5f5f7;border-radius:8px;padding:3px;margin-bottom:14px;gap:2px}.vt button{font:inherit;font-size:13px;font-weight:600;padding:6px 14px;border:none;background:transparent;color:#666;cursor:pointer;border-radius:6px;transition:background .12s,color .12s;display:inline-flex;align-items:center;gap:6px}.vt button.on{background:#fff;color:#c8102e;box-shadow:0 1px 2px rgba(0,0,0,.06)}.vt button:not(.on):hover{color:#111}.day-card{background:#fff;border:1px solid #eaeaea;border-radius:8px;padding:12px 14px;margin-bottom:8px}.day-hdr{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:8px;font-weight:700;font-size:13px}.day-totals{font-weight:400;font-size:12px;color:#666}.day-cols{display:grid;grid-template-columns:1fr 1fr;gap:16px}.day-col-title{font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.3px;color:#666;margin-bottom:6px;padding-bottom:4px;border-bottom:1px solid #eaeaea}.day-row{display:flex;justify-content:space-between;align-items:baseline;padding:4px 0;font-size:13px;border-bottom:1px solid #f5f5f5}.day-row:last-child{border-bottom:none}.day-row.legacy{color:#999;font-style:italic}.day-name{flex:1;min-width:0}.day-name .day-sub{font-size:11px;color:#888;margin-left:4px}.day-hrs{font-weight:600;margin-left:8px;white-space:nowrap}.day-empty{font-size:12px;color:#888;padding:6px 0;font-style:italic}@media (max-width:640px){.day-cols{grid-template-columns:1fr;gap:8px}}.modal-ov{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:1000;display:flex;align-items:center;justify-content:center;padding:20px}.modal-pn{background:#fff;border-radius:12px;max-width:900px;width:100%;max-height:85vh;display:flex;flex-direction:column;box-shadow:0 8px 32px rgba(0,0,0,.2);overflow:hidden}.modal-hdr{display:flex;justify-content:space-between;align-items:center;padding:16px 20px;border-bottom:1px solid #eaeaea}.modal-hdr h2{margin:0;font-size:18px}.modal-body{padding:16px 20px;overflow:auto;flex:1}.modal-sec{margin-bottom:20px}.modal-sec h3{font-size:13px;font-weight:600;text-transform:uppercase;letter-spacing:.3px;color:#666;margin:0 0 10px}.bud-form{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:12px}.bud-form input,.bud-form select{font:inherit;font-size:13px;padding:8px 10px;border:1px solid #ddd;border-radius:6px;width:100%;box-sizing:border-box}.bud-form-actions{display:flex;justify-content:flex-end;gap:8px}.bud-form-actions .btn{padding:8px 16px}@media (max-width:640px){.bud-form{grid-template-columns:1fr 1fr}}summary.day-hdr{cursor:pointer;list-style:none;outline:none;user-select:none}summary.day-hdr::-webkit-details-marker{display:none}summary.day-hdr::before{content:'\25B8';color:#c8102e;margin-right:7px;font-size:11px}details[open]>summary.day-hdr::before{content:'\25BE'}details.day-card[open]>summary.day-hdr{margin-bottom:10px;padding-bottom:8px;border-bottom:1px solid #eaeaea}.day-date{flex:1;min-width:0}.day-prod{margin-bottom:12px}.day-prod .day-row.prod-row{cursor:pointer}.day-prod .day-row.prod-row:hover{background:#fafafa}.day-prod .day-row.prod-row{align-items:flex-start}.day-name .prod-title{display:block}.prod-meta{font-size:11px;color:#666;margin-top:2px;line-height:1.4}.prod-note{font-size:11px;color:#888;font-style:italic;margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%}.day-hrs .u{font-size:10px;color:#999;font-weight:500;text-transform:uppercase;margin-left:1px}
+/* ===== 2026-07-01.3 visual system: VH blue brand, dark mode, blueprint grid ===== */
+:root{--brand:#185FA5;--brand-d:#0C447C;--card:#fff;--grid:rgba(24,95,165,.045)}
+@media(prefers-color-scheme:dark){
+  :root{--bg:#101418;--bg2:#1a2027;--border:#2a323b;--text:#e8eaee;--text2:#9aa5b1;--text3:#69737f;
+        --card:#171d24;--grid:rgba(130,180,230,.05);--shadow:0 1px 3px rgba(0,0,0,.5)}
+}
+body{background:var(--bg);background-image:linear-gradient(var(--grid) 1px,transparent 1px),linear-gradient(90deg,var(--grid) 1px,transparent 1px);background-size:32px 32px;background-attachment:fixed}
+/* brand = blue; red now means ONLY over budget */
+.logo{background:var(--brand)}
+.btn-p{background:var(--brand);border-color:var(--brand)}
+.btn-p:hover{background:var(--brand-d)}
+.dpre button.on{background:var(--brand);border-color:var(--brand);color:#fff}
+.pbarfill{background:var(--brand)}
+.spinner{border-top-color:var(--brand)}
+.rb.admin{background:rgba(24,95,165,.14);color:var(--brand)}
+.vt button.on{color:var(--brand)}
+summary.day-hdr::before{color:var(--brand)}
+/* surfaces onto theme vars (enables dark mode) */
+.hdr,.k,.sec,.md,.cg select,.cg input,.btn,.dpre button,.day-card,.modal-pn,.bud-form input,.bud-form select{background:var(--card);color:var(--text)}
+.hdr{border-bottom-color:var(--border)}
+.btn:hover,.dpre button:hover:not(.on){background:var(--bg2)}
+.e:hover,.day-prod .day-row.prod-row:hover{background:var(--bg2)}
+.vt{background:var(--bg2)}
+.vt button{color:var(--text2)}
+.vt button.on{background:var(--card)}
+.vt button:not(.on):hover{color:var(--text)}
+.day-card,.modal-pn{border-color:var(--border)}
+.bud-form input,.bud-form select{border-color:var(--border)}
+.modal-hdr,.day-col-title,details.day-card[open]>summary.day-hdr{border-bottom-color:var(--border)}
+.day-row{border-bottom-color:var(--bg2)}
+.day-totals,.day-col-title,.day-empty,.day-name .day-sub,.prod-meta,.prod-note,.modal-sec h3{color:var(--text2)}
+@media(prefers-color-scheme:dark){
+  .toast{background:#e8eaee;color:#14181d}
+  .toast.err{background:#c0392b;color:#fff}
+  .rb{background:var(--bg2);color:var(--text2)}
+  .rb.manager{background:rgba(217,119,6,.18);color:#e2a04a}
+}
+/* KPI cards: gauge treatment — condensed display numerals + brand accent bar */
+.k{border-top:3px solid var(--brand);box-shadow:var(--shadow)}
+.k .val{font-family:'Barlow Condensed','Inter',sans-serif;font-size:26px;font-weight:600;letter-spacing:0}
+.k.feat .val{font-size:32px}
+.k .val.good{color:var(--green)}
+.k .val.bad{color:var(--red)}
+.e-yard{font-family:'Barlow Condensed','Inter',sans-serif;font-size:17px;font-weight:600}
+.sec{box-shadow:var(--shadow)}
+/* accessibility floor */
+:where(button,select,input,a,summary):focus-visible{outline:2px solid var(--brand);outline-offset:2px}
+@media(prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important}}
+</style>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js"></script>
+</head>
+<body>
+<div id="app"><div class="loading"><div class="spinner"></div><div>Loading...</div></div></div>
+<div id="toasts"></div>
+<script>
+// === CONFIG ===
+const CLIENT_ID='127c307a-e672-4d13-b5e9-c3b96fb34759';
+const TENANT_ID='1585f578-f5d3-41e6-a437-9c59bd33fbcf';
+const SCOPES=['Files.ReadWrite','Files.ReadWrite.All','Sites.ReadWrite.All','User.Read','offline_access'];
+const FD_SITE='valentiheld.sharepoint.com,faa2c371-4166-4fc1-aed9-bf6ff65c7034,d89c0495-1617-4429-b05b-7addf584b82e';
+const FD_LIST='0e317e27-adb1-4bef-b57a-cb0524e60981';
+const TS_SITE='valentiheld.sharepoint.com,155c9359-7fd3-4f2c-8c6a-b04a722b6f64,801969a1-b2a1-4f9a-8c3a-05ae5405e710';
+// Fallback role detection if vhts-state.json can't be loaded
+const FALLBACK_ADMINS=['dmorris@valentiheld.com','abewley@valentiheld.com','jroe@valentiheld.com','jtrenkamp@valentiheld.com','cbroeker@valentiheld.com','eroe@valentiheld.com','cwaters@valentiheld.com','mzielinski@valentiheld.com','mjanson@valentiheld.com','kpero@valentiheld.com','jschuetz@valentiheld.com'];
+const FALLBACK_MANAGERS=['jroe@valentiheld.com','jtrenkamp@valentiheld.com'];
+const EARTH_PHASES=['300','310'];
+const UTIL_PHASES=['400','450','500','600'];
+const BUDGETS_LIST='9d5a39ab-23ff-41f5-9dd5-40fe40f56323';
+const TSJL_LIST='228b5d0b-c95c-4bd0-a9b2-b963d767b7d2';
+
+let mi;
+let auth={user:null,account:null,isAdmin:false,isManager:false,role:'foreman'};
+let S={view:'asbuilt',rows:[],foremen:[],jobs:[],phases:[],selectedForeman:'',selectedJob:'',selectedPhase:'',dateFrom:null,dateTo:null,adminEmails:[],managers:[],budgets:{},jobLines:[],showSettings:false};
+
+// === MSAL ===
+async function initMsal(){
+  if(typeof msal==='undefined'||!msal.PublicClientApplication){
+    throw new Error('MSAL library failed to load from CDN. Check network/CSP and retry.');
+  }
+  mi=new msal.PublicClientApplication({
+    auth:{clientId:CLIENT_ID,authority:`https://login.microsoftonline.com/${TENANT_ID}`,redirectUri:window.location.origin+window.location.pathname},
+    cache:{cacheLocation:'localStorage'}
+  });
+  await mi.initialize();
+  await mi.handleRedirectPromise();
+  const accs=mi.getAllAccounts();
+  if(accs.length>0){
+    auth.account=accs[0];
+    auth.user={name:accs[0].name,email:(accs[0].username||'').toLowerCase()};
+    await loadRoles();
+    await loadData();
+    await Promise.all([loadBudgets(),loadJobLines()]);
+    render();
+  } else {
+    renderAuth();
+  }
+}
+async function signIn(){await mi.loginRedirect({scopes:SCOPES,prompt:'select_account'});}
+async function signOut(){await mi.logoutRedirect();}
+const VH_PROD_BUILD='2026-07-01.4';
+console.log('[VH] Production dashboard build',VH_PROD_BUILD);
+let __vhAuthToastAt=0;
+async function getToken(interactive){
+  try{const r=await mi.acquireTokenSilent({scopes:SCOPES,account:auth.account});return r.accessToken;}
+  catch(e){
+    if(e instanceof msal.InteractionRequiredAuthError){
+      if(interactive){await mi.acquireTokenRedirect({scopes:SCOPES,account:auth.account});}
+      else if(Date.now()-__vhAuthToastAt>60000){__vhAuthToastAt=Date.now();toast('Session expired — sign in again to refresh data.','err');}
+    }
+    return null;
+  }
+}
+// Follow @odata.nextLink until the WHOLE list is in — a single $top page silently
+// truncates once the list grows past the page size and every KPI goes stale.
+async function vhGetAll(tok,url,label){
+  const out=[];
+  let next=url,pages=0;
+  while(next&&pages<50){ // hard cap: 50 pages ≈ 50k rows
+    const r=await fetch(next,{headers:{Authorization:'Bearer '+tok}});
+    if(!r.ok)throw new Error((label||'fetch')+' Graph '+r.status);
+    const j=await r.json();
+    if(j.value)out.push(...j.value);
+    next=j['@odata.nextLink']||null;
+    pages++;
+  }
+  if(next)console.warn('[VH]',label,'hit 50-page cap —',out.length,'rows loaded, more exist');
+  return out;
+}
+
+// === DATA ===
+async function loadRoles(){
+  // Try to load shared state from the timesheet app's VHTimesheets site
+  try{
+    const tok=await getToken();if(!tok)throw new Error('no token');
+    const r=await fetch(`https://graph.microsoft.com/v1.0/sites/${TS_SITE}/drive/root:/vhts-state.json:/content`,{headers:{Authorization:'Bearer '+tok}});
+    if(r.ok){
+      const j=await r.json();
+      S.adminEmails=(j.adminEmails||[]).map(e=>(e||'').toLowerCase());
+      S.managers=j.managers||[];
+    } else throw new Error('state file not found');
+  }catch(e){
+    console.warn('Using fallback role lists:',e.message);
+    S.adminEmails=FALLBACK_ADMINS.map(e=>e.toLowerCase());
+    S.managers=FALLBACK_MANAGERS.map(e=>({email:e}));
+  }
+  auth.isAdmin=S.adminEmails.includes(auth.user.email);
+  auth.isManager=S.managers.some(m=>(m.email||'').toLowerCase()===auth.user.email);
+  auth.role=auth.isAdmin?'admin':(auth.isManager?'manager':'foreman');
+  if(auth.role==='foreman')S.selectedForeman=auth.user.name;
+}
+
+async function loadData(){
+  try{
+    const tok=await getToken();if(!tok)return;
+    const now=new Date();
+    if(!S.dateFrom||!S.dateTo){
+      // Default view = current week (Sunday → today), matching the "This Week" preset
+      const f=new Date(now);f.setDate(now.getDate()-now.getDay());
+      S.dateFrom=isoDate(f);S.dateTo=isoDate(now);S.dpre='week';
+    }
+
+    const fields='Id,Title,Date,Foreman,Jobnumber,Phase,Yardage_x002f_production,Unit,BidCost,ActualCost,TotalCost,Bid_x0020_Cost_x0020_Per_x0020_Y,Actual_x0020_Cost_x0020_Per_x002,Labor_x0020_Hours,Crew_x0020_Size,Production_x0020_Hours,Equipment,STR_x0020_ID,Work_x0020_Type,Notes';
+    const url=`https://graph.microsoft.com/v1.0/sites/${FD_SITE}/lists/${FD_LIST}/items?$expand=fields($select=${fields})&$top=999`;
+    const items=await vhGetAll(tok,url,'Field Data');
+    // Keep every row with a date and a numeric phase; the view split (earth 0–399 / util 400+)
+    // is applied later by phaseInView, so no earthwork phase gets dropped at load.
+    S.rows=items.map(it=>it.fields).filter(f=>f&&f.Date&&!isNaN(parseInt(f.Phase,10)));
+    S.foremen=[...new Set(S.rows.map(r=>r.Foreman).filter(Boolean))].sort();
+    S.jobs=[...new Set(S.rows.map(r=>r.Jobnumber).filter(Boolean))].sort();
+    S.phases=[...new Set(S.rows.map(r=>r.Phase).filter(Boolean))].sort();
+  }catch(e){
+    console.error('loadData:',e);
+    toast('Failed to load production data.','err');
+  }
+}
+
+async function loadBudgets(){
+  try{
+    const tok=await getToken();if(!tok)return;
+    const url='https://graph.microsoft.com/v1.0/sites/'+FD_SITE+'/lists/'+BUDGETS_LIST+'/items?$expand=fields($select=JobNumber,JobName,Phase,PhaseType,BidCost,BidQty,QtyUnit,BidHours,BidEquip,BidLabor,BidMaterial,BidFringe,BidBurden)&$top=999';
+    const items=await vhGetAll(tok,url,'Budgets');
+    S.budgets={};
+    items.forEach(it=>{const b=Object.assign({__id:it.id},it.fields||{});S.budgets[b.JobNumber+'-'+b.Phase]=b;});
+  }catch(e){console.warn('loadBudgets:',e);}
+}
+async function loadJobLines(){
+  try{
+    const tok=await getToken();if(!tok)return;
+    const fields='WorkDate,EmployeeName,EmployeeTitle,Hours,Equipment,Jobnumber,Phase,SubmittedBy';
+    const url='https://graph.microsoft.com/v1.0/sites/'+FD_SITE+'/lists/'+TSJL_LIST+'/items?$expand=fields($select='+fields+')&$top=999';
+    const items=await vhGetAll(tok,url,'TimesheetJobLines');
+    S.jobLines=items.map(it=>it.fields).filter(f=>f&&f.WorkDate);
+  }catch(e){console.warn('loadJobLines:',e);}
+}
+function parseEquipment(s){
+  if(!s)return [];
+  if(s.indexOf('[object Object]')>=0){
+    const count=s.split(',').length;
+    return [{name:'('+count+' unrecorded item'+(count>1?'s':'')+')',hours:0,legacy:true}];
+  }
+  try{const arr=JSON.parse(s);return Array.isArray(arr)?arr:[];}
+  catch(e){return [{name:String(s),hours:0}];}
+}
+function prepDailyBreakdown(){
+  const phases=viewPhases();
+  const from=S.dateFrom?new Date(S.dateFrom+'T00:00:00'):null;
+  const to=S.dateTo?new Date(S.dateTo+'T23:59:59'):null;
+  const passes=function(r,useDate){
+    if(!phaseInView(r.Phase))return false;
+    if(S.selectedJob&&r.Jobnumber!==S.selectedJob)return false;
+    if(S.selectedPhase&&r.Phase!==S.selectedPhase)return false;
+    if(useDate){
+      const d=r.WorkDate?new Date(r.WorkDate):null;if(!d)return false;
+      if(from&&d<from)return false;
+      if(to&&d>to)return false;
+    }
+    return true;
+  };
+  const inRange=S.jobLines.filter(r=>passes(r,true));
+  const allTime=S.jobLines.filter(r=>passes(r,false));
+  const byDate={};
+  inRange.forEach(r=>{
+    const dk=(r.WorkDate||"").slice(0,10);if(!dk)return;
+    if(!byDate[dk])byDate[dk]={date:dk,crew:{},equip:{}};
+    const total=parseFloat(r.Hours)||0;
+    // Sum this line's equipment hours; true labor = total worked minus time spent running equipment.
+    const eq=parseEquipment(r.Equipment);
+    let rowEquip=0;
+    eq.forEach(e=>{
+      const ek=((e.description||e.name||"")+(e.number?" #"+e.number:""))||e.id||e.equipNum||"(unknown)";
+      if(!byDate[dk].equip[ek])byDate[dk].equip[ek]={name:ek,hours:0,legacy:!!e.legacy};
+      const eh=parseFloat(e.hours)||0;
+      byDate[dk].equip[ek].hours+=eh;
+      rowEquip+=eh;
+    });
+    const labor=Math.max(0,total-rowEquip);
+    const empKey=r.EmployeeName||"Unknown";
+    if(!byDate[dk].crew[empKey])byDate[dk].crew[empKey]={name:empKey,title:r.EmployeeTitle||'',hours:0};
+    byDate[dk].crew[empKey].hours+=labor;
+  });
+  const days=Object.values(byDate).map(d=>{
+    const crewArr=Object.values(d.crew).sort((a,b)=>b.hours-a.hours);
+    const equipArr=Object.values(d.equip).sort((a,b)=>b.hours-a.hours);
+    const laborTotal=crewArr.reduce((s,c)=>s+c.hours,0);
+    const equipTotal=equipArr.reduce((s,e)=>s+e.hours,0);
+    const dt=new Date(d.date+'T00:00:00');
+    const dateLabel=dt.toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'});
+    return{date:d.date,dateLabel,crew:crewArr,equip:equipArr,laborTotal,equipTotal};
+  }).sort((a,b)=>new Date(b.date)-new Date(a.date));
+  let totalLabor=0,totalEquip=0;const dateSet=new Set();
+  allTime.forEach(r=>{
+    if(r.WorkDate)dateSet.add(r.WorkDate.slice(0,10));
+    let rowEquip=0;
+    parseEquipment(r.Equipment).forEach(e=>{const eh=parseFloat(e.hours)||0;totalEquip+=eh;rowEquip+=eh;});
+    totalLabor+=Math.max(0,(parseFloat(r.Hours)||0)-rowEquip);
+  });
+  return{days,totalLabor,totalEquip,daysWorked:dateSet.size,rangeRowCount:inRange.length};
+}
+
+function viewPhases(){return S.view==='earth'?EARTH_PHASES:UTIL_PHASES;}
+// Merge production entries (Field Data) with crew/equipment (TimesheetJobLines) into one
+// per-day structure for the collapsible Daily Production roll-up. `rows` is the already-
+// filtered production set from render() so production-entry indexes align with window._recent.
+function prepDailyRollup(rows){
+  const dB=prepDailyBreakdown();
+  const ce={};dB.days.forEach(d=>{ce[d.date]=d;});
+  const byDate={};
+  rows.forEach((r,idx)=>{
+    const dk=(r.Date||'').slice(0,10);if(!dk)return;
+    if(!byDate[dk])byDate[dk]={prod:[],yards:0,cost:0};
+    const y=parseFloat(r.Yardage_x002f_production)||0;
+    byDate[dk].yards+=y;
+    byDate[dk].cost+=parseFloat(r.TotalCost)||parseFloat(r.ActualCost)||0;
+    byDate[dk].prod.push({job:r.Jobnumber||'?',phase:r.Phase||'?',yards:y,unit:r.Unit||unitLabel(),foreman:r.Foreman||'',workType:r.Work_x0020_Type||'',prodHours:parseFloat(r.Production_x0020_Hours)||0,strId:r.STR_x0020_ID||'',notes:r.Notes||'',idx:idx});
+  });
+  const allDates=new Set(Object.keys(byDate).concat(Object.keys(ce)));
+  const days=[...allDates].map(dk=>{
+    const p=byDate[dk]||{prod:[],yards:0,cost:0};
+    const c=ce[dk]||{crew:[],equip:[],laborTotal:0,equipTotal:0};
+    const dt=new Date(dk+'T00:00:00');
+    const dateLabel=dt.toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'});
+    return{date:dk,dateLabel,prod:p.prod,yards:p.yards,cost:p.cost,crew:c.crew,equip:c.equip,laborTotal:c.laborTotal,equipTotal:c.equipTotal};
+  }).sort((a,b)=>new Date(b.date)-new Date(a.date));
+  return{days,totalLabor:dB.totalLabor,totalEquip:dB.totalEquip,daysWorked:dB.daysWorked};
+}
+// Earthwork = phases 0–399; Utility = 400+. Numeric range so phases like 320/350 are included.
+function phaseInView(phase){const p=parseInt(phase,10);if(isNaN(p))return false;return S.view==='earth'?(p>=0&&p<400):(p>=400);}
+function rowMatchesView(r){return phaseInView(r.Phase);}
+function unitLabel(){return S.view==='earth'?'CY':'LF';}
+
+// === HELPERS ===
+function isoDate(d){return d.toISOString().slice(0,10);}
+function fmtNum(n,d){d=d||0;if(!isFinite(n))return '—';return n.toLocaleString('en-US',{minimumFractionDigits:d,maximumFractionDigits:d});}
+function fmtMoney(n,d){d=d==null?2:d;if(!isFinite(n)||n===0)return '—';return '$'+n.toLocaleString('en-US',{minimumFractionDigits:d,maximumFractionDigits:d});}
+function fmtVar(v){if(!isFinite(v)||v===0)return '—';return (v<0?'-':'+')+'$'+Math.abs(v).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});}
+function fmtDate(s){if(!s)return '—';const d=new Date(s);return d.toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'});}
+function startOfWeek(d){const r=new Date(d);const day=r.getDay();r.setDate(r.getDate()-day);r.setHours(0,0,0,0);return r;}
+function esc(s){return String(s==null?'':s).replace(/[<>&"']/g,c=>({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;',"'":'&#39;'}[c]));}
+
+function filteredRows(){
+  const from=S.dateFrom?new Date(S.dateFrom+'T00:00:00'):null;
+  const to=S.dateTo?new Date(S.dateTo+'T23:59:59'):null;
+  return S.rows.filter(r=>{
+    if(!rowMatchesView(r))return false;
+    const d=r.Date?new Date(r.Date):null;if(!d)return false;
+    if(from&&d<from)return false;
+    if(to&&d>to)return false;
+    if(S.selectedForeman&&r.Foreman!==S.selectedForeman)return false;
+    if(S.selectedJob&&r.Jobnumber!==S.selectedJob)return false;
+    if(S.selectedPhase&&r.Phase!==S.selectedPhase)return false;
+    return true;
+  });
+}
+function thisWeekRows(){
+  const sow=startOfWeek(new Date());
+  return S.rows.filter(r=>{
+    if(!rowMatchesView(r))return false;
+    if(S.selectedForeman&&r.Foreman!==S.selectedForeman)return false;
+    if(S.selectedJob&&r.Jobnumber!==S.selectedJob)return false;
+    if(S.selectedPhase&&r.Phase!==S.selectedPhase)return false;
+    return r.Date&&new Date(r.Date)>=sow;
+  });
+}
+// All-time rows for the selected job/phase/foreman, ignoring date range.
+// Used by the "Accumulated Cost" and "Total Yards to Date" KPIs.
+function allTimeRows(){
+  return S.rows.filter(r=>{
+    if(!rowMatchesView(r))return false;
+    if(S.selectedForeman&&r.Foreman!==S.selectedForeman)return false;
+    if(S.selectedJob&&r.Jobnumber!==S.selectedJob)return false;
+    if(S.selectedPhase&&r.Phase!==S.selectedPhase)return false;
+    return true;
+  });
+}
+function aggregate(rows){
+  let yards=0,totalCost=0,bidYardsForBid=0,bidWeighted=0,laborHours=0,prodHours=0;
+  rows.forEach(r=>{
+    const y=parseFloat(r.Yardage_x002f_production)||0;
+    yards+=y;
+    // TotalCost (entered by foreman in production form), fall back to ActualCost
+    // (populated on baseline rows from the historical import)
+    totalCost+=parseFloat(r.TotalCost)||parseFloat(r.ActualCost)||0;
+    // Bid $/CY — only include rows that actually have bid data; otherwise baseline
+    // rows (where bid was never entered) drag the weighted avg toward 0.
+    const bc=parseFloat(r.BidCost)||0;
+    const bcpy=parseFloat(r.Bid_x0020_Cost_x0020_Per_x0020_Y)||0;
+    const effectiveBcpy=bcpy>0?bcpy:(bc>0&&y>0?bc/y:0);
+    if(effectiveBcpy>0&&y>0){
+      bidYardsForBid+=y;
+      bidWeighted+=effectiveBcpy*y;
+    }
+    laborHours+=parseFloat(r.Labor_x0020_Hours)||0;
+    prodHours+=parseFloat(r.Production_x0020_Hours)||0;
+  });
+  const cpy=yards>0?totalCost/yards:0;
+  const bcpy=bidYardsForBid>0?bidWeighted/bidYardsForBid:0;
+  const variance=(cpy>0&&bcpy>0)?cpy-bcpy:0;
+  const productivity=laborHours>0?yards/laborHours:0;
+  return{yards,totalCost,bidCost:bidWeighted,laborHours,prodHours,cpy,bcpy,variance,productivity};
+}
+
+// === RENDER ===
+function render(){
+  if(S.view==='asbuilt'){renderAsBuilt();return;}
+  abUnlockVP();
+  const rows=filteredRows();
+  const weekRows=thisWeekRows();
+  const wk=aggregate(weekRows);
+  const rng=aggregate(rows);
+  const allTime=aggregate(allTimeRows());
+  const _activePhases=viewPhases();
+  const _matchingBuds=Object.values(S.budgets||{}).filter(b=>{
+    if(!b||!b.Phase)return false;
+    if(!phaseInView(b.Phase))return false;
+    if(S.selectedJob&&b.JobNumber!==S.selectedJob)return false;
+    if(S.selectedPhase&&b.Phase!==S.selectedPhase)return false;
+    return true;
+  });
+  const _budTotals=_matchingBuds.reduce((acc,b)=>{
+    acc.bidCost+=parseFloat(b.BidCost)||0;
+    // Field cost = equipment + labor + fringe + burden (excludes material, sub, other, profit)
+    acc.fieldCost+=(parseFloat(b.BidEquip)||0)+(parseFloat(b.BidLabor)||0)+(parseFloat(b.BidFringe)||0)+(parseFloat(b.BidBurden)||0);
+    acc.material+=parseFloat(b.BidMaterial)||0;
+    acc.bidQty+=parseFloat(b.BidQty)||0;
+    acc.bidHours+=parseFloat(b.BidHours)||0;
+    return acc;
+  },{bidCost:0,fieldCost:0,material:0,bidQty:0,bidHours:0});
+  // Prefer the field-cost basis when the category breakdown is entered; otherwise fall back
+  // to the single legacy BidCost. This is the "more accurate cost per unit" (no material).
+  const _bidCostBasis=_budTotals.fieldCost>0?_budTotals.fieldCost:_budTotals.bidCost;
+  if(_bidCostBasis>0&&_budTotals.bidQty>0){
+    rng.bcpy=_bidCostBasis/_budTotals.bidQty;
+    rng.variance=rng.cpy>0?rng.cpy-rng.bcpy:0;
+  }
+  const _bidHrsPerUnit=(_budTotals.bidHours>0&&_budTotals.bidQty>0)?_budTotals.bidHours/_budTotals.bidQty:null;
+  const _totalBidHours=_budTotals.bidHours;
+  const _totalBidQty=_budTotals.bidQty;
+  // Structures set = distinct non-empty STR IDs within the current filter range.
+  const _structures=new Set(rows.map(r=>r.STR_x0020_ID).filter(Boolean)).size;
+  // Utility actual cost per LF: value the foreman's production hours at the bid's implied rate.
+  //   actual $/LF = bid $/LF × (actual prod hrs per LF ÷ bid hrs per LF)
+  // Needs a budget that has both bid cost and bid hours (so bid $/LF and bid hrs/LF exist).
+  const _actualHrsPerFt=(rng.prodHours>0&&rng.yards>0)?rng.prodHours/rng.yards:0;
+  const _utilActualCpf=(rng.bcpy>0&&_bidHrsPerUnit&&_bidHrsPerUnit>0&&_actualHrsPerFt>0)?rng.bcpy*(_actualHrsPerFt/_bidHrsPerUnit):0;
+  const _utilCostVar=(_utilActualCpf>0&&rng.bcpy>0)?_utilActualCpf-rng.bcpy:0;
+  // Label for the "to-date" KPIs — tells the user what scope they're seeing
+  const toDateLabel=S.selectedJob?`Job ${S.selectedJob}${S.selectedPhase?' P'+S.selectedPhase:''} to-date`:`All ${S.view==='earth'?'earthwork':'utility'} to-date`;
+
+  // Group by job+phase
+  const byJob={};
+  rows.forEach(r=>{
+    const k=`${r.Jobnumber||'?'}::${r.Phase||'?'}`;
+    if(!byJob[k])byJob[k]={job:r.Jobnumber||'?',phase:r.Phase||'?',rows:[]};
+    byJob[k].rows.push(r);
+  });
+  const jobList=Object.values(byJob).map(g=>({...g,agg:aggregate(g.rows)})).sort((a,b)=>b.agg.yards-a.agg.yards);
+  // Apply JobBudgets bid rates per row when available
+  jobList.forEach(g=>{const k=g.job+'-'+g.phase;const b=S.budgets[k];if(b&&b.BidCost&&b.BidQty){g.agg.bcpy=b.BidCost/b.BidQty;g.agg.variance=g.agg.cpy>0?g.agg.cpy-g.agg.bcpy:0;}});
+
+  const showSelector=auth.isAdmin||auth.isManager;
+  const roleBadge=`<span class="rb ${auth.role}">${auth.role}</span>`;
+
+  document.getElementById('app').innerHTML=`
+    <div class="hdr"><div class="hdr-in">
+      <div class="brand"><div class="logo">VH</div><span>${S.view==='earth'?'Earthwork':'Utility'}</span></div>
+      <div class="uline">
+        <span class="nm">${esc(auth.user.name)}</span>${roleBadge}
+        ${auth.isAdmin?`<button class="btn btn-sm" onclick="toggleSettings()" title="Settings" style="margin-right:6px"><i class="ti ti-settings"></i></button>`:''}<button class="btn btn-sm" onclick="signOut()" title="Sign out"><i class="ti ti-logout"></i></button>
+      </div>
+    </div></div>
+    <div class="container">
+      ${S.showSettings?renderSettingsModal():''}
+      <div class="vt" role="tablist" aria-label="View">
+        <button class="${S.view==='earth'?'on':''}" onclick="setView('earth')"><i class="ti ti-mountain"></i> Earthwork</button>
+        <button class="${S.view==='util'?'on':''}" onclick="setView('util')"><i class="ti ti-tool"></i> Utility</button>
+        <button class="${S.view==='asbuilt'?'on':''}" onclick="setView('asbuilt')"><i class="ti ti-map-2"></i> As-Built</button>
+      </div>
+      <div class="ctrl">
+        ${showSelector?`
+          <div class="cg">
+            <label>Foreman</label>
+            <select onchange="setForeman(this.value)">
+              <option value="">All foremen</option>
+              ${S.foremen.map(f=>`<option value="${esc(f)}" ${f===S.selectedForeman?'selected':''}>${esc(f)}</option>`).join('')}
+            </select>
+          </div>`:''}
+        <div class="cg">
+          <label>Job</label>
+          <select onchange="setJob(this.value)">
+            <option value="">All jobs</option>
+            ${S.jobs.map(j=>`<option value="${esc(j)}" ${j===S.selectedJob?'selected':''}>${esc(j)}</option>`).join('')}
+          </select>
+        </div>
+        <div class="cg">
+          <label>Phase</label>
+          <select onchange="setPhase(this.value)">
+            <option value="">All</option>
+            ${S.phases.filter(phaseInView).map(p=>`<option value="${esc(p)}" ${p===S.selectedPhase?'selected':''}>${esc(p)}</option>`).join('')}
+          </select>
+        </div>
+        <div class="cg">
+          <label>From</label>
+          <input type="date" value="${S.dateFrom}" onchange="setDate('from',this.value)">
+        </div>
+        <div class="cg">
+          <label>To</label>
+          <input type="date" value="${S.dateTo}" onchange="setDate('to',this.value)">
+        </div>
+        <div class="cg" style="margin-left:auto">
+          <button class="btn btn-sm" onclick="location.href='index.html'"><i class="ti ti-clock"></i> Timesheets</button><button class="btn btn-sm" onclick="location.href='tracker.html'"><i class="ti ti-map-2"></i> Job trackers</button><button class="btn btn-sm" onclick="refresh()"><i class="ti ti-refresh"></i> Refresh</button>
+        </div>
+      </div>
+
+      <div class="dpre">
+        <button class="${S.dpre==='week'?'on':''}" onclick="setDatePreset('week')">This Week</button>
+        <button class="${S.dpre==='lastWeek'?'on':''}" onclick="setDatePreset('lastWeek')">Last Week</button>
+        <button class="${S.dpre==='mtd'?'on':''}" onclick="setDatePreset('mtd')">MTD</button>
+        <button class="${S.dpre==='last30'?'on':''}" onclick="setDatePreset('last30')">Last 30</button>
+        <button class="${S.dpre==='ptd'?'on':''}" onclick="setDatePreset('ptd')">Project to Date</button>
+        <button class="${(!S.dpre||S.dpre==='custom')?'on':''}" onclick="setDatePreset('custom')">Custom</button>
+      </div>
+      <div class="kg">
+        ${S.view==='earth'?`
+        <div class="k feat"><div class="lbl">Yards</div><div class="val">${fmtNum(rng.yards)}</div><div class="sub">${rows.length} entries · ${rng.laborHours.toFixed(1)}h labor · in range</div></div>
+        <div class="k feat"><div class="lbl">Cost Variance</div><div class="val ${rng.variance<0?'good':(rng.variance>0?'bad':'')}"><span class="arr">${rng.variance<0?'↓':rng.variance>0?'↑':''}</span>${fmtVar(rng.variance)}</div><div class="sub">${fmtMoney(rng.cpy)} actual vs ${fmtMoney(rng.bcpy)} bid</div></div>
+        <div class="k feat"><div class="lbl">Cost / Yard</div><div class="val">${fmtMoney(rng.cpy)}</div><div class="sub">range total</div></div>
+        <div class="k feat"><div class="lbl">% Complete</div><div class="val">${_totalBidQty>0?(allTime.yards/_totalBidQty*100).toFixed(1)+'%':'—'}</div><div class="sub">${_totalBidQty>0?fmtNum(allTime.yards)+' / '+fmtNum(_totalBidQty)+' CY':'no bid set'}</div>${_totalBidQty>0?`<div class="pbar"><div class="pbarfill" style="width:${Math.min(allTime.yards/_totalBidQty*100,100)}%"></div></div>`:''}</div>
+        <div class="k"><div class="lbl">Accumulated Cost</div><div class="val">${fmtMoney(allTime.totalCost,0)}</div><div class="sub">${esc(toDateLabel)}</div></div>
+        <div class="k"><div class="lbl">Yards to Date</div><div class="val">${fmtNum(allTime.yards)}</div><div class="sub">${esc(toDateLabel)}</div></div>
+        `:`
+        <div class="k feat"><div class="lbl">LF</div><div class="val">${fmtNum(rng.yards)}</div><div class="sub">${rows.length} entries · ${rng.laborHours.toFixed(1)}h labor · in range</div></div>
+        <div class="k feat"><div class="lbl">Cost Variance / LF</div><div class="val ${_utilCostVar<0?'good':(_utilCostVar>0?'bad':'')}"><span class="arr">${_utilCostVar<0?'↓':_utilCostVar>0?'↑':''}</span>${_utilActualCpf>0?fmtVar(_utilCostVar):'—'}</div><div class="sub">${_utilActualCpf>0?fmtMoney(_utilActualCpf)+' actual vs '+fmtMoney(rng.bcpy)+' bid':'needs bid $/LF + bid hrs'}</div></div>
+        <div class="k feat" onclick="showStructures()" style="cursor:pointer" title="View structures set"><div class="lbl">Structures Set</div><div class="val">${_structures}</div><div class="sub">${_structures>0?'tap to view list':'unique structures · in range'}</div></div>
+        <div class="k feat"><div class="lbl">Prod Hours vs Bid</div><div class="val ${_totalBidHours>0?(allTime.prodHours<=_totalBidHours?'good':'bad'):''}">${fmtNum(allTime.prodHours,1)}</div><div class="sub">${_totalBidHours>0?'of '+fmtNum(_totalBidHours,1)+' bid hrs · '+(allTime.prodHours/_totalBidHours*100).toFixed(0)+'%':'no bid hrs set'}</div></div>
+        <div class="k"><div class="lbl">% Complete</div><div class="val">${_totalBidQty>0?(allTime.yards/_totalBidQty*100).toFixed(1)+'%':'—'}</div><div class="sub">${_totalBidQty>0?fmtNum(allTime.yards)+' / '+fmtNum(_totalBidQty)+' LF':'no bid set'}</div>${_totalBidQty>0?`<div class="pbar"><div class="pbarfill" style="width:${Math.min(allTime.yards/_totalBidQty*100,100)}%"></div></div>`:''}</div>
+        <div class="k"><div class="lbl">LF to Date</div><div class="val">${fmtNum(allTime.yards)}</div><div class="sub">${esc(toDateLabel)}</div></div>
+        `}
+      </div>
+
+      <div class="sec" ${jobList.length<=1?'style="display:none"':''}>
+        <h2>By Job &amp; Phase <span class="h2-sub">${S.dateFrom} → ${S.dateTo}</span></h2>
+        ${jobList.length<=1?'':`
+        <table class="tbl">
+          <thead><tr><th>Job</th><th>Phase</th><th class="num">${unitLabel()}</th><th class="num">Hours</th><th class="num">$/${unitLabel()} Actual</th><th class="num">$/${unitLabel()} Bid</th><th class="num">Variance</th></tr></thead>
+          <tbody>
+            ${jobList.map(g=>{
+              const v=g.agg.variance;
+              const cls=v<0?'vn':(v>0?'vp':'');
+              return `<tr>
+                <td data-label="Job">${esc(g.job)}</td>
+                <td data-label="Phase">${esc(g.phase)}</td>
+                <td data-label="${unitLabel()}" class="num">${fmtNum(g.agg.yards)}</td>
+                <td data-label="Hours" class="num">${fmtNum(g.agg.laborHours,1)}</td>
+                <td data-label="$/${unitLabel()} Actual" class="num">${fmtMoney(g.agg.cpy)}</td>
+                <td data-label="$/${unitLabel()} Bid" class="num">${fmtMoney(g.agg.bcpy)}</td>
+                <td data-label="Variance" class="num ${cls}">${fmtVar(v)}</td>
+              </tr>`;
+            }).join('')}
+          </tbody>
+        </table>`}
+      </div>
+
+      <div class="sec">
+        <h2>Daily Production <span class="h2-sub">production, crew &amp; equipment per day — tap a day to expand</span></h2>
+        ${(()=>{const dR=prepDailyRollup(rows);return `
+          <div class="kg" style="margin-bottom:14px">
+            <div class="k"><div class="lbl">Labor Hours to Date</div><div class="val">${fmtNum(dR.totalLabor,1)}</div><div class="sub">${esc(toDateLabel)}</div></div>
+            <div class="k"><div class="lbl">Equipment Hours to Date</div><div class="val">${fmtNum(dR.totalEquip,1)}</div><div class="sub">${esc(toDateLabel)}</div></div>
+            <div class="k"><div class="lbl">Days Worked</div><div class="val">${dR.daysWorked}</div><div class="sub">${esc(toDateLabel)}</div></div>
+          </div>
+          ${dR.days.length===0?'<div class="empty">No activity in this range.</div>':dR.days.map((d,di)=>`
+            <details class="day-card" ${di===0?'open':''}>
+              <summary class="day-hdr"><span class="day-date">${esc(d.dateLabel)}</span><span class="day-totals">${fmtNum(d.yards)} ${unitLabel()} · crew ${fmtNum(d.laborTotal,1)}h · equip ${fmtNum(d.equipTotal,1)}h</span></summary>
+              <div class="day-prod">
+                <div class="day-col-title">Production</div>
+                ${d.prod.length===0?'<div class="day-empty">no production logged</div>':d.prod.map(p=>`<div class="day-row prod-row" onclick="showDetail(${p.idx})"><span class="day-name"><span class="prod-title">${esc(p.job)} · P${esc(p.phase)}${showSelector&&p.foreman?`<span class="day-sub">${esc(p.foreman)}</span>`:''}</span>${S.view==='util'?(function(){var m=[p.workType&&esc(p.workType),p.strId&&('STR '+esc(p.strId)),p.prodHours>0&&(fmtNum(p.prodHours,1)+'h prod')].filter(Boolean).join(' · ');var out=m?('<div class="prod-meta">'+m+'</div>'):'';if(p.notes)out+='<div class="prod-note" title="'+esc(p.notes)+'">'+esc(p.notes)+'</div>';return out;})():''}</span><span class="day-hrs">${fmtNum(p.yards)} <span class="u">${esc(p.unit)}</span></span></div>`).join('')}
+              </div>
+              <div class="day-cols">
+                <div class="day-col">
+                  <div class="day-col-title">Crew (labor)</div>
+                  ${d.crew.length===0?'<div class="day-empty">no labor</div>':d.crew.map(c=>`<div class="day-row"><span class="day-name">${esc(c.name)}${c.title?`<span class="day-sub">${esc(c.title)}</span>`:''}</span><span class="day-hrs">${fmtNum(c.hours,1)}h</span></div>`).join('')}
+                </div>
+                <div class="day-col">
+                  <div class="day-col-title">Equipment</div>
+                  ${d.equip.length===0?'<div class="day-empty">no equipment</div>':d.equip.map(e=>`<div class="day-row${e.legacy?' legacy':''}"><span class="day-name">${esc(e.name)}</span><span class="day-hrs">${e.legacy?'':fmtNum(e.hours,1)+'h'}</span></div>`).join('')}
+                </div>
+              </div>
+            </details>
+          `).join('')}
+        `;})()}
+      </div>
+    </div>
+  `;
+  window._recent=rows;
+}
+
+function renderAuth(){
+  document.getElementById('app').innerHTML=`
+    <div class="auth"><div class="auth-c">
+      <div class="brand"><div class="logo">VH</div><span>Earthwork Dashboard</span></div>
+      <h1>Sign in to continue</h1>
+      <p>Use your Valenti Held account to view your production data.</p>
+      <button class="btn btn-p" style="width:100%;justify-content:center;padding:10px 14px" onclick="signIn()"><i class="ti ti-brand-microsoft"></i> Sign in with Microsoft</button>
+    </div></div>`;
+}
+
+function showDetail(i){
+  const r=window._recent[i];if(!r)return;
+  const y=parseFloat(r.Yardage_x002f_production)||0;
+  const total=parseFloat(r.TotalCost)||0;
+  const cpy=y>0&&total>0?total/y:0;
+  const bcpy=parseFloat(r.Bid_x0020_Cost_x0020_Per_x0020_Y)||0;
+  const v=cpy>0&&bcpy>0?cpy-bcpy:0;
+  const labor=parseFloat(r.Labor_x0020_Hours)||0;
+  const prod=parseFloat(r.Production_x0020_Hours)||0;
+  const u=esc(r.Unit||(phaseInView(r.Phase)?unitLabel():(parseInt(r.Phase,10)>=400?'LF':'CY')));
+  const rows=[
+    ['Quantity',fmtNum(y)+' '+u],
+    ['Total Cost',fmtMoney(total)],
+    ['Cost / '+u+' (Actual)',fmtMoney(cpy)],
+    ['Bid Cost / '+u,fmtMoney(bcpy)],
+    ['Variance ($/'+u+')',`<span class="${v<0?'vn':'vp'}">${fmtVar(v)}</span>`],
+    ['Labor Hours',fmtNum(labor,1)],
+    ['Production Hours',fmtNum(prod,1)],
+    r.Crew_x0020_Size?['Crew Size',esc(r.Crew_x0020_Size)]:null,
+    r.Work_x0020_Type?['Work Type',esc(r.Work_x0020_Type)]:null,
+    r.Equipment?['Equipment',esc(r.Equipment)]:null,
+    r.STR_x0020_ID?['STR ID',esc(r.STR_x0020_ID)]:null,
+    r.Notes?['Notes',esc(r.Notes)]:null
+  ].filter(Boolean);
+  const html=`
+    <h3>${esc(r.Jobnumber||'?')} · Phase ${esc(r.Phase||'?')}</h3>
+    <div class="meta">${fmtDate(r.Date)} · ${esc(r.Foreman||'—')}</div>
+    ${rows.map(([l,v])=>`<div class="dr"><span class="lk">${l}</span><span class="vk">${v}</span></div>`).join('')}
+    <div class="mf"><button class="btn" onclick="closeMo()">Close</button></div>`;
+  const mo=document.createElement('div');
+  mo.className='mo';
+  mo.onclick=e=>{if(e.target===mo)closeMo();};
+  mo.innerHTML=`<div class="md">${html}</div>`;
+  document.body.appendChild(mo);
+}
+function closeMo(){const m=document.querySelector('.mo');if(m)m.remove();}
+function showStructures(){
+  const rows=filteredRows();
+  const byStr={};
+  rows.forEach(r=>{
+    const id=r.STR_x0020_ID;if(!id)return;
+    if(!byStr[id])byStr[id]={id:id,job:r.Jobnumber||'?',phases:new Set(),dates:new Set(),workTypes:new Set(),foremen:new Set(),lf:0,last:''};
+    const g=byStr[id];
+    if(r.Phase)g.phases.add(r.Phase);
+    const dk=(r.Date||'').slice(0,10);if(dk){g.dates.add(dk);if(dk>g.last)g.last=dk;}
+    if(r.Work_x0020_Type)g.workTypes.add(r.Work_x0020_Type);
+    if(r.Foreman)g.foremen.add(r.Foreman);
+    g.lf+=parseFloat(r.Yardage_x002f_production)||0;
+  });
+  const list=Object.values(byStr).sort((a,b)=>(b.last||'').localeCompare(a.last||''));
+  const showSel=auth.isAdmin||auth.isManager;
+  const body=list.length?list.map(g=>{
+    const sub=[g.job+(g.phases.size?' · P'+[...g.phases].join('/'):''),g.workTypes.size?[...g.workTypes].join(', '):'',(showSel&&g.foremen.size)?[...g.foremen].join(', '):''].filter(Boolean).join(' · ');
+    const right=(g.lf>0?fmtNum(g.lf)+' LF':'—')+(g.last?'<br><span style="font-size:11px;color:var(--text3);font-weight:500">'+fmtDate(g.last)+'</span>':'');
+    return `<div class="dr"><span class="lk"><strong style="color:var(--text)">STR ${esc(g.id)}</strong><br><span style="font-size:11px">${esc(sub)}</span></span><span class="vk">${right}</span></div>`;
+  }).join(''):'<div class="empty">No structures set in this range.</div>';
+  const html=`<h3>Structures Set <span style="font-weight:600;color:var(--text2);font-size:14px">· ${list.length}</span></h3><div class="meta">${S.dateFrom} → ${S.dateTo}${S.selectedJob?' · Job '+esc(S.selectedJob):''}</div>${body}<div class="mf"><button class="btn" onclick="closeMo()">Close</button></div>`;
+  const mo=document.createElement('div');mo.className='mo';mo.onclick=e=>{if(e.target===mo)closeMo();};mo.innerHTML=`<div class="md">${html}</div>`;document.body.appendChild(mo);
+}
+
+function toggleSettings(){S.showSettings=!S.showSettings;render();}
+function renderSettingsModal(){
+  const list=Object.values(S.budgets).sort((a,b)=>(''+(a.JobNumber||'')).localeCompare(b.JobNumber||'')||(''+(a.Phase||'')).localeCompare(b.Phase||''));
+  const rows=list.map(b=>'<tr>'+
+    '<td>'+esc(b.JobNumber||'')+(b.JobName?'<div style="font-size:11px;color:#666">'+esc(b.JobName)+'</div>':'')+'</td>'+
+    '<td>'+esc(b.Phase||'')+'</td>'+
+    '<td>'+esc(b.PhaseType||'')+'</td>'+
+    '<td class="num">'+(b.BidCost?fmtMoney(b.BidCost,0):'—')+'</td>'+
+    '<td class="num">'+((function(){const f=(parseFloat(b.BidEquip)||0)+(parseFloat(b.BidLabor)||0)+(parseFloat(b.BidFringe)||0)+(parseFloat(b.BidBurden)||0);return f>0?fmtMoney(f,0):'—';})())+'</td>'+
+    '<td class="num">'+(b.BidQty?fmtNum(b.BidQty):'—')+'</td>'+
+    '<td>'+esc(b.QtyUnit||'')+'</td>'+
+    '<td class="num">'+(b.BidHours?fmtNum(b.BidHours,1):'—')+'</td>'+
+    '<td><button class="btn btn-sm" onclick="deleteBudget(\''+b.__id+'\')" title="Delete"><i class="ti ti-trash"></i></button></td>'+
+  '</tr>').join('');
+  const tbl=list.length===0?'<div class="empty">No budgets yet. Add one above.</div>':
+    '<table class="tbl"><thead><tr><th>Job</th><th>Phase</th><th>Type</th><th class="num">Bid $</th><th class="num">Field $</th><th class="num">Bid Qty</th><th>Unit</th><th class="num">Bid Hrs</th><th></th></tr></thead><tbody>'+rows+'</tbody></table>';
+  return '<div class="modal-ov" onclick="if(event.target===this)toggleSettings()">'+
+    '<div class="modal-pn">'+
+      '<div class="modal-hdr"><h2>Job Budgets</h2><button class="btn btn-sm" onclick="toggleSettings()" title="Close"><i class="ti ti-x"></i></button></div>'+
+      '<div class="modal-body">'+
+        '<div class="modal-sec"><h3>Add new budget</h3>'+
+          '<div class="bud-form">'+
+            '<input id="bud-jn" placeholder="Job Number (e.g. 2610)">'+
+            '<input id="bud-jname" placeholder="Job Name">'+
+            '<input id="bud-ph" placeholder="Phase (e.g. 300)">'+
+            '<select id="bud-pt"><option value="earth">earth</option><option value="utility">utility</option></select>'+
+            '<input id="bud-bc" type="number" placeholder="Bid Cost (total, optional)" step="0.01">'+
+            '<input id="bud-bq" type="number" placeholder="Bid Qty" step="0.01">'+
+            '<select id="bud-qu"><option value="">unit</option><option value="CY">CY</option><option value="SY">SY</option><option value="LF">LF</option></select>'+
+            '<input id="bud-bh" type="number" placeholder="Bid Hours" step="0.01">'+
+            '<input id="bud-eq" type="number" placeholder="Equip ($)" step="0.01">'+
+            '<input id="bud-lb" type="number" placeholder="Labor ($)" step="0.01">'+
+            '<input id="bud-mt" type="number" placeholder="Material ($)" step="0.01">'+
+            '<input id="bud-fr" type="number" placeholder="Fringe ($)" step="0.01">'+
+            '<input id="bud-bd" type="number" placeholder="Burden ($)" step="0.01">'+
+          '</div>'+
+          '<div class="bud-form-actions"><button class="btn btn-p" onclick="saveBudget()"><i class="ti ti-plus"></i> Add Budget</button></div>'+
+        '</div>'+
+        '<div class="modal-sec"><h3>Existing budgets ('+list.length+')</h3>'+tbl+'</div>'+
+      '</div>'+
+    '</div>'+
+  '</div>';
+}
+async function saveBudget(){
+  const gv=id=>(document.getElementById(id)||{}).value||'';
+  const jn=gv('bud-jn').trim();const ph=gv('bud-ph').trim();
+  if(!jn||!ph){toast('Job Number and Phase required','err');return;}
+  const payload={Title:jn+'-'+ph,JobNumber:jn,Phase:ph,PhaseType:gv('bud-pt')||'earth'};
+  const jname=gv('bud-jname').trim();if(jname)payload.JobName=jname;
+  const bc=parseFloat(gv('bud-bc'));if(!isNaN(bc))payload.BidCost=bc;
+  const bq=parseFloat(gv('bud-bq'));if(!isNaN(bq))payload.BidQty=bq;
+  const qu=gv('bud-qu');if(qu)payload.QtyUnit=qu;
+  const bh=parseFloat(gv('bud-bh'));if(!isNaN(bh))payload.BidHours=bh;
+  const eq=parseFloat(gv('bud-eq'));if(!isNaN(eq))payload.BidEquip=eq;
+  const lb=parseFloat(gv('bud-lb'));if(!isNaN(lb))payload.BidLabor=lb;
+  const mt=parseFloat(gv('bud-mt'));if(!isNaN(mt))payload.BidMaterial=mt;
+  const fr=parseFloat(gv('bud-fr'));if(!isNaN(fr))payload.BidFringe=fr;
+  const bd=parseFloat(gv('bud-bd'));if(!isNaN(bd))payload.BidBurden=bd;
+  try{
+    const tok=await getToken();if(!tok){toast('Auth failed','err');return;}
+    // Upsert: if this JobNumber-Phase already has a budget row, PATCH it instead of
+    // stacking a duplicate list item (dupes silently shadowed each other before).
+    const existing=S.budgets[jn+'-'+ph];
+    let r;
+    if(existing&&existing.__id){
+      const url='https://graph.microsoft.com/v1.0/sites/'+FD_SITE+'/lists/'+BUDGETS_LIST+'/items/'+existing.__id+'/fields';
+      r=await fetch(url,{method:'PATCH',headers:{Authorization:'Bearer '+tok,'Content-Type':'application/json'},body:JSON.stringify(payload)});
+    }else{
+      const url='https://graph.microsoft.com/v1.0/sites/'+FD_SITE+'/lists/'+BUDGETS_LIST+'/items';
+      r=await fetch(url,{method:'POST',headers:{Authorization:'Bearer '+tok,'Content-Type':'application/json'},body:JSON.stringify({fields:payload})});
+    }
+    if(!r.ok){const t=await r.text();toast('Save failed: '+t.slice(0,120),'err');return;}
+    toast(existing?'Budget updated':'Budget added','ok');
+    ['bud-jn','bud-jname','bud-ph','bud-bc','bud-bq','bud-bh','bud-eq','bud-lb','bud-mt','bud-fr','bud-bd'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});
+    await loadBudgets();render();
+  }catch(e){toast('Error: '+e.message,'err');}
+}
+async function deleteBudget(id){
+  if(!confirm('Delete this budget?'))return;
+  try{
+    const tok=await getToken();if(!tok){toast('Auth failed','err');return;}
+    const url='https://graph.microsoft.com/v1.0/sites/'+FD_SITE+'/lists/'+BUDGETS_LIST+'/items/'+id;
+    const r=await fetch(url,{method:'DELETE',headers:{Authorization:'Bearer '+tok}});
+    if(!r.ok){toast('Delete failed','err');return;}
+    toast('Deleted','ok');await loadBudgets();render();
+  }catch(e){toast('Error: '+e.message,'err');}
+}
+function setDatePreset(preset){
+  S.dpre=preset;
+  const today=new Date();
+  const todayIso=isoDate(today);
+  if(preset==='week'){
+    const d=new Date(today);d.setDate(today.getDate()-today.getDay());
+    S.dateFrom=isoDate(d);S.dateTo=todayIso;
+  }else if(preset==='lastWeek'){
+    const d=new Date(today);d.setDate(today.getDate()-today.getDay()-7);
+    const e=new Date(d);e.setDate(d.getDate()+6);
+    S.dateFrom=isoDate(d);S.dateTo=isoDate(e);
+  }else if(preset==='mtd'){
+    S.dateFrom=isoDate(new Date(today.getFullYear(),today.getMonth(),1));S.dateTo=todayIso;
+  }else if(preset==='last30'){
+    const d=new Date(today);d.setDate(today.getDate()-30);
+    S.dateFrom=isoDate(d);S.dateTo=todayIso;
+  }else if(preset==='ptd'){
+    const dates=(S.rows||[]).map(r=>r.Date||r.fields&&r.fields.Date).filter(Boolean).sort();
+    S.dateFrom=dates.length?dates[0].slice(0,10):'2026-01-01';S.dateTo=todayIso;
+  }
+  render();
+}
+function setView(v){if(v!=='asbuilt'){location.href='production.html';return;}S.view=v;S.selectedPhase='';render();}
+function setForeman(v){S.selectedForeman=v;render();}
+function setJob(v){S.selectedJob=v;render();}
+function setPhase(v){S.selectedPhase=v;render();}
+function setDate(which,v){if(which==='from')S.dateFrom=v;else S.dateTo=v;render();}
+async function refresh(){toast('Refreshing...');await Promise.all([loadData(),loadBudgets(),loadJobLines()]);render();toast('Updated — '+S.rows.length+' production rows, '+S.jobLines.length+' hour rows.');}
+function toast(msg,type){
+  const t=document.createElement('div');
+  t.className='toast'+(type==='err'?' err':'');
+  t.textContent=msg;
+  document.getElementById('toasts').appendChild(t);
+  setTimeout(()=>t.remove(),2400);
+}
+
+// ===== AS-BUILT PLAN VIEW (dashboard, additive) ===========================
+const AB_COLORS={'300':'#8a5a2b','310':'#8a5a2b','400':'#ff8800','450':'#9333ea','500':'#1faa4b','600':'#1466d6'};
+const AB_PLABEL={'300':'Earthwork','310':'Fine Grade','400':'Storm','450':'Force Main','500':'Sanitary','600':'Watermain'};
+const AB_UNIT={'300':'CY','310':'SY','400':'LF','450':'LF','500':'LF','600':'LF'};
+const AB_ROOT='JobPlans';
+const AB_DPR=Math.min(window.devicePixelRatio||1,2.5),AB_MAXPIX=14e6,AB_SS=3;
+let AB={pdfDoc:null,baseW:1,baseH:1,backing:1,cssW:1,cssH:1,zoom:1,fit:0,calibrating:false,calibPts:[],calibLine:null,ftPerPoint:0,gfx:0,gfy:0,gz:1,lz:1,tx:0,ty:0,userRot:0,pdfRotate:0,
+  plans:[],planIdx:0,marks:[],job:null,panning:false,sx:0,sy:0,gOn:false,gd:0,gnx:0,gny:0,lmx:0,lmy:0,lf:1,winBound:false};
+function abC(v,a,b){return Math.min(b,Math.max(a,v));}
+function abRot(){return (AB.pdfRotate+AB.userRot)%360;}
+function abWrap(){return document.getElementById('ab-wrap');}
+function abSetStatus(t){const s=document.getElementById('ab-status');if(s){s.innerHTML=t||'';s.style.display=t?'flex':'none';}}
+
+function abSheetBase(name){return (name||'plan').replace(/\.pdf$/i,'').replace(/[^A-Za-z0-9_-]+/g,'_');}
+function abScalePath(){return AB_ROOT+'/'+encodeURIComponent(AB.job)+'/'+encodeURIComponent(abSheetBase(AB.plans[AB.planIdx].name)+'.scale.json');}
+async function abLoadScale(){AB.ftPerPoint=0;try{const tok=await getToken();const r=await fetch(`https://graph.microsoft.com/v1.0/sites/${TS_SITE}/drive/root:/${abScalePath()}:/content`,{headers:{Authorization:'Bearer '+tok}});if(r.ok){const j=await r.json();if(j&&j.ftPerPoint>0)AB.ftPerPoint=j.ftPerPoint;}}catch(e){}}
+async function abSaveScale(){try{const tok=await getToken();await fetch(`https://graph.microsoft.com/v1.0/sites/${TS_SITE}/drive/root:/${abScalePath()}:/content`,{method:'PUT',headers:{Authorization:'Bearer '+tok,'Content-Type':'application/json'},body:JSON.stringify({ftPerPoint:AB.ftPerPoint,setBy:(auth.user&&auth.user.name)||'office',date:new Date().toISOString()})});}catch(e){console.warn('ab save scale',e);}}
+function abSyncScale(){const b=document.getElementById('ab-scalebtn');if(!b)return;if(AB.ftPerPoint){b.textContent='Scale \u2713';b.classList.add('btn-p');}else{b.textContent='Set scale';b.classList.remove('btn-p');}}
+function abBanner(t){const b=document.getElementById('ab-banner');if(b){b.textContent=t||'';b.style.display=t?'block':'none';}}
+function abPtFromClient(cx,cy){const w=abWrap(),r=w.getBoundingClientRect();const x=cx-r.left,y=cy-r.top,sw=AB.cssW*AB.zoom,sh=AB.cssH*AB.zoom;return{x:Math.min(1,Math.max(0,(x-AB.tx)/sw)),y:Math.min(1,Math.max(0,(y-AB.ty)/sh))};}
+function abStartCalib(){if(!AB.pdfDoc){abSetStatus('Open a job and sheet first.');setTimeout(function(){abSetStatus('');},1500);return;}AB.calibrating=true;AB.calibPts=[];AB.calibLine=null;abHideDetail();document.getElementById('ab-calibpanel').style.display='none';abBanner('\u2460 Click one end of a known distance (e.g. the scale bar). Zoom in first for accuracy.');abOverlay();}
+function abCalibTap(nx,ny){AB.calibPts.push({x:nx,y:ny});abOverlay();if(AB.calibPts.length===1){abBanner('\u2461 Click the other end');return;}abBanner('');const panel=document.getElementById('ab-calibpanel');panel.style.display='flex';const f=document.getElementById('ab-calibft');f.value='';setTimeout(function(){f.focus();},50);}
+async function abApplyCalib(){const ft=parseFloat(document.getElementById('ab-calibft').value);if(!(ft>0)||AB.calibPts.length<2)return;const a={x:AB.calibPts[0].x*AB.baseW,y:AB.calibPts[0].y*AB.baseH},b={x:AB.calibPts[1].x*AB.baseW,y:AB.calibPts[1].y*AB.baseH};const d=Math.hypot(b.x-a.x,b.y-a.y);if(d>0){AB.ftPerPoint=ft/d;AB.calibLine={p1:AB.calibPts[0],p2:AB.calibPts[1]};await abSaveScale();}AB.calibrating=false;AB.calibPts=[];document.getElementById('ab-calibpanel').style.display='none';abBanner('Scale saved \u2014 foremen will use this automatically.');setTimeout(function(){abBanner('');},2400);abSyncScale();abOverlay();}
+function abCancelCalib(){AB.calibrating=false;AB.calibPts=[];document.getElementById('ab-calibpanel').style.display='none';abBanner('');abOverlay();}
+function abDrawCalib(ctx,W,H){const cp=AB.calibPts&&AB.calibPts.length?AB.calibPts:(AB.calibLine?[AB.calibLine.p1,AB.calibLine.p2]:[]);if(!cp.length)return;const sc=AB.backing;if(cp.length===2){ctx.save();ctx.strokeStyle='#00b3ff';ctx.lineWidth=Math.max(2,sc*1.2);ctx.setLineDash([10,7]);ctx.beginPath();ctx.moveTo(cp[0].x*W,cp[0].y*H);ctx.lineTo(cp[1].x*W,cp[1].y*H);ctx.stroke();ctx.restore();}cp.forEach(function(p){ctx.fillStyle='#00b3ff';ctx.beginPath();ctx.arc(p.x*W,p.y*H,Math.max(6,sc*4),0,Math.PI*2);ctx.fill();ctx.lineWidth=Math.max(2,sc);ctx.strokeStyle='#fff';ctx.stroke();});}
+function abDetailCanvas(){let d=document.getElementById('ab-detail');if(!d){d=document.createElement('canvas');d.id='ab-detail';d.style.cssText='position:absolute;pointer-events:none;z-index:5;display:none';abWrap().appendChild(d);}return d;}
+function abHideDetail(){const d=document.getElementById('ab-detail');if(d)d.style.display='none';}
+function abScheduleSharpen(){clearTimeout(AB._sharpT);AB._sharpT=setTimeout(abSharpen,300);}
+async function abSharpen(){
+  if(AB.calibrating){abHideDetail();return;}
+  if(!AB.pdfDoc||AB.gOn||AB.panning||AB._sharpening)return;
+  if(AB.zoom<=1.2){abHideDetail();return;}
+  AB._sharpening=true;
+  try{
+    const w=abWrap();if(!w){AB._sharpening=false;return;}
+    const cW=w.clientWidth,cH=w.clientHeight,sw=AB.cssW*AB.zoom,sh=AB.cssH*AB.zoom;
+    const nx0=Math.max(0,(0-AB.tx)/sw),ny0=Math.max(0,(0-AB.ty)/sh),nx1=Math.min(1,(cW-AB.tx)/sw),ny1=Math.min(1,(cH-AB.ty)/sh);
+    if(nx1-nx0<=0.001||ny1-ny0<=0.001){AB._sharpening=false;return;}
+    const page=await AB.pdfDoc.getPage(1);
+    let scale=AB.zoom*AB.fit*AB_DPR;
+    let cw=Math.round((nx1-nx0)*AB.baseW*scale),ch=Math.round((ny1-ny0)*AB.baseH*scale);
+    const area=cw*ch;if(area>AB_MAXPIX){const k=Math.sqrt(AB_MAXPIX/area);scale*=k;cw=Math.round(cw*k);ch=Math.round(ch*k);}
+    if(cw<2||ch<2){AB._sharpening=false;return;}
+    const vp=page.getViewport({scale:scale,rotation:abRot()});
+    const off=document.createElement('canvas');off.width=cw;off.height=ch;
+    await page.render({canvasContext:off.getContext('2d'),viewport:vp,transform:[1,0,0,1,-nx0*vp.width,-ny0*vp.height]}).promise;
+    if(AB.gOn||AB.panning||!abWrap()){AB._sharpening=false;return;}
+    const ic=off.getContext('2d');ic.lineCap='round';ic.lineJoin='round';
+    const MX=function(x){return ((x-nx0)/(nx1-nx0))*cw;},MY=function(y){return ((y-ny0)/(ny1-ny0))*ch;};
+    abShown().forEach(function(m){(m.strokes||[]).forEach(function(st){const col=st.color||AB_COLORS[st.phase]||'#c8102e';ic.strokeStyle=col;ic.globalAlpha=st.kind==='line'?.85:.4;ic.lineWidth=(st.width||3)*scale;const pts=(st.pts||[]).map(abXY);ic.beginPath();pts.forEach(function(p,i){const x=MX(p.x),y=MY(p.y);i?ic.lineTo(x,y):ic.moveTo(x,y);});ic.stroke();if(st.kind==='line'&&pts.length>=2){const n=pts.length;abArr(ic,MX(pts[n-2].x),MY(pts[n-2].y),MX(pts[n-1].x),MY(pts[n-1].y),14*scale,col);}});});
+    ic.globalAlpha=1;
+    const d=abDetailCanvas();d.width=cw;d.height=ch;
+    d.style.left=(AB.tx+nx0*sw)+'px';d.style.top=(AB.ty+ny0*sh)+'px';d.style.width=((nx1-nx0)*sw)+'px';d.style.height=((ny1-ny0)*sh)+'px';
+    d.getContext('2d').drawImage(off,0,0);d.style.display='block';
+  }catch(e){console.warn('ab sharpen',e);}
+  AB._sharpening=false;
+}
+let abPrevVp=null,abOrientBound=false;
+function abLockVP(){const m=document.querySelector('meta[name="viewport"]');if(m){if(abPrevVp==null)abPrevVp=m.getAttribute('content');m.setAttribute('content','width=device-width, initial-scale=1, maximum-scale=1, minimum-scale=1, user-scalable=no');}}
+function abUnlockVP(){const m=document.querySelector('meta[name="viewport"]');if(m&&abPrevVp!=null){m.setAttribute('content',abPrevVp);abPrevVp=null;}}
+function renderAsBuilt(){
+  const roleBadge=`<span class="rb ${auth.role}">${auth.role}</span>`;
+  document.getElementById('app').innerHTML=`
+    <div class="hdr"><div class="hdr-in">
+      <div class="brand"><div class="logo">VH</div><span>As-Built</span></div>
+      <div class="uline"><span class="nm">${esc(auth.user.name)}</span>${roleBadge}
+        <button class="btn btn-sm" onclick="signOut()" title="Sign out"><i class="ti ti-logout"></i></button></div>
+    </div></div>
+    <div class="container" style="max-width:none;padding:10px 12px">
+      <div class="vt" role="tablist" aria-label="View">
+        <button onclick="setView('earth')"><i class="ti ti-mountain"></i> Earthwork</button>
+        <button onclick="setView('util')"><i class="ti ti-tool"></i> Utility</button>
+        <button class="on"><i class="ti ti-map-2"></i> As-Built</button>
+      </div>
+      <div class="ctrl">
+        <div class="cg"><label>Job</label>
+          <select onchange="abSelectJob(this.value)">
+            <option value="">Select job…</option>
+            ${S.jobs.map(j=>`<option value="${esc(j)}" ${j===S.selectedJob?'selected':''}>${esc(j)}</option>`).join('')}
+          </select></div>
+        <div class="cg"><label>Sheet</label><select id="ab-sheet" onchange="abPickPlan(this.value)"><option>—</option></select></div>
+        <div class="cg"><label>From</label><input type="date" value="${S.dateFrom||''}" onchange="abSetDate('from',this.value)"></div>
+        <div class="cg"><label>To</label><input type="date" value="${S.dateTo||''}" onchange="abSetDate('to',this.value)"></div>
+        <div class="cg" style="margin-left:auto;flex-direction:row;gap:6px;align-items:flex-end">
+          <button class="btn btn-sm" id="ab-scalebtn" onclick="abStartCalib()">Set scale</button>
+          <button class="btn btn-sm" onclick="abZoom(1.3)">+</button>
+          <button class="btn btn-sm" onclick="abZoom(0.77)">−</button>
+          <button class="btn btn-sm" onclick="abFit()">Fit</button>
+          <button class="btn btn-sm" onclick="abRotate()"><i class="ti ti-rotate"></i></button>
+          <button class="btn btn-sm" onclick="abDownload()"><i class="ti ti-download"></i></button>
+          <button class="btn btn-p btn-sm" onclick="abPrint()"><i class="ti ti-printer"></i> Print</button>
+        </div>
+      </div>
+      <div style="display:flex;gap:12px;align-items:stretch;flex-wrap:wrap">
+        <div id="ab-wrap" style="flex:1;min-width:300px;position:relative;overflow:hidden;background:#e9e9e9;border:1px solid var(--border);border-radius:8px;touch-action:none;cursor:grab;height:calc(100vh - 150px);min-height:420px">
+          <div id="ab-stack" style="position:absolute;left:0;top:0;transform-origin:0 0;touch-action:none">
+            <canvas id="ab-pdf" style="display:block;background:#fff;touch-action:none"></canvas>
+            <canvas id="ab-ink" style="position:absolute;left:0;top:0;touch-action:none"></canvas>
+          </div>
+          <div id="ab-banner" style="display:none;position:absolute;top:8px;left:50%;transform:translateX(-50%);background:#0ea5e9;color:#00121c;font-weight:700;padding:8px 14px;border-radius:8px;z-index:40;font-size:13px;max-width:90%;text-align:center"></div>
+          <div id="ab-calibpanel" style="display:none;position:absolute;top:8px;left:50%;transform:translateX(-50%);background:#fff;color:#111;padding:10px 12px;border-radius:10px;z-index:41;box-shadow:0 6px 24px rgba(0,0,0,.25);align-items:center;gap:8px;flex-wrap:wrap"><span style="font-size:13px;font-weight:600">Distance:</span><input id="ab-calibft" type="number" placeholder="feet" onkeydown="if(event.key==='Enter')abApplyCalib()" style="width:90px;padding:7px;border:1px solid #ccc;border-radius:6px;font-size:14px"/><span style="font-weight:600">ft</span><button class="btn btn-p btn-sm" onclick="abApplyCalib()">Apply</button><button class="btn btn-sm" onclick="abCancelCalib()">Cancel</button></div>
+          <div id="ab-status" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#777;font-size:14px;text-align:center;padding:20px"></div>
+        </div>
+        <div style="width:280px;flex-shrink:0;display:flex;flex-direction:column;gap:12px">
+          <div class="sec" style="margin:0"><h2>Quantities to date <span class="h2-sub" id="ab-range"></span></h2><div id="ab-totals" style="font-size:13px;color:var(--text2)">Select a job.</div></div>
+          <div class="sec" style="margin:0"><h2>Days on record</h2><div id="ab-days" style="font-size:13px;color:var(--text2)">—</div></div>
+        </div>
+      </div>
+    </div>`;
+  abBindView();abLockVP();if(!abOrientBound){abOrientBound=true;window.addEventListener('orientationchange',function(){if(document.getElementById('ab-wrap')&&AB.pdfDoc)setTimeout(function(){abRender(true);},350);});}
+  abSetStatus(S.selectedJob?'Loading…':'Select a job to view its as-built plan.');
+  if(S.selectedJob)abLoadJob();else abTotals();
+}
+function abSelectJob(v){S.selectedJob=v;abLoadJob();}
+function abSetDate(which,v){if(which==='from')S.dateFrom=v;else S.dateTo=v;abOverlay();}
+
+async function abLoadJob(){
+  const job=S.selectedJob;AB.job=job;AB.marks=[];AB.plans=[];AB.pdfDoc=null;
+  if(!job){abSetStatus('Select a job to view its as-built plan.');abTotals();return;}
+  abSetStatus('Loading plans…');
+  const tok=await getToken();if(!tok){abSetStatus('Sign-in required.');return;}
+  try{
+    const r=await fetch(`https://graph.microsoft.com/v1.0/sites/${TS_SITE}/drive/root:/${AB_ROOT}/${encodeURIComponent(job)}:/children`,{headers:{Authorization:'Bearer '+tok}});
+    if(r.status===404){abSetStatus(`No plans for job ${esc(job)} yet.<br>Upload plan PDFs to ${AB_ROOT}/${esc(job)} in SharePoint.`);abTotals();return;}
+    if(!r.ok)throw new Error('plans '+r.status);
+    const d=await r.json();
+    AB.plans=(d.value||[]).filter(c=>c.file&&/\.pdf$/i.test(c.name||''));
+    if(!AB.plans.length){abSetStatus(`No plan PDFs in ${AB_ROOT}/${esc(job)}.`);abTotals();return;}
+  }catch(e){console.error(e);abSetStatus('Could not load plans.');return;}
+  const sel=document.getElementById('ab-sheet');if(sel)sel.innerHTML=AB.plans.map((p,i)=>`<option value="${i}">${esc(p.name.replace(/\.pdf$/i,''))}</option>`).join('');
+  await abLoadMarks(tok);
+  await abPickPlan(0);
+}
+async function abLoadMarks(tok){
+  AB.marks=[];
+  try{
+    const r=await fetch(`https://graph.microsoft.com/v1.0/sites/${TS_SITE}/drive/root:/${AB_ROOT}/${encodeURIComponent(AB.job)}/Marks:/children?$top=400`,{headers:{Authorization:'Bearer '+tok}});
+    if(r.ok){const d=await r.json();const files=(d.value||[]).filter(c=>c.file&&/\.json$/i.test(c.name||''));
+      for(const f of files){try{const u=f['@microsoft.graph.downloadUrl'];AB.marks.push(await (await fetch(u)).json());}catch(e){}}}
+  }catch(e){}
+}
+async function abPickPlan(i){
+  AB.planIdx=+i;abSetStatus('Rendering…');
+  try{
+    const f=AB.plans[AB.planIdx];const u=f['@microsoft.graph.downloadUrl'];
+    const buf=await (await fetch(u)).arrayBuffer();
+    pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+    AB.pdfDoc=await pdfjsLib.getDocument({data:buf.slice(0)}).promise;
+    AB.userRot=0;await abRender(true);abSetStatus('');abTotals();await abLoadScale();abSyncScale();
+  }catch(e){console.error(e);abSetStatus('Could not open plan PDF.');}
+}
+async function abRender(reset){
+  if(!AB.pdfDoc)return;const page=await AB.pdfDoc.getPage(1);AB.pdfRotate=page.rotate||0;
+  const w=abWrap();const cW=w.clientWidth,cH=w.clientHeight;if(cW<10){setTimeout(()=>abRender(reset),60);return;}
+  const base=page.getViewport({scale:1,rotation:abRot()});AB.baseW=base.width;AB.baseH=base.height;
+  if(reset||!AB.fit){AB.fit=Math.min((cW-12)/AB.baseW,(cH-12)/AB.baseH);AB.zoom=1;}const fit=AB.fit;
+  AB.cssW=AB.baseW*fit;AB.cssH=AB.baseH*fit;
+  let rs=fit*AB_DPR*AB_SS;const _md=4096/Math.max(AB.baseW,AB.baseH);if(rs>_md)rs=_md;const tot=(AB.baseW*rs)*(AB.baseH*rs);if(tot>AB_MAXPIX)rs*=Math.sqrt(AB_MAXPIX/tot);AB.backing=rs;
+  const vp=page.getViewport({scale:rs,rotation:abRot()});
+  const pc=document.getElementById('ab-pdf'),oc=document.getElementById('ab-ink');
+  [pc,oc].forEach(c=>{c.width=Math.round(vp.width);c.height=Math.round(vp.height);c.style.width=AB.cssW+'px';c.style.height=AB.cssH+'px';});
+  const ctx=pc.getContext('2d');ctx.clearRect(0,0,pc.width,pc.height);
+  await page.render({canvasContext:ctx,viewport:vp}).promise;
+  if(reset){AB.tx=AB.cssW<cW?(cW-AB.cssW)/2:0;AB.ty=AB.cssH<cH?(cH-AB.cssH)/2:0;abHideDetail();}
+  abApply();abOverlay();
+}
+function abApply(){const w=abWrap(),cW=w.clientWidth,cH=w.clientHeight;
+  const sw=AB.cssW*AB.zoom,sh=AB.cssH*AB.zoom;
+  AB.tx=sw<=cW?(cW-sw)/2:abC(AB.tx,cW-sw,0);
+  AB.ty=sh<=cH?(cH-sh)/2:abC(AB.ty,cH-sh,0);
+  document.getElementById('ab-stack').style.transform=`translate(${AB.tx}px,${AB.ty}px) scale(${AB.zoom})`;}
+function abSetZoom(nz,ax,ay){nz=abC(nz,0.5,12);if(Math.abs(nz-AB.zoom)<1e-3)return;abHideDetail();const fx=(ax-AB.tx)/(AB.cssW*AB.zoom),fy=(ay-AB.ty)/(AB.cssH*AB.zoom);AB.zoom=nz;AB.tx=ax-fx*AB.cssW*nz;AB.ty=ay-fy*AB.cssH*nz;abApply();abScheduleSharpen();}
+function abZoom(f){const w=abWrap();abSetZoom(AB.zoom*f,w.clientWidth/2,w.clientHeight/2);}
+async function abFit(){await abRender(true);}
+function abRotate(){const t=p=>[1-(p[1]!=null?p[1]:p.y),(p[0]!=null?p[0]:p.x)];AB.marks.forEach(m=>(m.strokes||[]).forEach(st=>{st.pts=(st.pts||[]).map(t);}));AB.userRot=(AB.userRot+90)%360;abRender(true);}
+
+function abInRange(d){const f=S.dateFrom,t=S.dateTo;if(f&&d<f)return false;if(t&&d>t)return false;return true;}
+function abShown(){return AB.marks.filter(m=>abInRange((m.date||'').slice(0,10)));}
+function abArr(ctx,x1,y1,x2,y2,sz,col){const a=Math.atan2(y2-y1,x2-x1);ctx.save();ctx.globalAlpha=.95;ctx.fillStyle=col;
+  ctx.beginPath();ctx.moveTo(x2,y2);ctx.lineTo(x2-sz*Math.cos(a-.45),y2-sz*Math.sin(a-.45));ctx.lineTo(x2-sz*Math.cos(a+.45),y2-sz*Math.sin(a+.45));ctx.closePath();ctx.fill();ctx.restore();}
+function abXY(p){return{x:(p[0]!=null?p[0]:p.x),y:(p[1]!=null?p[1]:p.y)};}
+function abPaint(ctx,W,H,sc){ctx.lineCap='round';ctx.lineJoin='round';
+  abShown().forEach(m=>{(m.strokes||[]).forEach(st=>{const col=st.color||AB_COLORS[st.phase]||'#c8102e';
+    ctx.strokeStyle=col;ctx.globalAlpha=st.kind==='line'?.85:.4;ctx.lineWidth=(st.width||3)*sc;
+    const pts=(st.pts||[]).map(abXY);ctx.beginPath();pts.forEach((p,i)=>{const x=p.x*W,y=p.y*H;i?ctx.lineTo(x,y):ctx.moveTo(x,y);});ctx.stroke();
+    if(st.kind==='line'&&pts.length>=2){const n=pts.length;abArr(ctx,pts[n-2].x*W,pts[n-2].y*H,pts[n-1].x*W,pts[n-1].y*H,14*sc,col);}});});
+  ctx.globalAlpha=1;}
+function abOverlay(){const oc=document.getElementById('ab-ink');if(!oc)return;const ctx=oc.getContext('2d');ctx.clearRect(0,0,oc.width,oc.height);abPaint(ctx,oc.width,oc.height,AB.backing);abDrawCalib(ctx,oc.width,oc.height);abTotals();abScheduleSharpen();}
+
+function abLen(st,W,H){const pts=(st.pts||[]).map(abXY);let L=0;for(let i=1;i<pts.length;i++){const a=pts[i-1],b=pts[i];L+=Math.hypot((b.x-a.x)*W,(b.y-a.y)*H);}return L;}
+function abArea(st,W,H){const pts=(st.pts||[]).map(abXY);let A=0;for(let i=0;i<pts.length;i++){const a=pts[i],b=pts[(i+1)%pts.length];A+=(a.x*W)*(b.y*H)-(b.x*W)*(a.y*H);}return Math.abs(A)/2;}
+function abFmt(n){return Math.round(n).toLocaleString();}
+function abTotals(){
+  const W=AB.baseW,H=AB.baseH;const agg={};let haul=0;const days={};
+  abShown().forEach(m=>{const fpp=m.ftPerPoint||0;const dk=(m.date||'').slice(0,10);if(dk){if(!days[dk])days[dk]={f:'',n:[]};if(m.foreman)days[dk].f=m.foreman;if(m.note)days[dk].n.push(m.note);}
+    (m.strokes||[]).forEach(st=>{const ph=st.phase||m.phase;const unit=AB_UNIT[ph]||'LF';
+      if(st.kind==='line'){const lf=abLen(st,W,H)*fpp;if(ph==='300'||ph==='310')haul+=lf;else agg[ph]=(agg[ph]||0)+lf;}
+      else{const sf=abArea(st,W,H)*fpp*fpp;if(unit==='CY')agg[ph]=(agg[ph]||0)+sf*(st.depth||1)/27;else if(unit==='SY')agg[ph]=(agg[ph]||0)+sf/9;else agg[ph]=(agg[ph]||0)+sf;}});});
+  const rEl=document.getElementById('ab-range');if(rEl)rEl.textContent=(S.dateFrom||'start')+' → '+(S.dateTo||'today');
+  const tEl=document.getElementById('ab-totals');if(tEl){let h='';const keys=Object.keys(agg).sort();
+    if(!keys.length&&!haul)h='<div style="color:var(--text3)">No marks in this date range.</div>';
+    keys.forEach(p=>{h+=`<div class="dr"><span class="lk"><span style="display:inline-block;width:11px;height:11px;border-radius:3px;background:${AB_COLORS[p]||'#999'};margin-right:6px;vertical-align:-1px"></span>${p} ${AB_PLABEL[p]||''}</span><span class="vk">${abFmt(agg[p])} ${AB_UNIT[p]||''}</span></div>`;});
+    if(haul)h+=`<div class="dr"><span class="lk">Earthwork haul</span><span class="vk">${abFmt(haul)} LF</span></div>`;
+    tEl.innerHTML=h;}
+  const dEl=document.getElementById('ab-days');if(dEl){const dk=Object.keys(days).sort();
+    dEl.innerHTML=dk.length?dk.map(d=>`<div class="dr"><span class="lk">${esc(d)}${days[d].n&&days[d].n.length?'<br><span style="font-size:11px;color:var(--text2)">'+esc(days[d].n.join(' · '))+'</span>':''}</span><span class="vk" style="font-weight:500;color:var(--text3)">${esc(days[d].f||'')}</span></div>`).join(''):'<div style="color:var(--text3)">No days in range.</div>';}
+}
+function abBindView(){const w=abWrap();if(!w)return;['gesturestart','gesturechange','gestureend'].forEach(ev=>w.addEventListener(ev,e=>e.preventDefault(),{passive:false}));
+  w.addEventListener('wheel',e=>{e.preventDefault();const r=w.getBoundingClientRect();abSetZoom(AB.zoom*(e.deltaY<0?1.15:0.87),e.clientX-r.left,e.clientY-r.top);},{passive:false});
+  w.addEventListener('mousedown',e=>{if(AB.calibrating){if(e.target&&e.target.closest&&e.target.closest('#ab-calibpanel'))return;const p=abPtFromClient(e.clientX,e.clientY);abCalibTap(p.x,p.y);return;}AB.panning=true;abHideDetail();AB.sx=e.clientX-AB.tx;AB.sy=e.clientY-AB.ty;});
+  w.addEventListener('touchstart',e=>{if(AB.calibrating&&e.touches.length===1){if(e.target&&e.target.closest&&e.target.closest('#ab-calibpanel'))return;e.preventDefault();const t=e.touches[0];const p=abPtFromClient(t.clientX,t.clientY);abCalibTap(p.x,p.y);return;}if(e.touches.length===2){e.preventDefault();AB.gOn=true;abHideDetail();const a=e.touches[0],b=e.touches[1];AB.gd=Math.max(1,Math.hypot(b.clientX-a.clientX,b.clientY-a.clientY));const r=w.getBoundingClientRect();const mx=(a.clientX+b.clientX)/2-r.left,my=(a.clientY+b.clientY)/2-r.top;AB.gfx=(mx-AB.tx)/(AB.cssW*AB.zoom);AB.gfy=(my-AB.ty)/(AB.cssH*AB.zoom);AB.gz=AB.zoom;AB.lz=AB.zoom;AB.lmx=mx;AB.lmy=my;}},{passive:false});
+  w.addEventListener('touchmove',e=>{if(AB.gOn&&e.touches.length>=2){e.preventDefault();const a=e.touches[0],b=e.touches[1];const f=Math.hypot(b.clientX-a.clientX,b.clientY-a.clientY)/AB.gd;const nz=abC(AB.gz*f,0.5,12);const r=w.getBoundingClientRect();const mx=(a.clientX+b.clientX)/2-r.left,my=(a.clientY+b.clientY)/2-r.top;AB.lmx=mx;AB.lmy=my;AB.lz=nz;document.getElementById('ab-stack').style.transform=`translate(${mx-AB.gfx*AB.cssW*nz}px,${my-AB.gfy*AB.cssH*nz}px) scale(${nz})`;}},{passive:false});
+  w.addEventListener('touchend',e=>{if(AB.gOn&&e.touches.length<2){AB.zoom=abC(AB.lz,0.5,12);AB.tx=AB.lmx-AB.gfx*AB.cssW*AB.zoom;AB.ty=AB.lmy-AB.gfy*AB.cssH*AB.zoom;abApply();abScheduleSharpen();AB.gOn=false;}});
+  if(!AB.winBound){AB.winBound=true;
+    window.addEventListener('mousemove',e=>{if(!AB.panning)return;AB.tx=e.clientX-AB.sx;AB.ty=e.clientY-AB.sy;abApply();});
+    window.addEventListener('mouseup',()=>{AB.panning=false;abScheduleSharpen();});}
+}
+async function abCombinedPDF(){
+  const {PDFDocument,rgb,StandardFonts}=PDFLib;const out=await PDFDocument.create();const EXP=3;
+  const page=await AB.pdfDoc.getPage(1);const vp=page.getViewport({scale:EXP,rotation:abRot()});
+  const cv=document.createElement('canvas');cv.width=Math.round(vp.width);cv.height=Math.round(vp.height);
+  const cx=cv.getContext('2d');await page.render({canvasContext:cx,viewport:vp}).promise;
+  abPaint(cx,cv.width,cv.height,EXP);
+  const lbl=(S.dateFrom||'start')+' → '+(S.dateTo||'today');
+  const bh=Math.round(20*EXP);cx.fillStyle='rgba(255,255,255,.9)';cx.fillRect(0,0,cv.width,bh);
+  cx.fillStyle='#111';cx.font='700 '+Math.round(11*EXP)+'px Arial';cx.textBaseline='middle';
+  cx.fillText('Job '+(AB.job||'')+' — As-built ('+lbl+')',8*EXP,bh/2);
+  const png=cv.toDataURL('image/png');const img=await out.embedPng(png);
+  const pg=out.addPage([cv.width/EXP,cv.height/EXP]);pg.drawImage(img,{x:0,y:0,width:cv.width/EXP,height:cv.height/EXP});
+  return await out.save();
+}
+async function abDownload(){if(!AB.pdfDoc)return;const bytes=await abCombinedPDF();const blob=new Blob([bytes],{type:'application/pdf'});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download='Job'+(AB.job||'')+'_asbuilt_'+(S.dateTo||'')+'.pdf';document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),5000);}
+async function abPrint(){if(!AB.pdfDoc)return;const bytes=await abCombinedPDF();const blob=new Blob([bytes],{type:'application/pdf'});const url=URL.createObjectURL(blob);const w=window.open(url);if(w){w.addEventListener('load',()=>{try{w.focus();w.print();}catch(e){}});}setTimeout(()=>URL.revokeObjectURL(url),60000);}
+
+initMsal().catch(e=>{
+  console.error(e);
+  document.getElementById('app').innerHTML=`<div class="auth"><div class="auth-c"><h1>Setup error</h1><p style="font-family:monospace;font-size:12px">${esc(e.message||String(e))}</p></div></div>`;
+});
+
+</script>
+</body>
+</html>
