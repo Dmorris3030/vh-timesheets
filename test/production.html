@@ -138,9 +138,11 @@ const FD_LIST='0e317e27-adb1-4bef-b57a-cb0524e60981'; // Field Data production l
 const FALLBACK_ADMINS=['dmorris@valentiheld.com','abewley@valentiheld.com','jroe@valentiheld.com','jtrenkamp@valentiheld.com','cbroeker@valentiheld.com','eroe@valentiheld.com','cwaters@valentiheld.com','mzielinski@valentiheld.com','mjanson@valentiheld.com','kpero@valentiheld.com','jschuetz@valentiheld.com'];
 const SCOPE_LIST_NAME='JobScope';
 const STATUS_LIST_NAME='TrackerStatus';
-const PHASE_LABELS={'300':'Earth — Mass','310':'Earth — Finish','400':'Storm','450':'Subsurface drain','500':'Sanitary','600':'Water'};
-const VH_TRK_BUILD='2026-11-25.48';
+const PHASE_LABELS={'300':'Earth — Mass','310':'Earth — Finish','400':'Storm','410':'Yard drains','450':'Subsurface drain','500':'Sanitary','600':'Water'};
+const VH_TRK_BUILD='2026-11-25.49';
 const OFFICE=/production\.html/i.test(location.pathname);
+const OFFICE_HIDE={'410':1};
+function ofShow(p){return !(OFFICE&&OFFICE_HIDE[p]);}
 const VH_BG=/[?&]autosave=1/.test(location.search); // loaded hidden by the time app, only to refresh the Excel trackers
 console.log('[VH] Job Trackers build',VH_TRK_BUILD);
 
@@ -589,7 +591,7 @@ function bidLineHtml(job,phase,rows){
 }
 // one line per utility: how complete, how many items done, in progress and not started, and feet in
 function completionHtml(job){
-  const all=S.scope.filter(function(r){return r.JobNum===job;});const phs=[...new Set(all.map(function(r){return r.Phase;}))].sort();if(!phs.length)return '';
+  const all=S.scope.filter(function(r){return r.JobNum===job;});const phs=[...new Set(all.map(function(r){return r.Phase;}))].sort().filter(ofShow);if(!phs.length)return '';
   const td='padding:7px 8px;border-top:1px solid var(--border)';let T={bid:0,earn:0,n:0,done:0,ip:0,lf:0,in:0};
   const bar=function(p,big){return '<div style="display:flex;align-items:center;gap:8px"><div style="flex:1;min-width:90px;height:'+(big?12:9)+'px;background:var(--bg2);border-radius:5px;overflow:hidden"><div style="width:'+Math.max(0,Math.min(100,p))+'%;height:100%;background:var(--green)"></div></div><b style="min-width:38px;text-align:right">'+fmt0(p)+'%</b></div>';};
   let h='<div class="sec" style="overflow-x:auto"><h2>Completion <span class="h2-sub">each item counts by its bid hours</span></h2><table style="width:100%;border-collapse:collapse;font-size:13px;min-width:560px"><thead><tr style="color:var(--text2);text-align:right"><th style="text-align:left;padding:6px 8px;font-weight:600">Utility</th><th style="text-align:left;padding:6px 8px;font-weight:600;width:36%">Complete</th><th style="padding:6px 8px;font-weight:600">Items done</th><th style="padding:6px 8px;font-weight:600">In progress</th><th style="padding:6px 8px;font-weight:600">Not started</th><th style="padding:6px 8px;font-weight:600">Feet installed</th></tr></thead><tbody>';
@@ -683,8 +685,8 @@ function officeHome(){
   const F=S.of||(S.of={mode:'all',date:new Date().toISOString().slice(0,10),job:'',phase:''});
   const rg=ofRange(F),a=rg[0],b=rg[1],inP=!!a;
   const allJobs=[...new Set(S.scope.map(function(r){return r.JobNum;}))].sort();const jobs=allJobs.filter(function(j){return !F.job||j===F.job;});
-  const phSet={};S.scope.forEach(function(r){if(!F.job||r.JobNum===F.job)phSet[r.Phase]=1;});const phList=Object.keys(phSet).sort();if(F.phase&&!phSet[F.phase])F.phase='';
-  const rowsJ=jobs.map(function(j){const phs=[...new Set(S.scope.filter(function(r){return r.JobNum===j;}).map(function(r){return r.Phase;}))].sort().filter(function(p){return !F.phase||p===F.phase;});
+  const phSet={};S.scope.forEach(function(r){if((!F.job||r.JobNum===F.job)&&ofShow(r.Phase))phSet[r.Phase]=1;});const phList=Object.keys(phSet).sort();if(F.phase&&!phSet[F.phase])F.phase='';
+  const rowsJ=jobs.map(function(j){const phs=[...new Set(S.scope.filter(function(r){return r.JobNum===j;}).map(function(r){return r.Phase;}))].sort().filter(function(p){return ofShow(p)&&(!F.phase||p===F.phase);});
     const P=phs.map(function(p){return ofPhase(j,p,a,b);});const T={job:j,P:P,ble:0,bidH:0,cum:0,n:0,done:0,eh:0,fh:0,earned:0,actual:0,labH:0,eqH:0,unH:0,capH:0,last:'',money:false};
     P.forEach(function(x){T.bidH+=x.bidH;T.cum+=x.cumEarn;T.n+=x.n;T.done+=x.done;T.eh+=x.earnedH;T.fh+=x.fieldH;T.labH+=x.act.labH;T.eqH+=x.act.eqH;T.unH+=x.act.unH;T.capH+=x.act.capH;if(x.last>T.last)T.last=x.last;
       if(isFinite(x.ble)){T.ble+=x.ble;T.money=true;if(isFinite(x.earned))T.earned+=x.earned;if(isFinite(x.act.total))T.actual+=x.act.total;}});
@@ -725,7 +727,7 @@ function officeHome(){
 function officeJobHtml(job){
   if(!S.costs){ofLoad();return '';}
   if(!S.earth){if(!S.earthLoading)loadEarth();return '<div class="sec"><p class="note">Loading timesheet hours\u2026</p></div>';}
-  const phs=[...new Set(S.scope.filter(function(r){return r.JobNum===job;}).map(function(r){return r.Phase;}))].sort();if(!phs.length)return '';
+  const phs=[...new Set(S.scope.filter(function(r){return r.JobNum===job;}).map(function(r){return r.Phase;}))].sort().filter(ofShow);if(!phs.length)return '';
   const th=function(x,l){return '<th style="'+(l?'text-align:left;':'')+'padding:7px 8px;font-weight:600;white-space:nowrap">'+x+'</th>';};const td='padding:8px;border-top:1px solid var(--border);white-space:nowrap';
   const P=phs.map(function(p){return ofPhase(job,p,null,null);});const B={e:0,l:0,f:0,b:0},A={e:0,l:0,f:0,b:0};let any=false,un=0;
   let h='<div class="sec" style="overflow-x:auto"><h2>Production by phase <span class="h2-sub">labor and equipment, with fringe and burden</span></h2><table style="width:100%;border-collapse:collapse;font-size:13px;min-width:900px"><thead><tr style="color:var(--text2);text-align:right">'+th('Phase',1)+th('Total Bid Hrs')+th('% Complete')+th('Bid Hrs')+th('Field Hrs')+th('Hrs +/\u2212')+th('Bid L&amp;E')+th('Earned $')+th('Actual $')+th('Gain / (Loss)')+th('At completion')+'</tr></thead><tbody>';
@@ -938,7 +940,7 @@ function renderJob(){
   const job=S.job;
   const rows=S.scope.filter(r=>r.JobNum===job);
   if(!rows.length)return `<div class="sec"><div class="empty">No scope rows for ${esc(job)}.</div></div>`;
-  const phases=[...new Set(rows.map(r=>r.Phase))].sort();
+  const phases=[...new Set(rows.map(r=>r.Phase))].sort().filter(ofShow);if(S.phase!=='ALL'&&!ofShow(S.phase))S.phase='ALL';
   const s=jobSummary(job);
   const actPh=actualByJobPhase(job);
   const actItem=actualByItem(job);

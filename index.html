@@ -648,7 +648,7 @@ async function initApp(){
   }catch(e){console.warn(e);}
   initWeeks();updUC();updNav();render();updBadge();
 }
-const VH_BUILD='2026-11-25.44';
+const VH_BUILD='2026-11-25.45';
 console.log('[VH] Timesheets build',VH_BUILD);
 let __vhAuthToastAt=0;
 // interactive=true only from a user-initiated action: saves drafts, then allows the MSAL
@@ -2468,8 +2468,8 @@ function upDayStats(d){let h=0;((d&&d.tasks)||[]).forEach(function(t){h+=upNum(t
 // gets one "Utility work" report: a single list of runs, structures, laterals, bid items and
 // other work, limited to the phases the crew has time on that day. Each phase keeps its own
 // hours check. Earthwork keeps its own screen.
-const UP_UTIL=['400','450','500','600'];
-const UP_PH={'400':'Storm','450':'Subsurface drain','500':'Sanitary','600':'Water main'};
+const UP_UTIL=['400','410','450','500','600'];
+const UP_PH={'400':'Storm','410':'Yard drains','450':'Subsurface drain','500':'Sanitary','600':'Water main'};
 const UP_OTHER=['Bench walls','Collars','Cleanup','Other work'];
 function upBidName(id){return String(id==null?'':id).replace(/^BID \d{3} /,'');}
 function upTsPhases(job,dt){const o={};UP_UTIL.forEach(function(p){const h=upCrewHrs({job:job,ph:p,dt:dt});if(h>0)o[p]=h;});return o;}
