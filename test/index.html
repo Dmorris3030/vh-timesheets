@@ -648,7 +648,7 @@ async function initApp(){
   }catch(e){console.warn(e);}
   initWeeks();updUC();updNav();render();updBadge();
 }
-const VH_BUILD='2026-11-24.39';
+const VH_BUILD='2026-11-24.40';
 console.log('[VH] Timesheets build',VH_BUILD);
 let __vhAuthToastAt=0;
 // interactive=true only from a user-initiated action: saves drafts, then allows the MSAL
@@ -1268,7 +1268,7 @@ async function tkSave(){
 function tkChoose(iso){
   showM('<div class="mh"></div><h2>Material tickets</h2><p>Photos upload straight to the job\'s Tickets folder.</p>'+
     '<button class="btn btn-p btn-bl" style="justify-content:flex-start;gap:14px;min-height:64px;margin-bottom:10px;text-align:left" onclick="closeM();tkOpen(\''+iso+'\',\'\',\'\')"><i class="ti ti-camera" style="font-size:24px"></i><span><strong style="font-size:16px;display:block">One ticket</strong><span style="font-size:12.5px;font-weight:400;opacity:.85">Take the photo and fill it in</span></span></button>'+
-    '<button class="btn btn-bl" style="justify-content:flex-start;gap:14px;min-height:64px;margin-bottom:10px;text-align:left" onclick="closeM();tkbOpen(\''+iso+'\',\'\',\'\')"><i class="ti ti-stack-2" style="font-size:24px"></i><span><strong style="font-size:16px;display:block">A stack of tickets</strong><span style="font-size:12.5px;color:var(--text2);font-weight:400">Same job and material. Only the quantity changes.</span></span></button>'+
+    '<button class="btn btn-bl" style="justify-content:flex-start;gap:14px;min-height:64px;margin-bottom:10px;text-align:left" onclick="closeM();tkbOpen(\''+iso+'\',\'\',\'\')"><i class="ti ti-stack-2" style="font-size:24px"></i><span><strong style="font-size:16px;display:block">A stack of tickets</strong><span style="font-size:12.5px;color:var(--text2);font-weight:400">One total for the day. Up to four tickets in each photo.</span></span></button>'+
     '<div class="mf"><button class="btn btn-bl" onclick="closeM()">Cancel</button></div>','tkch');
 }
 async function tkbOpen(dt,ph,job){
@@ -1289,7 +1289,7 @@ async function tkbOpen(dt,ph,job){
      '<strong style="flex:1;font-size:17px">Stack of tickets</strong>'+
      '<button class="btn btn-p" id="tkb-save" onclick="tkbSave()" style="min-height:42px"><i class="ti ti-check"></i> Save all</button></div>'+
    '<div style="flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:6px 16px 20px;max-width:640px;width:100%;margin:0 auto;box-sizing:border-box">'+
-     '<div style="font-size:14px;font-weight:700;margin-top:14px">Same on every ticket</div>'+
+     '<div style="font-size:14px;font-weight:700;margin-top:14px">For the whole stack</div>'+
      '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">'+
        '<div><span style="'+lbl+'">Job #</span><input id="tk-job" style="'+inp+'" value="'+q(job||mem.lastJob)+'"/></div>'+
        '<div><span style="'+lbl+'">Phase</span><select id="tk-phase" style="'+inp+'">'+phs.map(function(p){return '<option value="'+p+'"'+(p===ph?' selected':'')+'>'+(p||'--')+'</option>';}).join('')+'</select></div>'+
@@ -1299,7 +1299,8 @@ async function tkbOpen(dt,ph,job){
        '<div><span style="'+lbl+'">Material</span><select id="tk-mat" style="'+inp+'"></select></div>'+
        '<div><span style="'+lbl+'">Size (pipe)</span><input id="tk-size" style="'+inp+'"/></div>'+
        '<div><span style="'+lbl+'">Unit</span><select id="tk-unit" style="'+inp+'"></select></div></div>'+
-     '<div style="display:flex;align-items:baseline;gap:10px;margin-top:20px"><span style="font-size:14px;font-weight:700">Tickets</span><span id="tkb-count" style="font-size:12.5px;color:var(--text2)"></span></div>'+
+     '<span style="'+lbl+'">Total quantity for the day, all tickets together</span><input id="tkb-total" inputmode="decimal" placeholder="For example 412.6" style="'+inp+';font-size:19px;font-weight:700" value="'+q(mem.batchTotal||'')+'" onchange="tkbTotalKeep(this.value)"/>'+
+     '<div style="display:flex;align-items:baseline;gap:10px;margin-top:20px"><span style="font-size:14px;font-weight:700">Photos of the tickets</span><span id="tkb-count" style="font-size:12.5px;color:var(--text2)"></span></div>'+
      '<div id="tkb-list"></div>'+
      '<div id="tkb-discard" style="text-align:center;margin-top:14px"></div>'+
    '</div>'+
@@ -1320,8 +1321,8 @@ async function tkbAdd(inp){
     if(st&&files.length>1)st.textContent='adding photo '+(i+1)+' of '+files.length+'\u2026';
     try{
       const data=await new Promise(function(res,rej){const rd=new FileReader();rd.onload=function(){res(rd.result);};rd.onerror=function(){rej(rd.error);};rd.readAsDataURL(files[i]);});
-      const small=await compressPhoto(data,1800,0.72);
-      const rec={id:Date.now()+'-'+Math.random().toString(36).slice(2,8),draft:true,img:small,meta:{ticket:'',qty:''}};
+      const small=await compressPhoto(data,2400,0.8);
+      const rec={id:Date.now()+'-'+Math.random().toString(36).slice(2,8),draft:true,img:small,meta:{}};
       await tkPut(rec);
       if(!window.__tk||!window.__tk.batch)return;
       window.__tk.rows.push(rec);
@@ -1334,24 +1335,21 @@ function tkbRender(toEnd){
   const inp='width:100%;font-size:17px;padding:12px;border-radius:10px;border:1px solid var(--border);background:var(--bg);color:inherit;box-sizing:border-box';
   box.innerHTML=t.rows.map(function(r,i){
     return '<div id="tkb-'+r.id+'" style="border:1.5px solid var(--border);border-radius:14px;padding:10px;margin-top:10px">'+
-      '<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px"><strong style="font-size:14px;flex:1">Ticket '+(i+1)+'</strong><button class="btn btn-sm" title="Remove" onclick="tkbRemove(\''+r.id+'\')"><i class="ti ti-trash"></i></button></div>'+
+      '<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px"><strong style="font-size:14px;flex:1">Photo '+(i+1)+'</strong><button class="btn btn-sm" title="Remove" onclick="tkbRemove(\''+r.id+'\')"><i class="ti ti-trash"></i></button></div>'+
       '<img src="'+r.img+'" onclick="this.style.maxHeight=(this.style.maxHeight===\'none\')?\'210px\':\'none\'" style="display:block;width:100%;max-height:210px;object-fit:contain;background:#111;border-radius:10px;cursor:zoom-in"/>'+
-      '<div style="font-size:11.5px;color:var(--text2);margin:4px 0 6px">Tap the photo to enlarge it</div>'+
-      '<div>'+
-        '<input placeholder="Quantity" inputmode="decimal" value="'+wdEsc(r.meta.qty)+'" style="'+inp+'" oninput="tkbSet(\''+r.id+'\',\'qty\',this.value)" onchange="tkbKeep(\''+r.id+'\')"/>'+
-      '</div></div>';}).join('');
+      '<div style="font-size:11.5px;color:var(--text2);margin-top:4px">Tap the photo to enlarge it and check every ticket can be read</div></div>';}).join('');
   const dz=document.getElementById('tkb-discard');
-  if(dz)dz.innerHTML=t.rows.length?'<button class="btn btn-sm" style="color:#dc2626" onclick="tkbDiscard()"><i class="ti ti-trash"></i> Discard this whole stack</button>':'<div style="color:var(--text2);font-size:13.5px;padding:18px 0">No photos yet. Take a photo of each ticket, or shoot them all with the Camera app first and choose them here in one go.</div>';
+  if(dz)dz.innerHTML=t.rows.length?'<button class="btn btn-sm" style="color:#dc2626" onclick="tkbDiscard()"><i class="ti ti-trash"></i> Discard this whole stack</button>':'<div style="color:var(--text2);font-size:13.5px;padding:18px 0">No photos yet. Lay up to four tickets flat, not overlapping, and take a photo. Or shoot them all with the Camera app first and choose them here in one go.</div>';
   tkbCount();
   if(toEnd&&t.rows.length){const last=document.getElementById('tkb-'+t.rows[t.rows.length-1].id);if(last){last.scrollIntoView({block:'center'});}}
 }
+function tkbTotalKeep(v){const m=tkMem();m.batchTotal=String(v||'').trim();tkMemSave(m);}
 function tkbRow(id){const t=window.__tk;return t&&t.rows?t.rows.find(function(r){return r.id===id;}):null;}
 function tkbSet(id,f,v){const r=tkbRow(id);if(!r)return;r.meta[f]=v;tkbCount();}
 function tkbKeep(id){const r=tkbRow(id);if(r&&r.draft)tkPut(r).catch(function(){});}
 function tkbCount(){
   const t=window.__tk,el=document.getElementById('tkb-count');if(!t||!el)return;
-  const ready=t.rows.filter(function(r){return parseFloat(String(r.meta.qty).replace(/,/g,''))>0;}).length;
-  el.textContent=t.rows.length?(t.rows.length+' photo'+(t.rows.length>1?'s':'')+' \u00b7 '+ready+' filled in'):'';
+  el.textContent=t.rows.length?(t.rows.length+' photo'+(t.rows.length>1?'s':'')):'';
 }
 async function tkbRemove(id){
   if(!confirm('Remove this ticket photo?'))return;
@@ -1362,37 +1360,34 @@ async function tkbDiscard(){
   const t=window.__tk;if(!t||!t.rows.length)return;
   if(!confirm('Discard all '+t.rows.length+' photos in this stack? This cannot be undone.'))return;
   for(const r of t.rows){try{await tkDel(r.id);}catch(e){}}
-  t.rows=[];tkbRender(false);tkRefreshCount();
+  t.rows=[];const mm=tkMem();delete mm.batchTotal;tkMemSave(mm);const te=document.getElementById('tkb-total');if(te)te.value='';tkbRender(false);tkRefreshCount();
 }
 async function tkbSave(){
   const t=window.__tk;if(!t||!t.batch)return;
   const v=function(id){return document.getElementById(id).value.trim();};
   const miss=[];
   if(!v('tk-job'))miss.push('job #');
+  const total=parseFloat(v('tkb-total').replace(/,/g,''));
+  if(!(total>0))miss.push('total quantity for the day');
   if(!t.rows.length)miss.push('at least one photo');
   if(miss.length){toast('Still needed: '+miss.join(', ')+'.','error');return;}
-  let first=null,nBad=0;
-  t.rows.forEach(function(r){
-    const qty=parseFloat(String(r.meta.qty).replace(/,/g,''));
-    const ok=qty>0;const box=document.getElementById('tkb-'+r.id);
-    if(box)box.style.borderColor=ok?'var(--border)':'#dc2626';
-    if(!ok){nBad++;if(!first)first=box;}
-  });
-  if(nBad){toast(nBad+' ticket'+(nBad>1?'s are':' is')+' missing a quantity. Outlined in red.','error');if(first)first.scrollIntoView({block:'center'});return;}
   const btn=document.getElementById('tkb-save');btn.disabled=true;
   const kind=t.kind;
   const shared={date:v('tk-date'),job:v('tk-job'),phase:v('tk-phase'),kind:kind,material:v('tk-mat'),size:kind==='Stone'?'':v('tk-size'),unit:v('tk-unit'),notes:'',
     by:(auth.user&&auth.user.name)||'',byEmail:(auth.user&&auth.user.email)||''};
   const n=t.rows.length;
   try{
+    // the day's total sits on the first photo's line, so adding up the quantity column stays right
+    const grp='B'+Date.now().toString(36);let k=0;
     for(const r of t.rows){
-      r.meta=Object.assign({},shared,{qty:parseFloat(String(r.meta.qty).replace(/,/g,'')),at:new Date().toISOString()});
+      k++;
+      r.meta=Object.assign({},shared,{qty:k===1?total:'',grp:grp,part:k+' of '+n,dayTotal:total,notes:(k===1?('Total for the day, on '+n+' photo'+(n>1?'s':'')+'.'):('Photo '+k+' of '+n+'. The total is on the first line of this entry.')),at:new Date().toISOString()});
       delete r.draft;await tkPut(r);
     }
   }catch(e){btn.disabled=false;toast('Could not save on this device: '+((e&&e.message)||e),'error');return;}
-  const mem=tkMem();mem.lastJob=shared.job;tkMemSave(mem);
+  const mem=tkMem();mem.lastJob=shared.job;delete mem.batchTotal;tkMemSave(mem);
   tkClose();
-  toast(n+' ticket'+(n>1?'s':'')+' saved. '+(navigator.onLine?'Uploading now\u2026':'They will upload when you have signal.'),'success');
+  toast(n+' photo'+(n>1?'s':'')+' saved, '+total+' '+shared.unit+' for the day. '+(navigator.onLine?'Uploading now\u2026':'They will upload when you have signal.'),'success');
   tkRefreshCount();tkFlush(false);
 }
 async function tkFlush(loud){
@@ -1419,7 +1414,7 @@ async function tkSend(tok,rec){
   // 1. photo (skipped on retry if it already went up)
   if(!m.url){
     const blob=await (await fetch(rec.img)).blob();
-    const fname=[m.date,tkClean(m.material+(m.size?' '+m.size:'')),tkClean(String(m.qty==null?'':m.qty)+' '+(m.unit||'')),(m.supplier||m.ticket)?tkClean((m.supplier||'')+' T'+(m.ticket||'')):String(rec.id).replace(/[^A-Za-z0-9]/g,'').slice(-6)].filter(Boolean).join('_')+'.jpg';
+    const fname=[m.date,tkClean(m.material+(m.size?' '+m.size:'')),tkClean(m.part?('photo '+m.part):(String(m.qty==null?'':m.qty)+' '+(m.unit||''))),(m.supplier||m.ticket)?tkClean((m.supplier||'')+' T'+(m.ticket||'')):String(rec.id).replace(/[^A-Za-z0-9]/g,'').slice(-6)].filter(Boolean).join('_')+'.jpg';
     const up=function(){return fetch(tkUrl(dir+'/'+fname)+':/content?@microsoft.graph.conflictBehavior=rename',{method:'PUT',headers:{Authorization:'Bearer '+tok,'Content-Type':'image/jpeg'},body:blob});};
     let r=await up();
     if(r.status===404||r.status===409){await tkEnsureFolder(tok,jobDir,'Tickets');r=await up();}
