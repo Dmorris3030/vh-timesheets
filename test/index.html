@@ -648,7 +648,7 @@ async function initApp(){
   }catch(e){console.warn(e);}
   initWeeks();updUC();updNav();render();updBadge();
 }
-const VH_BUILD='2026-11-25.43-test';
+const VH_BUILD='2026-11-25.44';
 console.log('[VH] Timesheets build',VH_BUILD);
 let __vhAuthToastAt=0;
 // interactive=true only from a user-initiated action: saves drafts, then allows the MSAL
@@ -722,7 +722,7 @@ function updUC(){const c=document.getElementById('uc');if(!c)return;
   if(auth.user){c.innerHTML=`<span class="uc" onclick="showUM()"><span class="av">${auth.user.initials}</span></span>`;}
   else{c.innerHTML=`<button class="btn btn-p btn-sm" onclick="signIn()" style="white-space:nowrap"><svg width="13" height="13" viewBox="0 0 21 21" style="flex-shrink:0"><rect x="1" y="1" width="9" height="9" fill="#f25022"/><rect x="11" y="1" width="9" height="9" fill="#7fba00"/><rect x="1" y="11" width="9" height="9" fill="#00a4ef"/><rect x="11" y="11" width="9" height="9" fill="#ffb900"/></svg> Sign in</button>`;}
 }
-function showUM(){showM(`<div class="mh"></div><div style="display:flex;align-items:center;gap:14px;margin-bottom:18px"><span class="av" style="width:52px;height:52px;font-size:20px;flex-shrink:0">${auth.user.initials}</span><div><strong style="font-size:17px;letter-spacing:-.3px">${auth.user.name}</strong><br><span style="font-size:13px;color:var(--text2)">${auth.user.email}</span><br><span class="rb${auth.isAdmin?' adm':''}" style="margin-top:6px;display:inline-flex">${auth.isAdmin?'Administrator':'User'}</span></div></div><button class="btn btn-bl" onclick="location.href='production.html'" style="margin-bottom:8px"><i class="ti ti-chart-bar"></i> Production dashboard</button><button class="btn btn-bl" onclick="location.href='tracker.html'" style="margin-bottom:8px"><i class="ti ti-map-2"></i> Job trackers</button><button class="btn btn-d btn-bl" onclick="signOut();closeM()"><i class="ti ti-logout"></i> Sign out</button><div style="text-align:center;font-size:11px;color:var(--text2);margin-top:10px;opacity:.7">Build ${VH_BUILD}</div>`,'um');}
+function showUM(){showM(`<div class="mh"></div><div style="display:flex;align-items:center;gap:14px;margin-bottom:18px"><span class="av" style="width:52px;height:52px;font-size:20px;flex-shrink:0">${auth.user.initials}</span><div><strong style="font-size:17px;letter-spacing:-.3px">${auth.user.name}</strong><br><span style="font-size:13px;color:var(--text2)">${auth.user.email}</span><br><span class="rb${auth.isAdmin?' adm':''}" style="margin-top:6px;display:inline-flex">${auth.isAdmin?'Administrator':'User'}</span></div></div><button class="btn btn-bl" onclick="location.href='production.html'" style="margin-bottom:8px"><i class="ti ti-chart-bar"></i> Office dashboard</button><button class="btn btn-bl" onclick="location.href='tracker.html'" style="margin-bottom:8px"><i class="ti ti-map-2"></i> Job trackers</button><button class="btn btn-d btn-bl" onclick="signOut();closeM()"><i class="ti ti-logout"></i> Sign out</button><div style="text-align:center;font-size:11px;color:var(--text2);margin-top:10px;opacity:.7">Build ${VH_BUILD}</div>`,'um');}
 function setSS(s){const d=document.getElementById('sd');if(d)d.className='sd '+s;}
 
 
