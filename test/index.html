@@ -648,7 +648,7 @@ async function initApp(){
   }catch(e){console.warn(e);}
   initWeeks();updUC();updNav();render();updBadge();
 }
-const VH_BUILD='2026-11-24.40';
+const VH_BUILD='2026-11-25.41-test';
 console.log('[VH] Timesheets build',VH_BUILD);
 let __vhAuthToastAt=0;
 // interactive=true only from a user-initiated action: saves drafts, then allows the MSAL
@@ -2296,7 +2296,7 @@ function upOpen(dt,ph,job){
 }
 function upClose(){
   const u=window.__up;if(!u)return;const d=upDay(u,false);
-  if(d&&d.tasks.length){let on=0;d.tasks.forEach(function(t){on+=upNum(t.h);});const crewNow=upCrewHrs(u);const left=crewNow>0?Math.round((crewNow-on-upNum(d.np))*100)/100:0;
+  if(d&&d.tasks.length&&u.ph!=='300'&&u.ph!=='310'){let on=0;d.tasks.forEach(function(t){on+=upNum(t.h);});const crewNow=upCrewHrs(u);const left=crewNow>0?Math.round((crewNow-on-upNum(d.np))*100)/100:0;
     if(Math.abs(left)>0.01&&!confirm('The day does not add up yet ('+(left>0?left+' h not accounted for':(-left)+' h more than the crew worked')+'). Close anyway?'))return;}
   const el=document.getElementById('up-sheet');if(el)el.remove();window.__up=null;render();
 }
@@ -2331,9 +2331,8 @@ function upAdd(){
     const q=upNum((document.getElementById('up-ft')||{}).value);const hv=document.getElementById('up-haul');const haul=hv?upNum(hv.value):0;
     if(!q){err('Enter the quantity.');return;}
     if(hv&&!haul){err('Enter the haul distance.');return;}
-    if(!hr){err('Enter the production hours.');return;}
     const L=euLine(tk,haul||tk.lines[0].haul);
-    d.tasks.push({k:'e:'+tk.n.toUpperCase()+'|'+haul,type:'et',id:tk.n,u:tk.u,q:q,haul:haul,lineHaul:L.haul,p:L.p,val:upR2(q*L.p),h:hr,bid:0,areas:(u.areas&&u.areas.length)?u.areas.slice():undefined});
+    d.tasks.push({k:'e:'+tk.n.toUpperCase()+'|'+haul,type:'et',id:tk.n,u:tk.u,q:q,haul:haul,lineHaul:L.haul,p:L.p,val:upR2(q*L.p),h:0,bid:0,areas:(u.areas&&u.areas.length)?u.areas.slice():undefined});
   }else if(u.view==='strf'){
     if(!hr){err('Enter the production hours.');return;}
     d.tasks.push({k:'s:'+u.sel,type:'str',id:u.sel,h:hr,bid:upR2((upScope(u,'structure').find(function(x){return x.id===u.sel;})||{}).bh||0)});
@@ -2457,11 +2456,11 @@ function upLauncher(wk,dt,ro){
     if(ro&&!done)return;shown++;
     const openJob=keys.length===1?keys[0].split('|')[0]:(keys.length?'':(onTs.length===1?onTs[0]:''));
     let sub=P[3];
-    if(keys.length===1){const st=upDayStats(days[keys[0]]);sub='Job '+wdEsc(keys[0].split('|')[0])+' \u00b7 '+st.n+(st.n===1?' entry':' entries')+' \u00b7 '+st.h+' h'+(st.np?' \u00b7 '+st.np+' h lost':'');}
+    if(keys.length===1){const st=upDayStats(days[keys[0]]);sub='Job '+wdEsc(keys[0].split('|')[0])+' \u00b7 '+st.n+(st.n===1?' entry':' entries')+((ph==='300'||ph==='310')?'':' \u00b7 '+st.h+' h')+(st.np?' \u00b7 '+st.np+' h lost':'');}
     else if(keys.length>1)sub=keys.length+' jobs reported';
     else if(onTs.length)sub='On the timesheet for job '+wdEsc(onTs.join(', '))+'. Not reported yet.';
     h+='<button class="btn btn-bl" '+(ro?'disabled ':'')+'style="justify-content:flex-start;gap:14px;min-height:66px;margin-bottom:10px;text-align:left;'+(done?'border-color:#16a34a;':'')+'" onclick="upOpen(\''+dt+'\',\''+ph+'\',\''+safe(openJob)+'\')"><i class="ti '+P[2]+'" style="font-size:24px;color:'+(done?'#16a34a':'var(--accent)')+';flex-shrink:0"></i><span style="flex:1;min-width:0"><strong style="font-size:16px;display:block">'+P[1]+'</strong><span style="font-size:12.5px;color:var(--text2);font-weight:400">'+sub+'</span></span><i class="ti '+(done?'ti-circle-check':'ti-chevron-right')+'" style="color:'+(done?'#16a34a':'var(--text3)')+';font-size:20px;flex-shrink:0"></i></button>';
-    if(keys.length>1&&!ro)keys.forEach(function(k){const j=k.split('|')[0];const st=upDayStats(days[k]);h+='<button class="btn btn-sm" style="margin:-4px 0 10px 38px" onclick="upOpen(\''+dt+'\',\''+ph+'\',\''+safe(j)+'\')">Job '+wdEsc(j)+' \u00b7 '+st.n+(st.n===1?' entry':' entries')+' \u00b7 '+st.h+' h</button>';});
+    if(keys.length>1&&!ro)keys.forEach(function(k){const j=k.split('|')[0];const st=upDayStats(days[k]);h+='<button class="btn btn-sm" style="margin:-4px 0 10px 38px" onclick="upOpen(\''+dt+'\',\''+ph+'\',\''+safe(j)+'\')">Job '+wdEsc(j)+' \u00b7 '+st.n+(st.n===1?' entry':' entries')+((ph==='300'||ph==='310')?'':' \u00b7 '+st.h+' h')+'</button>';});
   });
   if(ro&&!shown)h+='<div class="nd" style="padding:20px 16px"><i class="ti ti-clipboard"></i>No production was reported for this day.</div>';
   // reports entered before this form existed stay visible until the week is turned in
@@ -2481,15 +2480,126 @@ function upBridge(u){
   if(!d)return;
   const mk=function(ref,fields){const e={id:(old[ref]&&old[ref].id)||(Date.now()+Math.random()),phase:u.ph,date:u.dt,job:u.job,upKey:key,upRef:ref,notes:''};Object.assign(e,fields);list.push(e);};
   const lats=u.ph==='500'?upScope(u,'lateral'):[];
+  const al=(u.ph==='300'||u.ph==='310')?euAlloc(u,d):null;
   (d.tasks||[]).forEach(function(t,i){
     if(t.type==='run')mk('t'+i,{strId:t.id,quantity:t.ft,productionHours:t.h,workType:'Pipe run'+(t.fin?' (finished)':'')});
     else if(t.type==='str')mk('t'+i,{strId:t.id,quantity:'',productionHours:t.h,workType:u.ph==='400'?'Structure set':'Manhole set'});
     else if(t.type==='lat'){const L=lats.find(function(x){return String(x.id)===String(t.id);})||{};mk('t'+i,{strId:t.id,quantity:L.q>0?L.q:'',productionHours:t.h,workType:'Lateral tied in'});}
     else if(t.type==='pipe')mk('t'+i,{strId:'',quantity:t.ft,productionHours:t.h,workType:'Pipe laid'});
-    else if(t.type==='et'){const fl={bidItem:t.id+(t.haul?' ('+t.haul+' ft haul)':''),workType:t.id,haulDistance:t.haul||'',productionHours:t.h,bidCostPerYard:t.p,unit:t.u};if(u.ph==='310')fl.areaFinished=t.q;else fl.yardsMovedTotal=t.q;mk('t'+i,fl);}
+    else if(t.type==='et'){const fl={bidItem:t.id+(t.haul?' ('+t.haul+' ft haul)':''),workType:t.id,haulDistance:t.haul||'',productionHours:(al&&al.per[i])?upR2(al.per[i].hrs+al.per[i].fh):'',bidCostPerYard:t.p,unit:t.u};if(al&&al.per[i]&&al.blocks.length){fl.totalCost=Math.round(al.per[i].cost);if(upNum(t.q)>0)fl.actualCostPerYard=Math.round(al.per[i].cost/upNum(t.q)*10000)/10000;}if(u.ph==='310')fl.areaFinished=t.q;else fl.yardsMovedTotal=t.q;mk('t'+i,fl);}
   });
   const np=upNum(d.np),note=String(d.note||'').trim();
-  if(np>0||note)mk('day',{workType:np>0?'Lost time':'Note',quantity:'',productionHours:'',notes:[np>0?('LOST TIME '+np+' h'+(d.why?': '+d.why:'')):'',note].filter(Boolean).join(' | ')});
+  const held=(al&&d.why)?('HELD UP: '+d.why):'';
+  if(np>0||note||held)mk('day',{workType:(np>0||held)?'Lost time':'Note',quantity:'',productionHours:'',notes:[np>0?('LOST TIME '+np+' h'+(d.why?': '+d.why:'')):held,note].filter(Boolean).join(' | ')});
+}
+// ===== EARTHWORK DAY: time and cost come from the timesheet ====================
+// Nobody types hours on earthwork. The timesheet already says who was there, on which machine
+// and for how long. That is cut into blocks: one per person-and-machine, plus one for any of a
+// person's hours not on a machine. With one task in the day the whole crew is on it. With two or
+// more, the foreman taps each block onto the task it worked; a block shared by two tasks is
+// split by hours. A foreman's own time follows the crew hours on each task.
+function euBlocks(u){
+  const c=euCache();const st=(c&&c.setup)||{};const rates=Object.assign({},EU_RATES,st.rates||{},((st.jobs||{})[u.job]||{}).rates||{});
+  const wk=S.weeks[S.currentWeek];const map={},order=[];if(!wk)return [];
+  const short=function(n){n=String(n||'').trim();if(n.indexOf(',')>0){const p=n.split(',');n=(p[1]||'').trim()+' '+p[0].trim();}const w=n.split(/\s+/);return w.length>1?(w[0]+' '+w[w.length-1].charAt(0)+'.'):n;};
+  (wk.employees||[]).forEach(function(eid){
+    const emp=empById(eid)||{};const nm=short(emp.name)||'?';let hrs=0,eqH=0;
+    getJobLines(wk,eid,u.dt).forEach(function(ln){
+      if(String(ln.job||'').trim()!==u.job||String(ln.phase||'').trim()!==u.ph)return;
+      const c2=calcJobHours(ln);const tot=(c2&&c2.total)||0;if(!(tot>0))return;hrs+=tot;
+      (ln.equipment||[]).forEach(function(x){
+        const hh=parseFloat(x&&x.hours)||0;if(!(hh>0))return;const numb=String((x&&(x.number||x.id||x.equipNum))||'').trim();
+        const reg=(typeof EQ!=='undefined'&&Array.isArray(EQ))?EQ.find(function(e){return String(e.number)===numb;}):null;
+        const desc=(reg&&reg.description)||(x&&x.description)||'';const cat=euCat(numb,desc,st);const id=eid+'|'+numb;
+        if(!map[id]){map[id]={id:id,eid:eid,name:nm,kind:'m',label:String(desc||('Machine '+numb)).slice(0,22),hours:0,rate:cat?(rates[cat]||0):0,norate:cat===null};order.push(id);}
+        map[id].hours+=hh;eqH+=hh;});
+    });
+    const lab=Math.round((hrs-eqH)*100)/100;
+    if(lab>0.01){const cls=euClass(emp.title);const id=eid+'|L';
+      map[id]={id:id,eid:eid,name:nm,kind:(cls==='FOREMAN'||cls==='SUPERVISOR')?'f':'l',label:cls==='FOREMAN'?'Foreman':(cls==='SUPERVISOR'?'Supervisor':'Labor'),hours:lab,rate:rates[cls]||0};order.push(id);}
+  });
+  return order.map(function(id){const b=map[id];b.hours=Math.round(b.hours*100)/100;return b;});
+}
+// make sure every earthwork task has a crew list once there are two or more of them
+function euInit(d,blocks){
+  const ets=(d.tasks||[]).filter(function(t){return t.type==='et';});if(ets.length<2)return false;
+  let ch=false;const any=ets.some(function(t){return t.crew&&Object.keys(t.crew).length;});
+  ets.forEach(function(t,i){if(!t.crew){t.crew={};if(!any&&i===0)blocks.forEach(function(b){if(b.kind!=='f')t.crew[b.id]=b.hours;});ch=true;}});
+  return ch;
+}
+function euAlloc(u,d){
+  const blocks=euBlocks(u);const B=blocks.filter(function(b){return b.kind!=='f';}),F=blocks.filter(function(b){return b.kind==='f';});
+  const tasks=(d&&d.tasks)||[];const etIdx=[];tasks.forEach(function(t,i){if(t.type==='et')etIdx.push(i);});const single=etIdx.length===1;
+  const per={};etIdx.forEach(function(i){per[i]={hrs:0,cost:0,fh:0,a:{}};});
+  let unH=0,unC=0;const unList=[];
+  B.forEach(function(b){
+    let sum=0;const raw={};
+    etIdx.forEach(function(i){const v=single?b.hours:Math.max(0,upNum((tasks[i].crew||{})[b.id]));raw[i]=v;sum+=v;});
+    const k=sum>b.hours+0.001?b.hours/sum:1;
+    etIdx.forEach(function(i){const v=Math.round(raw[i]*k*100)/100;if(v>0){per[i].a[b.id]=v;per[i].hrs+=v;per[i].cost+=v*b.rate;}});
+    const left=Math.round((b.hours-Math.min(sum,b.hours))*100)/100;
+    if(left>0.01&&etIdx.length){unH+=left;unC+=left*b.rate;unList.push(b.name+' \u00b7 '+b.label+' '+left+' h');}
+  });
+  let all=0;etIdx.forEach(function(i){all+=per[i].hrs;});
+  let fH=0,fC=0;F.forEach(function(b){fH+=b.hours;fC+=b.hours*b.rate;});
+  etIdx.forEach(function(i){const s=all>0?per[i].hrs/all:(single?1:0);per[i].fh=Math.round(fH*s*100)/100;per[i].cost+=fC*s;});
+  if(etIdx.length&&all<=0&&!single)unC+=fC;
+  let total=0,hours=0,norate=0;blocks.forEach(function(b){total+=b.hours*b.rate;hours+=b.hours;if(b.norate)norate+=b.hours;});
+  return {blocks:blocks,B:B,F:F,per:per,etIdx:etIdx,single:single,unH:Math.round(unH*100)/100,unC:unC,unList:unList,total:total,hours:Math.round(hours*100)/100,norate:norate};
+}
+function euTap(ti,bid){
+  const u=window.__up;const d=upDay(u,true);const t=d.tasks[ti];if(!t)return;const al=euAlloc(u,d);const b=al.B.find(function(x){return x.id===bid;});if(!b)return;
+  euInit(d,al.blocks);t.crew=t.crew||{};
+  if(upNum(t.crew[bid])>0){delete t.crew[bid];u.ask=null;upSave();upDraw();return;}
+  let other=0;al.etIdx.forEach(function(i){if(i!==ti)other+=Math.min(b.hours,upNum((d.tasks[i].crew||{})[bid]));});
+  if(other>0.01){u.ask={ti:ti,bid:bid};upDraw();const e=document.getElementById('eu-ask');if(e)e.scrollIntoView({block:'center'});return;}
+  t.crew[bid]=b.hours;u.ask=null;upSave();upDraw();
+}
+function euSplit(v){
+  const u=window.__up;if(!u||!u.ask)return;const d=upDay(u,true);const al=euAlloc(u,d);const b=al.B.find(function(x){return x.id===u.ask.bid;});const t=d.tasks[u.ask.ti];
+  v=upNum(v);if(!b||!t||!(v>0)){u.ask=null;upDraw();return;}
+  v=Math.min(v,b.hours);t.crew=t.crew||{};t.crew[b.id]=Math.round(v*100)/100;
+  let rest=Math.round((b.hours-v)*100)/100;
+  al.etIdx.forEach(function(i){if(i===u.ask.ti)return;const o=d.tasks[i];if(!o.crew||!(upNum(o.crew[b.id])>0))return;const keep=Math.min(upNum(o.crew[b.id]),rest);if(keep>0.01){o.crew[b.id]=Math.round(keep*100)/100;rest=Math.round((rest-keep)*100)/100;}else delete o.crew[b.id];});
+  u.ask=null;upSave();upDraw();
+}
+function euSplitType(){const e=document.getElementById('eu-ask-h');euSplit(e?e.value:0);}
+function euWhy(w){const u=window.__up;const d=upDay(u,true);d.why=(d.why===w?'':w);upSave();upDraw();}
+function euDay(u,d,inp,lbl,RS){
+  const al=euAlloc(u,d);if(euInit(d,al.blocks)){try{saveDraftSilent();}catch(e){}}
+  const al2=euAlloc(u,d);const esc1=function(x){return wdEsc(x);};const q1=function(x){return String(x).replace(/\\/g,'\\\\').replace(/'/g,"\\'");};
+  let h='';
+  // the crew, straight from the timesheet
+  h+='<div style="font-size:13px;font-weight:700;color:var(--text2);margin:14px 0 4px">Crew today, from your timesheet</div>';
+  if(!al2.blocks.length)h+='<div class="ib"><i class="ti ti-info-circle"></i><span>No time is on your timesheet yet for job '+esc1(u.job)+' on this phase today. Enter the crew and their equipment hours on the timesheet and the cost will show here.</span></div>';
+  else{h+='<div style="background:var(--bg2);border-radius:12px;padding:8px 12px">'+al2.blocks.map(function(b){return '<div style="display:flex;gap:8px;padding:3px 0;font-size:13.5px"><span style="flex:1;min-width:0">'+esc1(b.name)+' \u00b7 '+esc1(b.label)+(b.norate?' <span style="color:#d97706">(no rate set)</span>':'')+'</span><span style="color:var(--text2)">'+b.hours+' h</span><span style="min-width:64px;text-align:right">'+euMoney(b.hours*b.rate)+'</span></div>';}).join('')+
+     '<div style="display:flex;gap:8px;padding:5px 0 1px;margin-top:3px;border-top:1px solid var(--border);font-size:13.5px;font-weight:700"><span style="flex:1">Day</span><span>'+al2.hours+' h</span><span style="min-width:64px;text-align:right">'+euMoney(al2.total)+'</span></div></div>';}
+  h+='<div style="font-size:13px;font-weight:700;color:var(--text2);margin:16px 0 4px">Tasks today</div>';
+  if(!al2.etIdx.length)h+='<div style="color:var(--text2);font-size:13.5px;padding:6px 0">Nothing yet. Add the first task above.</div>';
+  let totV=0,totC=0;
+  al2.etIdx.forEach(function(i){
+    const t=d.tasks[i],p=al2.per[i];const val=upNum(t.val),cost=p.cost,g=Math.round(val-cost);totV+=val;totC+=cost;
+    h+='<div style="border:1.5px solid var(--border);border-radius:14px;padding:10px 12px;margin-bottom:10px"><div style="display:flex;align-items:flex-start;gap:8px"><div style="flex:1;min-width:0"><div style="font-weight:700;font-size:15px">'+esc1(t.id)+(t.haul?' \u00b7 '+t.haul+' ft haul':'')+'</div><div style="font-size:12.5px;color:var(--text2)">'+Number(t.q).toLocaleString()+' '+esc1(t.u)+' at $'+Number(t.p).toFixed(2)+((t.lineHaul&&t.haul!==t.lineHaul)?' (bid cost for a '+t.lineHaul+' ft haul)':'')+'</div></div>'+
+       (al2.blocks.length?'<div style="font-size:17px;font-weight:800;white-space:nowrap;color:'+(g>=0?'#16a34a':'#dc2626')+'">'+(g>=0?'+':'')+euMoney(g)+'</div>':'')+
+       '<button class="btn btn-sm" onclick="upRemove('+i+')"><i class="ti ti-x"></i></button></div>'+
+       '<div style="font-size:12.5px;margin-top:4px">Bid cost <b>'+euMoney(val)+'</b>'+(al2.blocks.length?' \u00b7 crew cost <b>'+euMoney(cost)+'</b> \u00b7 '+upR2(p.hrs+p.fh)+' h':'')+'</div>';
+    if(!al2.single&&al2.B.length){
+      h+='<div style="font-size:12px;color:var(--text2);margin:8px 0 5px">Who worked this task? Tap to add or take off.</div><div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(112px,1fr));gap:6px">';
+      al2.B.forEach(function(b){const on=p.a[b.id]||0;let other=0;al2.etIdx.forEach(function(j){if(j!==i)other+=(al2.per[j].a[b.id]||0);});const gone=!on&&other>=b.hours-0.01;
+        h+='<button class="btn" style="flex-direction:column;align-items:flex-start;gap:0;min-height:58px;padding:5px 8px;line-height:1.25;text-align:left;'+(on?'background:var(--accent);color:#fff;border-color:var(--accent)':(gone?'opacity:.5':''))+'" onclick="euTap('+i+',\''+q1(b.id)+'\')"><span style="font-weight:700;font-size:13.5px">'+esc1(b.name)+'</span><span style="font-size:11.5px;font-weight:400">'+esc1(b.label)+'</span><span style="font-size:11.5px;font-weight:400;opacity:.9">'+(on?(on+' of '+b.hours+' h'):(gone?'on another task':b.hours+' h'))+'</span></button>';});
+      h+='</div>';
+      if(al2.F.length)h+='<div style="font-size:12px;color:var(--text2);margin-top:6px">'+al2.F.map(function(b){return esc1(b.name)+' ('+esc1(b.label.toLowerCase())+')';}).join(', ')+': '+p.fh+' h, shared by the crew hours on each task</div>';
+    }else if(al2.single&&al2.blocks.length){h+='<div style="font-size:12px;color:var(--text2);margin-top:6px">Only one task today, so the whole crew is on it.</div>';}
+    if(u.ask&&u.ask.ti===i){const b=al2.B.find(function(x){return x.id===u.ask.bid;});
+      if(b){const opts=[1,2,3,4,5,6,8].filter(function(v){return v<b.hours;});
+        h+='<div id="eu-ask" style="border:2px solid var(--accent);border-radius:12px;padding:10px 12px;margin-top:10px"><div style="font-size:14.5px;font-weight:700;margin-bottom:8px">How many of '+esc1(b.name)+'\u2019s '+b.hours+' hours on '+esc1(b.label)+' were on this task?</div><div style="display:flex;flex-wrap:wrap;gap:8px">'+opts.map(function(v){return '<button class="btn" style="min-width:58px;min-height:46px;justify-content:center" onclick="euSplit('+v+')">'+v+' h</button>';}).join('')+'<button class="btn" style="min-height:46px" onclick="euSplit('+b.hours+')">All '+b.hours+'</button></div><div style="display:flex;gap:8px;margin-top:8px"><input id="eu-ask-h" inputmode="decimal" placeholder="Other hours" style="'+inp+';padding:10px;flex:1"/><button class="btn btn-p" onclick="euSplitType()">Use</button><button class="btn" onclick="window.__up.ask=null;upDraw()">Cancel</button></div><div style="font-size:12px;color:var(--text2);margin-top:6px">The rest stays on the other task.</div></div>';}}
+    h+='</div>';
+  });
+  if(al2.etIdx.length>1&&al2.unH>0.01)h+='<div class="ib" style="border-color:#d97706"><i class="ti ti-alert-triangle" style="color:#d97706"></i><span><b>'+al2.unH+' h not on a task</b> ('+euMoney(al2.unC)+'): '+esc1(al2.unList.join(', '))+'. Tap those onto the task they worked. Until then their cost counts for the day but not for a task.</span></div>';
+  if(al2.etIdx.length&&al2.blocks.length){totC+=al2.unC;const g=Math.round(totV-totC);
+    h+='<div style="margin-top:12px;padding:12px;border-radius:12px;background:var(--bg2);display:flex;align-items:center;gap:10px"><div style="flex:1"><div style="font-size:13.5px">Bid cost for the day\'s work <b>'+euMoney(totV)+'</b>. The crew and machines cost <b>'+euMoney(totC)+'</b>.</div><div style="font-size:11.5px;color:var(--text2)">Plus means under the bid cost.'+(al2.norate>0?' '+upR2(al2.norate)+' machine hours have no rate set and are counted at $0.':'')+'</div></div><div style="font-size:23px;font-weight:800;white-space:nowrap;color:'+(g>=0?'#16a34a':'#dc2626')+'">'+(g>=0?'+':'')+euMoney(g)+'</div></div>';}
+  h+='<span style="'+lbl+'">Notes (anything the office should know)</span><input style="'+inp+'" value="'+esc1(d.note||'')+'" onchange="upNote(this.value)"/>';
+  return h;
 }
 function upDraw(){
   const u=window.__up;if(!u)return;
@@ -2514,6 +2624,7 @@ function upDraw(){
     else if(u.ph==='600')h+=(upScope(u,'run').length?big('run','ti-line','Pipe run','Feet laid on a run'):'')+big('pipe','ti-ruler-measure','Pipe laid','Feet of water main laid today');
     else h+=big('run','ti-line','Pipe run','Feet laid on a run')+big('str','ti-circle-dot',u.ph==='400'?'Structure':'Manhole',u.ph==='400'?'A structure you set':'A manhole you set');
     if(u.ph==='500')h+=big('lat','ti-home','Laterals','Lots you tied in');
+    if(earth){h+=euDay(u,d,inp,lbl,RS);}else{
     h+='<div style="font-size:13px;font-weight:700;color:var(--text2);margin:14px 0 4px">Added today</div>';
     if(!d.tasks.length)h+='<div style="color:var(--text2);font-size:13.5px;padding:6px 0">Nothing yet.</div>';
     let on=0;
@@ -2527,6 +2638,7 @@ function upDraw(){
        upGainLine(d)+((left>0.01&&d.tasks.length)?'<button class="btn btn-sm" style="margin-top:8px" onclick="upFill('+left+')">Put the '+left+' h under non-production</button>':'')+'</div>';
     if(np>0)h+='<div style="font-size:12.5px;color:var(--text2);margin:10px 0 5px">Why was time lost? (tap one)</div><div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">'+RS.map(function(x){return '<button class="btn'+(d.why===x?' btn-p':'')+'" style="min-height:44px;justify-content:center;font-size:13.5px" onclick="upWhy(\''+x+'\')">'+x+'</button>';}).join('')+'</div>';
     h+='<span style="'+lbl+'">Notes (water, delays, anything the office should know)</span><input style="'+inp+'" value="'+esc1(d.note||'')+'" onchange="upNote(this.value)"/>';
+    }
     h+='<div class="ib" style="margin-top:14px"><i class="ti ti-cloud-upload"></i><span>Saved as you go. It reaches the job tracker within a few minutes when you have signal, and goes to the office with your timesheet.</span></div>';
   }else if(u.view==='run'){
     back='day';title='Pick the run';
@@ -2581,7 +2693,7 @@ function upDraw(){
       '<div style="display:grid;grid-template-columns:1fr 1fr auto;gap:8px;align-items:end;margin-top:8px"><div><span style="font-size:11.5px;color:var(--text2)">Length, ft</span><input id="up-al" inputmode="decimal" style="'+inp+';padding:10px"/></div><div><span style="font-size:11.5px;color:var(--text2)">Width, ft</span><input id="up-aw" inputmode="decimal" style="'+inp+';padding:10px"/></div><button class="btn btn-p" style="min-height:46px" onclick="euArea()"><i class="ti ti-plus"></i> Add</button></div></div>';}
     if(hauls.length){h+='<span style="'+lbl+'">Haul distance today, ft</span><input id="up-haul" inputmode="numeric" style="'+inp+'" value="'+esc1((fm.haul!=null&&fm.haul!=='')?fm.haul:hauls[0].haul)+'"/><div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:8px">'+hauls.map(function(L){return '<button class="btn btn-sm" onclick="euHaul('+L.haul+')">'+L.haul+' ft \u00b7 $'+L.p.toFixed(2)+'</button>';}).join('')+'</div><div style="font-size:12px;color:var(--text2);margin-top:6px">The yards use the bid cost for the haul closest to the one you enter.</div>';}
     else h+='<div style="font-size:12px;color:var(--text2);margin-top:6px">Bid cost $'+Number(tk.lines[0].p).toFixed(2)+' per '+tk.u+'.</div>';
-    h+='<span style="'+lbl+'">Production hours on this task</span><input id="up-hr" inputmode="decimal" style="'+inp+'" value="'+esc1(fm.hr==null?'':fm.hr)+'"/><div id="up-err" style="color:#dc2626;font-size:13.5px;min-height:20px;margin-top:8px"></div><button class="btn btn-p btn-bl" style="min-height:54px;justify-content:center;font-size:16px" onclick="upAdd()">Add to today</button>';
+    h+='<div id="up-err" style="color:#dc2626;font-size:13.5px;min-height:20px;margin-top:8px"></div><button class="btn btn-p btn-bl" style="min-height:54px;justify-content:center;font-size:16px" onclick="upAdd()">Add to today</button>';
   }else if(u.view==='lat'){
     back='day';title='Laterals tied in';
     const lots=upScope(u,'lateral').filter(function(l){return !upUsed(u,'l:'+l.id).hit;}).sort(function(a,b){return String(a.id).localeCompare(String(b.id),undefined,{numeric:true});});
@@ -3089,6 +3201,7 @@ function getJobEquipHours(wk,dt,jobNum){
 // Submit production entries to Field Data SharePoint list
 async function submitProductionToSP(wk, silent){
   if(window.__VH_PROD_INFLIGHT)return{ok:false,busy:true};
+  try{if(wk&&wk===S.weeks[S.currentWeek]&&(wk.status==='draft'||wk.status==='returned'))Object.keys(wk.utilDays||{}).forEach(function(k){const p=k.split('|');if(p[1]==='300'||p[1]==='310')upBridge({job:p[0],ph:p[1],dt:p[2]});});}catch(e){console.warn('earth refresh',e);}
   window.__VH_PROD_INFLIGHT=true;
   try{const res=await _submitProductionToSPImpl(wk,silent);if(res&&res.ok)window.__VH_LAST_WRITE_AT=Date.now();return res;}
   finally{window.__VH_PROD_INFLIGHT=false;}
