@@ -139,7 +139,7 @@ const FALLBACK_ADMINS=['dmorris@valentiheld.com','abewley@valentiheld.com','jroe
 const SCOPE_LIST_NAME='JobScope';
 const STATUS_LIST_NAME='TrackerStatus';
 const PHASE_LABELS={'300':'Earth — Mass','310':'Earth — Finish','400':'Storm','450':'Subsurface drain','500':'Sanitary','600':'Water'};
-const VH_TRK_BUILD='2026-11-25.45';
+const VH_TRK_BUILD='2026-11-25.46';
 const OFFICE=/production\.html/i.test(location.pathname);
 const VH_BG=/[?&]autosave=1/.test(location.search); // loaded hidden by the time app, only to refresh the Excel trackers
 console.log('[VH] Job Trackers build',VH_TRK_BUILD);
@@ -560,20 +560,24 @@ function bidLineHtml(job,phase,rows){
       else if(sz)g=grp('p'+sz[1],sz[1]+'" pipe','',+sz[1]);
       else g=grp('p','Pipe','',1500);
       g.unit='ft';if(r.BidQty>0){g.bq+=r.BidQty;g.q+=r.BidQty*p/100;}}
-    g.bid+=r.BidHrs;g.earn+=r.BidHrs*p/100;g.used+=(act[nid(r.ItemID)]||0);g.xs.push({name:name,p:p,tip:(d?d+' \u00b7 ':'')+'bid '+fmt(r.BidHrs)+' h'});
+    g.bid+=r.BidHrs;g.earn+=r.BidHrs*p/100;g.used+=(act[nid(r.ItemID)]||0);g.xs.push({id:r.ItemID,name:name,p:p,tip:(d?d+' \u00b7 ':'')+'bid '+fmt(r.BidHrs)+' h'});
   });
   if(!order.length)return '';
   let other=0;
   S.prod.forEach(function(l){if(String(l.Jobnumber||'').trim()!==job||String(l.Phase||'').trim()!==phase)return;if(/^other work/i.test(String(l['Work_x0020_Type']||'')))other+=(+l['Production_x0020_Hours']||0);});
   const list=order.map(function(k){return G[k];}).sort(function(a,b){return a.rank-b.rank;});
-  const chip=function(x){const done=x.p>=100,ip=x.p>0&&!done;return '<span title="'+esc(x.tip)+'" style="display:inline-block;font-size:11.5px;line-height:1.5;padding:1px 6px;margin:2px 3px 2px 0;border-radius:5px;white-space:nowrap;border:1px solid '+(done?'var(--green)':(ip?'var(--amber,#d97706)':'var(--border)'))+';color:'+(done?'var(--green)':(ip?'var(--amber,#d97706)':'var(--text2)'))+(done?';font-weight:700':'')+'">'+(done?'\u2713 ':'')+esc(x.name)+(ip?' '+fmt0(x.p)+'%':'')+'</span>';};
+  const can=pdCan();window.__lines=window.__lines||{};
+  const lineBtn=function(g){if(!can)return '';const ids=g.xs.filter(function(x){return x.p<100;}).map(function(x){return x.id;});
+    if(!ids.length)return g.single?'<button class="btn btn-sm" style="margin:0 8px 2px 0" data-j="'+esc(job)+'" data-i="'+esc(g.xs[0].id)+'" data-p="0" onclick="chipTap(this)">Undo</button>':'';
+    const key=job+'|'+phase+'|'+g.rank;window.__lines[key]={job:job,ids:ids};return '<button class="btn btn-sm" style="margin:0 8px 2px 0" data-k="'+esc(key)+'" onclick="lineDone(this)">'+(g.single?'Mark done':'All done')+'</button>';};
+  const chip=function(x){const done=x.p>=100,ip=x.p>0&&!done;return '<span title="'+esc(x.tip)+'" '+(can?'data-j="'+esc(job)+'" data-i="'+esc(x.id)+'" data-p="'+(done?0:100)+'" onclick="chipTap(this)" ':'')+'style="'+(can?'cursor:pointer;':'')+'display:inline-block;font-size:11.5px;line-height:1.5;padding:1px 6px;margin:2px 3px 2px 0;border-radius:5px;white-space:nowrap;border:1px solid '+(done?'var(--green)':(ip?'var(--amber,#d97706)':'var(--border)'))+';color:'+(done?'var(--green)':(ip?'var(--amber,#d97706)':'var(--text2)'))+(done?';font-weight:700':'')+'">'+(done?'\u2713 ':'')+esc(x.name)+(ip?' '+fmt0(x.p)+'%':'')+'</span>';};
   const bar=function(p){return '<div style="display:flex;align-items:center;gap:6px;justify-content:flex-end"><div style="width:64px;height:8px;background:var(--bg2);border-radius:4px;overflow:hidden"><div style="width:'+Math.max(0,Math.min(100,p))+'%;height:100%;background:var(--green)"></div></div><span style="min-width:34px;text-align:right">'+fmt0(p)+'%</span></div>';};
   const td='padding:6px 8px;border-top:1px solid var(--border);vertical-align:top';
   let tb=0,te=0,tu=0;
-  let h='<div class="area-h"><span>Where it stands, by bid line</span><span class="ah-num"><span style="color:var(--green)">\u2713 done</span> \u00b7 <span style="color:var(--amber,#d97706)">in progress</span> \u00b7 not started</span></div><div style="overflow-x:auto;border:1px solid var(--border);border-radius:8px;margin-bottom:10px"><table style="width:100%;border-collapse:collapse;font-size:12.5px;min-width:760px"><thead><tr style="color:var(--text2);text-align:right"><th style="text-align:left;padding:7px 8px;font-weight:600">Bid line</th><th style="text-align:left;padding:7px 8px;font-weight:600">Depth</th><th style="padding:7px 8px;font-weight:600">In the bid</th><th style="padding:7px 8px;font-weight:600">Installed</th><th style="padding:7px 8px;font-weight:600">Done</th><th style="padding:7px 8px;font-weight:600">Bid hrs</th><th style="padding:7px 8px;font-weight:600">Worth so far</th><th style="padding:7px 8px;font-weight:600">Hours used</th><th style="padding:7px 8px;font-weight:600">Hours gained</th><th style="text-align:left;padding:7px 8px;font-weight:600;min-width:260px">Runs, structures and items</th></tr></thead><tbody>';
+  let h='<div class="area-h"><span>Where it stands, by bid line'+(pdCan()?' <span style="font-weight:400;text-transform:none;letter-spacing:0">\u00b7 tap a tag to mark it done, or use All done for a whole line</span>':'')+'</span><span class="ah-num"><span style="color:var(--green)">\u2713 done</span> \u00b7 <span style="color:var(--amber,#d97706)">in progress</span> \u00b7 not started</span></div><div style="overflow-x:auto;border:1px solid var(--border);border-radius:8px;margin-bottom:10px"><table style="width:100%;border-collapse:collapse;font-size:12.5px;min-width:760px"><thead><tr style="color:var(--text2);text-align:right"><th style="text-align:left;padding:7px 8px;font-weight:600">Bid line</th><th style="text-align:left;padding:7px 8px;font-weight:600">Depth</th><th style="padding:7px 8px;font-weight:600">In the bid</th><th style="padding:7px 8px;font-weight:600">Installed</th><th style="padding:7px 8px;font-weight:600">Done</th><th style="padding:7px 8px;font-weight:600">Bid hrs</th><th style="padding:7px 8px;font-weight:600">Worth so far</th><th style="padding:7px 8px;font-weight:600">Hours used</th><th style="padding:7px 8px;font-weight:600">Hours gained</th><th style="text-align:left;padding:7px 8px;font-weight:600;min-width:260px">Runs, structures and items</th></tr></thead><tbody>';
   list.forEach(function(g){const pct=g.bid?g.earn/g.bid*100:(g.bq?g.q/g.bq*100:0);const started=g.earn>0.004||g.used>0.004;const gn=g.earn-g.used;tb+=g.bid;te+=g.earn;tu+=g.used;
     const u=g.unit?(' '+g.unit):'';
-    h+='<tr style="text-align:right"><td style="'+td+';text-align:left;font-weight:700">'+esc(g.label)+'</td><td style="'+td+';text-align:left">'+esc(g.depth?g.depth+' ft':'')+'</td><td style="'+td+'">'+(g.bq?fmt0(g.bq)+u:'')+'</td><td style="'+td+'">'+(g.bq?fmt0(g.q)+u:'')+'</td><td style="'+td+'">'+bar(pct)+'</td><td style="'+td+'">'+fmt(g.bid)+'</td><td style="'+td+'">'+(started?fmt(g.earn):'')+'</td><td style="'+td+'">'+(started?fmt(g.used):'')+'</td><td style="'+td+';font-weight:700;color:'+(started?gainCol(gn):'var(--text3)')+'">'+(started?(Math.abs(gn)<0.5?'on pace':gainTxt(gn)):'')+'</td><td style="'+td+';text-align:left;white-space:normal">'+(g.single?(g.xs[0].p>=100?'<span style="color:var(--green);font-weight:700">\u2713 Done</span>':(g.xs[0].p>0?'<span style="color:var(--amber,#d97706)">In progress '+fmt0(g.xs[0].p)+'%</span>':'<span class="note">Not started</span>')):g.xs.map(chip).join(''))+'</td></tr>';});
+    h+='<tr style="text-align:right"><td style="'+td+';text-align:left;font-weight:700">'+esc(g.label)+'</td><td style="'+td+';text-align:left">'+esc(g.depth?g.depth+' ft':'')+'</td><td style="'+td+'">'+(g.bq?fmt0(g.bq)+u:'')+'</td><td style="'+td+'">'+(g.bq?fmt0(g.q)+u:'')+'</td><td style="'+td+'">'+bar(pct)+'</td><td style="'+td+'">'+fmt(g.bid)+'</td><td style="'+td+'">'+(started?fmt(g.earn):'')+'</td><td style="'+td+'">'+(started?fmt(g.used):'')+'</td><td style="'+td+';font-weight:700;color:'+(started?gainCol(gn):'var(--text3)')+'">'+(started?(Math.abs(gn)<0.5?'on pace':gainTxt(gn)):'')+'</td><td style="'+td+';text-align:left;white-space:normal">'+lineBtn(g)+(g.single?(g.xs[0].p>=100?'<span style="color:var(--green);font-weight:700">\u2713 Done</span>':(g.xs[0].p>0?'<span style="color:var(--amber,#d97706)">In progress '+fmt0(g.xs[0].p)+'%</span>':'<span class="note">Not started</span>')):g.xs.map(chip).join(''))+'</td></tr>';});
   if(other>0.05){tu+=other;h+='<tr style="text-align:right"><td style="'+td+';text-align:left;font-weight:700">Other work</td><td style="'+td+'"></td><td style="'+td+'"></td><td style="'+td+'"></td><td style="'+td+'"></td><td style="'+td+'"></td><td style="'+td+'"></td><td style="'+td+'">'+fmt(other)+'</td><td style="'+td+';font-weight:700;color:var(--red)">\u2212'+fmt0(other)+' hrs</td><td style="'+td+';text-align:left"><span class="note">Not on the takeoff, no bid hours</span></td></tr>';}
   const loose=(((actualByJobPhase(job)||{})[phase])||0)-tu;
   if(loose>0.05){tu+=loose;h+='<tr style="text-align:right"><td style="'+td+';text-align:left;font-weight:700">Not tied to an item</td><td style="'+td+'"></td><td style="'+td+'"></td><td style="'+td+'"></td><td style="'+td+'"></td><td style="'+td+'"></td><td style="'+td+'"></td><td style="'+td+'">'+fmt(loose)+'</td><td style="'+td+';font-weight:700;color:var(--red)">\u2212'+fmt0(loose)+' hrs</td><td style="'+td+';text-align:left"><span class="note">Hours reported without naming a run or item</span></td></tr>';}
@@ -734,6 +738,70 @@ function officeJobHtml(job){
   else h+='<p class="note" style="margin-top:10px">No bid dollars for this job yet. Its packet\u2019s BIDPACK tab is blank, or the bid data has not been loaded since the rates were added.</p>';
   if(un>0.5)h+='<p class="note" style="margin-top:8px;color:var(--amber,#d97706)">'+fmt0(un)+' machine hours on this job have no matching rate and are not costed.</p>';
   h+='</div>';
+  return h;
+}
+// ===== CATCHING UP WHAT IS ALREADY INSTALLED ====================================
+// In the office view, the tags in the bid-line table can be tapped to mark an item done or not,
+// and each line has an "All done" button. Used to bring a job up to date with what is already in
+// the ground; after that, production reports keep it current.
+function chipTap(el){setPct(el.dataset.j,el.dataset.i,+el.dataset.p);}
+function lineDone(el){const L=(window.__lines||{})[el.dataset.k];if(!L||!L.ids.length)return;if(L.ids.length>3&&!confirm('Mark '+L.ids.length+' items on this line as done?'))return;setMany(L.job,L.ids,100);}
+async function setMany(job,ids,pct){
+  ids.forEach(function(id){const k=job+'|'+id;const prev=S.status[k];S.status[k]=Object.assign({spId:prev?prev.spId:null,note:prev?prev.note:''},{pct:pct});});
+  render();
+  try{
+    const tok=await getToken(true);if(!tok)throw new Error('not signed in');
+    const base='/sites/'+FD_SITE+'/lists/'+S.lists.status+'/items';
+    for(const part of chunk(ids,20)){
+      const reqs=part.map(function(id,i){const k=job+'|'+id;const cur=S.status[k];
+        return cur.spId?{id:String(i+1),method:'PATCH',url:base+'/'+cur.spId+'/fields',headers:{'Content-Type':'application/json','If-Match':'*'},body:packFields('status',{PctDone:pct})}
+          :{id:String(i+1),method:'POST',url:base,headers:{'Content-Type':'application/json'},body:{fields:packFields('status',{Title:k,JobNum:job,ItemID:id,PctDone:pct})}};});
+      const resp=await gBatch(tok,reqs);
+      resp.forEach(function(r){if(r.status>=400)throw new Error('save failed ('+r.status+')');const id=part[(+r.id)-1];if(id!==undefined&&r.body&&r.body.id){const k=job+'|'+id;if(S.status[k]&&!S.status[k].spId)S.status[k].spId=r.body.id;}});
+    }
+    toast(ids.length+' item'+(ids.length===1?'':'s')+' marked '+(pct>=100?'done':'not done'));
+  }catch(e){toast('Could not save: '+((e&&e.message)||e)+'. Refresh and check before trying again.','err');}
+}
+// ===== EARTHWORK IN THE OFFICE VIEW, AND THE EARTHWORK REPORT ====================
+function officeEarthHtml(){
+  if(!S.costs){ofLoad();return '';}
+  const th=function(x,l){return '<th style="'+(l?'text-align:left;':'')+'padding:7px 8px;font-weight:600;white-space:nowrap">'+x+'</th>';};const td='padding:8px;border-top:1px solid var(--border);white-space:nowrap';
+  let rows='',G={ble:0,earned:0,actual:0},un=0;
+  ewJobs().forEach(function(job){const d=ewData(job);const cfg=(S.earth.setup.jobs||{})[job]||{};
+    ['300','310'].forEach(function(ph){const P=EW_PH[ph];const bidQ=+cfg[P.q]||0,qty=d.ph[ph].qty;const pc=((((S.costs||{})[job]||{}).phases)||{})[ph]||null;const act=ofActual(job,ph,null,null);
+      if(!pc&&!(act.labH>0)&&!(qty>0))return;
+      const ble=pc?(pc.e+pc.l+pc.f+pc.b):NaN;const pct=bidQ?Math.min(100,qty/bidQ*100):0;const earned=isFinite(ble)?ble*pct/100:NaN;const g=earned-act.total;const on=act.labH>0||qty>0;un+=act.unH;
+      if(isFinite(ble)){G.ble+=ble;if(isFinite(earned))G.earned+=earned;if(isFinite(act.total))G.actual+=act.total;}
+      rows+='<tr style="text-align:right;cursor:pointer" onclick="S.ejob=\''+esc(job)+'\';render()"><td style="'+td+';text-align:left"><b>'+esc(jobLabel(job).replace(' \u00b7 ',' \u2013 '))+'</b></td><td style="'+td+';text-align:left">'+P.label+'</td><td style="'+td+'">'+ofMoney(ble)+'</td><td style="'+td+'">'+(bidQ?fmt0(qty)+' of '+fmt0(bidQ)+' '+P.unit:(qty?fmt0(qty)+' '+P.unit:'\u2014'))+'</td><td style="'+td+'">'+ofBar(pct)+'</td><td style="'+td+'">'+ofMoney(earned)+'</td><td style="'+td+'">'+ofMoney(act.total)+'</td><td style="'+td+'">'+(on?ofGL(g):'<span class="note">\u2014</span>')+'</td><td style="'+td+'">'+((on&&pct>=1)?ofGL(g/(pct/100)):'<span class="note">\u2014</span>')+'</td></tr>';});});
+  if(!rows)return '';
+  return '<div class="sec" style="overflow-x:auto"><h2>Earthwork <span class="h2-sub">labor and equipment, with fringe and burden</span></h2><table style="width:100%;border-collapse:collapse;font-size:13px;min-width:900px"><thead><tr style="color:var(--text2);text-align:right">'+th('Job',1)+th('Phase',1)+th('Bid L&amp;E')+th('Yards reported')+th('% Complete')+th('Earned $')+th('Actual $')+th('Gain / (Loss)')+th('At completion')+'</tr></thead><tbody>'+rows+
+    '<tr style="text-align:right;font-weight:700;background:var(--bg2)"><td style="'+td+';text-align:left">All jobs</td><td style="'+td+'"></td><td style="'+td+'">'+ofMoney(G.ble)+'</td><td style="'+td+'"></td><td style="'+td+'"></td><td style="'+td+'">'+ofMoney(G.earned)+'</td><td style="'+td+'">'+ofMoney(G.actual)+'</td><td style="'+td+'">'+ofGL(G.earned-G.actual)+'</td><td style="'+td+'"></td></tr></tbody></table><p class="note" style="margin-top:10px">Office basis: bid equipment, labor, fringe and burden from BIDPACK, earned by the share of bid yards reported; actual is every timesheet hour at the RATES class rate with fringe and burden, plus machine hours at the RATES equipment rate. The cards below are the field basis the crews see.'+(un>0.5?' <span style="color:var(--amber,#d97706)">'+fmt0(un)+' machine hours have no matching rate and are not costed.</span>':'')+'</p></div>';
+}
+function erGroup(name){const s=String(name||'').trim();if(/^top\s?soil/i.test(s))return 'Topsoil';if(/^site cut/i.test(s))return 'Site cut';if(/^lake cut/i.test(s))return 'Lake cut';if(/utility waste/i.test(s))return 'Utility waste';return 'Other';}
+function earthReportHtml(job){
+  const F=S.er||(S.er={grp:'All',haul:'All'});
+  const all=[];
+  S.prod.forEach(function(l){const ph=String(l.Phase||'').trim();if(ph!=='300'&&ph!=='310')return;const j=String(l.Jobnumber||'').trim();if(job&&j!==job)return;
+    const q=parseFloat(String(l['Yardage_x002f_production']||'').replace(/,/g,''))||0;if(!(q>0))return;
+    const raw=String(l.BidItem||'').trim();const m=raw.match(/\(([\d,]+)\s*ft haul\)/i);const task=raw.replace(/\s*\([\d,]+\s*ft haul\)\s*$/i,'');
+    const haul=(+l['Haul_x0020_Distance']||0)||(m?+m[1].replace(/,/g,''):0);const named=!!task&&!/^(mass earthwork|finish grade|earthwork)$/i.test(task);
+    all.push({dt:String(l.Date||l.Created||'').slice(0,10),job:j,ph:ph,task:named?task:'',grp:named?erGroup(task):'Other',haul:haul,q:q,bid:+l['Bid_x0020_Cost_x0020_Per_x0020_Y']||0,act:+l['Actual_x0020_Cost_x0020_Per_x002']||0,who:String(l.Foreman||'')});});
+  if(!all.length)return '<div class="sec"><h2>Earthwork production report</h2><p class="note">No yards have been reported'+(job?' on this job':'')+' yet. Reports made with the earthwork form show here by task and haul distance.</p></div>';
+  const groups=['All','Topsoil','Site cut','Lake cut','Utility waste','Other'].filter(function(g){return g==='All'||all.some(function(r){return r.grp===g;});});if(groups.indexOf(F.grp)<0)F.grp='All';
+  const hauls=['All'].concat([...new Set(all.filter(function(r){return r.haul>0;}).map(function(r){return r.haul;}))].sort(function(a,b){return a-b;}).map(String));if(hauls.indexOf(String(F.haul))<0)F.haul='All';
+  const list=all.filter(function(r){return (F.grp==='All'||r.grp===F.grp)&&(F.haul==='All'||String(r.haul)===String(F.haul));}).sort(function(a,b){return b.dt.localeCompare(a.dt);});
+  let cy=0,bv=0,bq=0,av=0,aq=0;list.forEach(function(r){cy+=r.q;if(r.bid>0){bv+=r.q*r.bid;bq+=r.q;}if(r.act>0){av+=r.q*r.act;aq+=r.q;}});
+  const both=list.filter(function(r){return r.bid>0&&r.act>0;});let gain=0;both.forEach(function(r){gain+=r.q*(r.bid-r.act);});
+  const chip=function(v,cur,fn,label){return '<button class="chip'+(String(cur)===String(v)?' on':'')+'" onclick="'+fn+'">'+label+'</button>';};
+  const td='padding:7px 8px;border-top:1px solid var(--border);white-space:nowrap';
+  let h='<div class="sec"><h2>Earthwork production report <span class="h2-sub">by task and haul distance</span></h2>'+
+    '<div class="note" style="margin:2px 0 4px">Task</div><div class="chips">'+groups.map(function(g){return chip(g,F.grp,"S.er.grp='"+g+"';render()",g);}).join('')+'</div>'+
+    (hauls.length>1?'<div class="note" style="margin:8px 0 4px">Haul distance</div><div class="chips">'+hauls.map(function(x){return chip(x,F.haul,"S.er.haul='"+x+"';render()",x==='All'?'All':(+x).toLocaleString()+' ft');}).join('')+'</div>':'')+
+    '<div class="kg" style="margin-top:12px"><div class="k"><div class="lbl">Yards</div><div class="val">'+fmt0(cy)+'</div><div class="sub">'+list.length+' report'+(list.length===1?'':'s')+'</div></div><div class="k"><div class="lbl">Cost per yard</div><div class="val">'+(aq?'$'+(av/aq).toFixed(2):'\u2014')+'</div><div class="sub">bid cost '+(bq?'$'+(bv/bq).toFixed(2):'\u2014')+'</div></div><div class="k"><div class="lbl">Gain or loss</div><div class="val" style="color:'+(both.length?gainCol(gain):'inherit')+'">'+(both.length?((gain>=0?'+':'\u2212')+'$'+Math.abs(Math.round(gain)).toLocaleString()):'\u2014')+'</div><div class="sub">plus is under the bid cost</div></div></div>'+
+    '<div style="overflow-x:auto;margin-top:10px"><table style="width:100%;border-collapse:collapse;font-size:13px;min-width:620px"><thead><tr style="color:var(--text2);text-align:right"><th style="text-align:left;padding:6px 8px;font-weight:600">Day</th>'+(job?'':'<th style="text-align:left;padding:6px 8px;font-weight:600">Job</th>')+'<th style="text-align:left;padding:6px 8px;font-weight:600">Task</th><th style="padding:6px 8px;font-weight:600">Haul</th><th style="padding:6px 8px;font-weight:600">Yards</th><th style="padding:6px 8px;font-weight:600">Bid cost</th><th style="padding:6px 8px;font-weight:600">Actual</th><th style="padding:6px 8px;font-weight:600">+ / \u2212</th></tr></thead><tbody>';
+  list.slice(0,200).forEach(function(r){const g=(r.bid>0&&r.act>0)?r.q*(r.bid-r.act):NaN;
+    h+='<tr style="text-align:right"><td style="'+td+';text-align:left">'+esc(r.dt)+'</td>'+(job?'':'<td style="'+td+';text-align:left">'+esc(r.job)+'</td>')+'<td style="'+td+';text-align:left">'+(r.task?esc(r.task):'<span class="note">'+(r.ph==='310'?'Finish grade':'Mass earthwork')+', no task named</span>')+'</td><td style="'+td+'">'+(r.haul?r.haul.toLocaleString()+' ft':'')+'</td><td style="'+td+'">'+fmt0(r.q)+'</td><td style="'+td+'">'+(r.bid?'$'+r.bid.toFixed(2):'')+'</td><td style="'+td+'">'+(r.act?'$'+r.act.toFixed(2):'')+'</td><td style="'+td+';font-weight:700;color:'+(isFinite(g)?gainCol(g):'inherit')+'">'+(isFinite(g)?((g>=0?'+':'\u2212')+'$'+Math.abs(Math.round(g)).toLocaleString()):'')+'</td></tr>';});
+  h+='</tbody></table></div>'+(list.length>200?'<p class="note" style="margin-top:8px">Showing the latest 200 of '+list.length+'.</p>':'')+'<p class="note" style="margin-top:8px">Costs here are the field basis: machine and labor hours on each task at the rate sheet, as the crews see them. Reports made before the earthwork form named tasks show as "no task named".</p></div>';
   return h;
 }
 function jobSummary(job){
@@ -1526,7 +1594,7 @@ function render(){
   if(!S.lists)body=renderSetup();
   else if(!S.loaded)body=S.loadErr?`<div class="sec"><b>The tracker could not load.</b><p class="note" style="margin:6px 0 10px">${esc(S.loadErr)}</p><p class="note" style="margin-bottom:10px">If this is the test address: open the live tracker in this same browser, sign in there, then come back here and press Try again.</p><button class="btn" onclick="location.reload()">Try again</button> <button class="btn" onclick="signIn()">Sign in</button></div>`:`<div class="loading"><div class="spinner"></div><div>Loading scope…</div></div>`;
   else if(S.view==='import')body=renderImport();
-  else if(S.view==='earth')body=renderEarth();
+  else if(S.view==='earth')body=(!S.earth?renderEarth():((OFFICE&&!S.ejob?officeEarthHtml():'')+renderEarth()+earthReportHtml(S.ejob||'')));
   else if(S.view==='packets')body=renderPackets();
   else if(S.view==='job'&&S.job)body=renderJob();
   else body=renderPortfolio();
