@@ -139,7 +139,7 @@ const FALLBACK_ADMINS=['dmorris@valentiheld.com','abewley@valentiheld.com','jroe
 const SCOPE_LIST_NAME='JobScope';
 const STATUS_LIST_NAME='TrackerStatus';
 const PHASE_LABELS={'300':'Earth — Mass','310':'Earth — Finish','400':'Storm','450':'Subsurface drain','500':'Sanitary','600':'Water'};
-const VH_TRK_BUILD='2026-11-25.44';
+const VH_TRK_BUILD='2026-11-25.45';
 const OFFICE=/production\.html/i.test(location.pathname);
 const VH_BG=/[?&]autosave=1/.test(location.search); // loaded hidden by the time app, only to refresh the Excel trackers
 console.log('[VH] Job Trackers build',VH_TRK_BUILD);
@@ -636,12 +636,12 @@ function ofEqClass(desc,num){const s=(String(num||'')+' '+String(desc||'')).toUp
   return null;}
 function ofActual(job,ph,a,b){
   const c=(S.costs||{})[job]||{};const R=c.rates||null;const fp=c.fringePct!=null?c.fringePct:0.12,bp=c.burdenPct!=null?c.burdenPct:0.28;const earth=(ph==='300'||ph==='310');
-  const o={lab:0,eq:0,labH:0,eqH:0,unH:0,rates:!!R};
+  const o={lab:0,eq:0,labH:0,eqH:0,unH:0,capH:0,rates:!!R};
   ((((S.earth||{}).all))||[]).forEach(function(f){
     if(String(f.Jobnumber||'').trim()!==job||String(f.Phase||'').trim()!==ph)return;const dt=String(f.WorkDate||'').slice(0,10);if(a&&(dt<a||dt>b))return;
     const hrs=+f.Hours||0;o.labH+=hrs;if(R)o.lab+=hrs*ofFind(R.lab,ofLabClass(f.EmployeeTitle,earth));
     let eq=[];try{eq=JSON.parse(f.Equipment||'[]')||[];}catch(e){}
-    eq.forEach(function(x){const h=parseFloat(x&&x.hours)||0;if(!(h>0))return;const r=R?ofFind(R.eq,ofEqClass(x.description,x.number||x.id)):0;if(r>0){o.eq+=h*r;o.eqH+=h;}else o.unH+=h;});
+    eq.forEach(function(x){const raw=parseFloat(x&&x.hours)||0;if(!(raw>0))return;const h=Math.min(raw,hrs);if(raw>hrs+0.05)o.capH+=raw-h;if(!(h>0))return;const r=R?ofFind(R.eq,ofEqClass(x.description,x.number||x.id)):0;if(r>0){o.eq+=h*r;o.eqH+=h;}else o.unH+=h;});
   });
   o.fringe=o.lab*fp;o.burden=o.lab*bp;o.total=R?(o.lab+o.eq+o.fringe+o.burden):NaN;return o;
 }
@@ -681,12 +681,12 @@ function officeHome(){
   const allJobs=[...new Set(S.scope.map(function(r){return r.JobNum;}))].sort();const jobs=allJobs.filter(function(j){return !F.job||j===F.job;});
   const phSet={};S.scope.forEach(function(r){if(!F.job||r.JobNum===F.job)phSet[r.Phase]=1;});const phList=Object.keys(phSet).sort();if(F.phase&&!phSet[F.phase])F.phase='';
   const rowsJ=jobs.map(function(j){const phs=[...new Set(S.scope.filter(function(r){return r.JobNum===j;}).map(function(r){return r.Phase;}))].sort().filter(function(p){return !F.phase||p===F.phase;});
-    const P=phs.map(function(p){return ofPhase(j,p,a,b);});const T={job:j,P:P,ble:0,bidH:0,cum:0,n:0,done:0,eh:0,fh:0,earned:0,actual:0,labH:0,eqH:0,unH:0,last:'',money:false};
-    P.forEach(function(x){T.bidH+=x.bidH;T.cum+=x.cumEarn;T.n+=x.n;T.done+=x.done;T.eh+=x.earnedH;T.fh+=x.fieldH;T.labH+=x.act.labH;T.eqH+=x.act.eqH;T.unH+=x.act.unH;if(x.last>T.last)T.last=x.last;
+    const P=phs.map(function(p){return ofPhase(j,p,a,b);});const T={job:j,P:P,ble:0,bidH:0,cum:0,n:0,done:0,eh:0,fh:0,earned:0,actual:0,labH:0,eqH:0,unH:0,capH:0,last:'',money:false};
+    P.forEach(function(x){T.bidH+=x.bidH;T.cum+=x.cumEarn;T.n+=x.n;T.done+=x.done;T.eh+=x.earnedH;T.fh+=x.fieldH;T.labH+=x.act.labH;T.eqH+=x.act.eqH;T.unH+=x.act.unH;T.capH+=x.act.capH;if(x.last>T.last)T.last=x.last;
       if(isFinite(x.ble)){T.ble+=x.ble;T.money=true;if(isFinite(x.earned))T.earned+=x.earned;if(isFinite(x.act.total))T.actual+=x.act.total;}});
     return T;}).filter(function(T){return T.P.length;});
-  const G={ble:0,bidH:0,cum:0,n:0,done:0,eh:0,fh:0,earned:0,actual:0,labH:0,eqH:0,unH:0,e:0,l:0,f:0,b:0};
-  rowsJ.forEach(function(T){['ble','bidH','cum','n','done','eh','fh','earned','actual','labH','eqH','unH'].forEach(function(k){G[k]+=T[k];});T.P.forEach(function(x){if(x.parts){G.e+=x.parts.e;G.l+=x.parts.l;G.f+=x.parts.f;G.b+=x.parts.b;}});});
+  const G={ble:0,bidH:0,cum:0,n:0,done:0,eh:0,fh:0,earned:0,actual:0,labH:0,eqH:0,unH:0,capH:0,e:0,l:0,f:0,b:0};
+  rowsJ.forEach(function(T){['ble','bidH','cum','n','done','eh','fh','earned','actual','labH','eqH','unH','capH'].forEach(function(k){G[k]+=T[k];});T.P.forEach(function(x){if(x.parts){G.e+=x.parts.e;G.l+=x.parts.l;G.f+=x.parts.f;G.b+=x.parts.b;}});});
   const mfmt=function(s){return new Date(s+'T12:00:00').toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'});};
   const period=!inP?'All to date':(F.mode==='week'?('Week of '+mfmt(a)+' \u2013 '+mfmt(b)):(F.mode==='month'?new Date(a+'T12:00:00').toLocaleDateString('en-US',{month:'long',year:'numeric'}):a.slice(0,4)));
   const sel='font:inherit;font-size:14px;padding:8px 10px;border-radius:8px;border:1px solid var(--border);background:var(--card);color:inherit;width:100%';
@@ -715,7 +715,7 @@ function officeHome(){
   h+='<div class="sec" style="overflow-x:auto"><h2>Production by utility phase <span class="h2-sub">'+(F.job?esc(jobLabel(F.job)):'all jobs')+(inP?' \u00b7 '+esc(period):'')+'</span></h2><table style="width:100%;border-collapse:collapse;font-size:13px;min-width:900px"><thead><tr style="color:var(--text2);text-align:right">'+th('Phase',1)+th('Total Bid Hrs')+th('% Complete')+th('Bid Hrs')+th('Field Hrs')+th('Hrs +/\u2212')+th('Bid L&amp;E')+th('Earned $')+th('Actual $')+th('Gain / (Loss)')+th('At completion')+'</tr></thead><tbody>';
   Object.keys(byP).sort().forEach(function(k){const o=byP[k];const pct=o.bidH?o.cum/o.bidH*100:0;const g=o.earned-o.actual;
     h+='<tr style="text-align:right"><td style="'+td+';text-align:left"><b>'+esc(k+' \u2013 '+(PHASE_LABELS[k]||'Phase '+k))+'</b></td><td style="'+td+'">'+fmt(o.bidH)+'</td><td style="'+td+'">'+ofBar(pct)+'</td><td style="'+td+'">'+fmt(o.eh)+'</td><td style="'+td+'">'+fmt(o.fh)+'</td><td style="'+td+'">'+((o.eh||o.fh)?ofHrs(o.eh-o.fh):'<span class="note">\u2014</span>')+'</td><td style="'+td+'">'+ofMoney(o.ble)+'</td><td style="'+td+'">'+ofMoney(o.earned)+'</td><td style="'+td+'">'+ofMoney(o.actual)+'</td><td style="'+td+'">'+(o.act?ofGL(g):'<span class="note">\u2014</span>')+'</td><td style="'+td+'">'+((!inP&&o.act&&pct>=1)?ofGL(g/(pct/100)):'<span class="note">\u2014</span>')+'</td></tr>';});
-  h+='</tbody></table><p class="note" style="margin-top:10px"><b>Bid Hrs</b> are the bid hours for the work installed. <b>Field Hrs</b> are the crew hours reported on that work. <b>Earned $</b> is Bid Hrs at the phase\u2019s bid labor and equipment per bid hour, with fringe and burden. <b>Actual $</b> is every timesheet hour on the phase at the packet\u2019s RATES class rate plus fringe and burden, and machine hours at the RATES equipment rate. <b>At completion</b> is the gain or loss to date divided by % complete, if the pace holds.'+(G.unH>0.5?' <span style="color:var(--amber,#d97706)">'+fmt0(G.unH)+' machine hours have no matching rate and are not costed.</span>':'')+(rowsJ.some(function(T){return !T.money;})?' Jobs showing no bid dollars have a blank BIDPACK tab in their packet.':'')+'</p></div>';
+  h+='</tbody></table><p class="note" style="margin-top:10px"><b>Bid Hrs</b> are the bid hours for the work installed. <b>Field Hrs</b> are the crew hours reported on that work. <b>Earned $</b> is Bid Hrs at the phase\u2019s bid labor and equipment per bid hour, with fringe and burden. <b>Actual $</b> is every timesheet hour on the phase at the packet\u2019s RATES class rate plus fringe and burden, and machine hours at the RATES equipment rate. <b>At completion</b> is the gain or loss to date divided by % complete, if the pace holds.'+(G.unH>0.5?' <span style="color:var(--amber,#d97706)">'+fmt0(G.unH)+' machine hours have no matching rate and are not costed.</span>':'')+(G.capH>0.5?' <span style="color:var(--amber,#d97706)">'+fmt0(G.capH)+' machine hours were entered on timesheet lines with fewer person hours than that, and were left out. Check those timesheets ('+rowsJ.filter(function(T){return T.capH>0.5;}).map(function(T){return T.job;}).join(', ')+').</span>':'')+(rowsJ.some(function(T){return !T.money;})?' Jobs showing no bid dollars have a blank BIDPACK tab in their packet.':'')+'</p></div>';
   return h;
 }
 function officeJobHtml(job){
